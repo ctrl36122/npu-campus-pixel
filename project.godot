@@ -16,9 +16,9 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 
 config/name="像素工大"
 config/description="西北工业大学长安校区像素地图（Godot 版）"
-config/icon="res://assets/icon.png"
 run/main_scene="res://scenes/online_boot.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
+config/icon="res://assets/icon.png"
 
 [autoload]
 
@@ -46,10 +46,6 @@ enabled=PackedStringArray("res://addons/godot_ai/plugin.cfg")
 [gui]
 
 theme/custom_font="res://assets/fonts/noto_sc_game.ttf"
-
-[input_devices]
-
-pointing/emulate_mouse_from_touch=true
 
 [input]
 

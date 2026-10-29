@@ -136,8 +136,38 @@ func _process(_d: float) -> bool:
 		print("[滚轮/世界] 相机视距 %.2f → %.2f（应变小）" % [_zoom_before, z])
 		if absf(z - _zoom_before) < 0.001:
 			fails.append("在面板外滚轮没有缩放地图（缩放逻辑被弄坏了）")
+		return false
+
+	# ── 手指拖动翻历史（手机上的主要方式，不能只靠滚轮）──
+	if step == 420:
+		# 放到中间再拖，两端都没法再动，测不出问题
+		var bar: VScrollBar = chat._scroll.get_v_scroll_bar()
+		chat._scroll.scroll_vertical = int((bar.max_value - bar.page) * 0.5)
+		return false
+
+	if step == 430:
+		_drag_at = chat._scroll.get_global_rect().get_center()
+		_scroll_before = chat._scroll.scroll_vertical
+		_touch_down(_drag_at)
+		return false
+
+	if step == 440:
+		# 手指往下拖 = 翻回更早的消息（就是用户说的「翻不回去」）
+		for i in range(1, 7):
+			_touch_drag(_drag_at + Vector2(0, 22.0 * i), i)
+		return false
+
+	if step == 450:
+		_touch_up(_drag_at + Vector2(0, 132))
+		return false
+
+	if step == 470:
+		var moved: int = chat._scroll.scroll_vertical
+		print("[拖动] 手指下滑 132px 翻回历史：滚动位置 %d → %d（应减小）" % [_scroll_before, moved])
+		if moved >= _scroll_before:
+			fails.append("手指下滑没有翻回更早的聊天记录")
 		if fails.is_empty():
-			print("结果 PASS：点击、滚动、滚轮隔离都正常")
+			print("结果 PASS：点击、滚动、滚轮隔离、手指拖动都正常")
 			quit(0)
 		else:
 			for f in fails:
@@ -150,6 +180,31 @@ func _process(_d: float) -> bool:
 
 var _zoom_before := 0.0
 var _scroll_before := 0
+var _drag_at := Vector2.ZERO
+
+
+func _touch_down(pos: Vector2) -> void:
+	var ev := InputEventScreenTouch.new()
+	ev.index = 0
+	ev.position = pos
+	ev.pressed = true
+	root.push_input(ev, true)
+
+
+func _touch_drag(pos: Vector2, i: int) -> void:
+	var ev := InputEventScreenDrag.new()
+	ev.index = 0
+	ev.position = pos
+	ev.relative = Vector2(0, 22)
+	root.push_input(ev, true)
+
+
+func _touch_up(pos: Vector2) -> void:
+	var ev := InputEventScreenTouch.new()
+	ev.index = 0
+	ev.position = pos
+	ev.pressed = false
+	root.push_input(ev, true)
 
 
 func _cam_zoom() -> float:
