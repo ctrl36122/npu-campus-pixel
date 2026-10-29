@@ -239,7 +239,6 @@ func _build() -> void:
 	_panel = Panel.new()
 	_panel.mouse_filter = Control.MOUSE_FILTER_STOP      # 接住点击，别穿到下面的世界里
 	_panel.add_theme_stylebox_override("panel", _panel_box(0.82))
-	_panel.gui_input.connect(_on_panel_gui_input)
 	add_child(_panel)
 
 	# ── 标题栏：整条是一个 Button（手指好点），右边是 ✕ ──
@@ -567,11 +566,16 @@ func _fit_scroll() -> void:
 	_scroll.position = Vector2(pad, maxf(top, h - bottom - use))
 
 
-## 滚轮：不管鼠标落在面板的哪个位置（标题栏、空白、消息上），都算「翻聊天记录」，
-## 并且把事件吃掉 —— 否则它会漏到世界层变成镜头缩放：
-## 玩家在聊天框上滚，结果地图在动，看着就像「滚不动」。
-func _on_panel_gui_input(event: InputEvent) -> void:
+## 滚轮统一在这里拦：只要指针在面板矩形内，就翻聊天记录并把事件吃掉。
+##
+## 之前靠 ScrollContainer 自己消费，但它只在"内容超出可视高度"时才吃滚轮；
+## 内容不满一屏、或鼠标落在标题栏/空白处时，事件直接穿到 _unhandled_input，
+## 被 PlayerAvatar 当成镜头缩放 —— 表现就是「聊天框滚不动、地图在动」。
+## 放在 _input（早于 GUI）里处理，速度和判定都只有一处，不会双重滚动。
+func _input(event: InputEvent) -> void:
 	if not (event is InputEventMouseButton) or not event.pressed:
+		return
+	if not is_instance_valid(_panel) or not _panel.visible:
 		return
 	var step := 0
 	if event.button_index == MOUSE_BUTTON_WHEEL_UP:
@@ -580,8 +584,16 @@ func _on_panel_gui_input(event: InputEvent) -> void:
 		step = 1
 	if step == 0:
 		return
-	_scroll.scroll_vertical += step * 60          # 一次约两行
-	_panel.accept_event()
+	if not _panel.get_global_rect().has_point(event.position):
+		return                                   # 面板之外：放行，照常缩放地图
+	_scroll.scroll_vertical += step * _wheel_step()
+	get_viewport().set_input_as_handled()
+
+
+## 一次滚半屏左右，手感接近正经聊天软件（原来交给 ScrollContainer 只有 20px，像没动）
+func _wheel_step() -> int:
+	var page := int(_scroll.get_v_scroll_bar().page)
+	return maxi(56, int(page * 0.5))
 
 
 func _on_scroll_resized() -> void:
