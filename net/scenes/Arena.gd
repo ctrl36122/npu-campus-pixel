@@ -147,6 +147,10 @@ func _ready() -> void:
 	_collect_xray()
 	queue_redraw()
 
+	# 调试：启动即进房间（正常玩法按 R）
+	if OS.has_environment("XGD_ROOM"):
+		_auto_enter_room()
+
 
 ## 生成校园 NPC。挂在 Objects 下是为了和建筑/树共用 y 排序（走到树后面会被遮住）。
 func _setup_wildlife() -> void:
@@ -1218,3 +1222,135 @@ func _find_safe(local: Vector2) -> Vector2:
 			if space.intersect_point(params, 1).is_empty():
 				return p
 	return local
+
+
+
+# ---------------------------------------------------------------- 房间（建筑内景）
+## 房间不切场景，而是挂在校园北界之外很远的空地上（世界格坐标）。
+## 这样相机、y 排序、碰撞、多人同步全都沿用原来那一套，玩家只是被传送过去；
+## 也不用把玩家容器搬来搬去 —— 搬了就得重设 MultiplayerSpawner 的 spawn_path，
+## 还会牵出一堆坐标空间的问题。
+##
+## 进出房间目前绑在 R 键上，等「走到宿舍门口自动进」做好了再换成触发器。
+const RoomScript := preload("res://net/scenes/Room.gd")
+const ROOM_ORIGIN := Vector2(0, -1500)      # 格：校园北界（y=0）之外
+## 房间比校园开阔得多（一个机位就顶几个人宽），校园那档视距进去只能看到一小块
+const ROOM_ZOOM := 0.85
+const CAMPUS_ZOOM := 1.2
+
+var room: Node2D
+var in_room := false
+var _return_cell := Vector2.ZERO
+## 本地玩家相机原来的边界。相机被限制在校园范围内（0..6784 / 0..12800），
+## 而房间远在校园之外 —— 不临时放开的话，画面会死死卡在校园边缘不动。
+var _cam_limit := {}
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if Net.is_dedicated or not (event is InputEventKey):
+		return
+	var k := event as InputEventKey
+	if not k.pressed or k.echo:
+		return
+	if k.keycode == KEY_R:
+		if in_room:
+			leave_room()
+		else:
+			enter_room("res://assets/rooms/game_lounge.json")
+		get_viewport().set_input_as_handled()
+
+
+## 把一个房间挂到校园的 Objects 下并把人送进去。成功返回 true。
+func enter_room(path: String) -> bool:
+	if in_room or campus == null:
+		return false
+	var objs: Node2D = campus.get_node_or_null("Objects")
+	if objs == null:
+		return false
+
+	if room == null:
+		room = Node2D.new()
+		room.name = "Room"
+		room.set_script(RoomScript)
+		room.set("node_scale", 1.0)          # Objects 空间已经是 8px/格
+		objs.add_child(room)
+		room.position = ROOM_ORIGIN * TS
+		if not bool(room.call("load_room", path)):
+			room.queue_free()
+			room = null
+			push_error("[arena] 房间加载失败：" + path)
+			return false
+	else:
+		room.visible = true
+
+	var me: Node = _local_avatar()
+	if me == null:
+		return false
+	_return_cell = (me as Node2D).position / TS
+
+	var sp: Vector2 = room.get("spawn_px")
+	var target: Vector2 = room.position + sp
+	me.call("teleport_to", target)
+	_set_cam_limit(me, true)
+	me.set("_cam_zoom_target", ROOM_ZOOM)
+	in_room = true
+
+	# 房间没有烘焙光照图，全屏夜幕会把它压成一片黑
+	if _night_dark != null:
+		_night_dark.visible = false
+	return true
+
+
+func leave_room() -> void:
+	if not in_room:
+		return
+	in_room = false
+	if _night_dark != null:
+		_night_dark.visible = true
+	var me: Node = _local_avatar()
+	if me != null:
+		me.call("teleport_to", _return_cell * TS)
+		_set_cam_limit(me, false)
+		me.set("_cam_zoom_target", CAMPUS_ZOOM)
+	if room != null:
+		room.visible = false
+
+
+## 等玩家 spawn 出来再进房间（联机会话建立有延迟）
+func _auto_enter_room() -> void:
+	await get_tree().create_timer(2.0).timeout
+	if not enter_room("res://assets/rooms/game_lounge.json"):
+		push_warning("[arena] 自动进房间失败")
+		return
+
+
+## 进出房间时放开/恢复相机边界。只动本地玩家的相机，远端玩家不影响视角。
+func _set_cam_limit(avatar: Node, free_it: bool) -> void:
+	var cam: Node = avatar.get_node_or_null("Camera")
+	if cam == null:
+		return
+	if free_it:
+		if _cam_limit.is_empty():
+			_cam_limit = {
+				"left": cam.get("limit_left"),
+				"right": cam.get("limit_right"),
+				"top": cam.get("limit_top"),
+				"bottom": cam.get("limit_bottom"),
+			}
+		cam.set("limit_left", -10000000)
+		cam.set("limit_right", 10000000)
+		cam.set("limit_top", -10000000)
+		cam.set("limit_bottom", 10000000)
+	elif not _cam_limit.is_empty():
+		for k in _cam_limit:
+			cam.set("limit_" + String(k), _cam_limit[k])
+		_cam_limit.clear()
+	cam.call("reset_smoothing")
+	cam.call("force_update_scroll")
+
+
+func _local_avatar() -> Node:
+	for c in players.get_children():
+		if c != null and c.get("is_local_player") == true:
+			return c
+	return null
