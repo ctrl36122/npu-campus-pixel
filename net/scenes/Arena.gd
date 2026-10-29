@@ -1433,7 +1433,8 @@ func _build_door_hint() -> void:
 	_door_hint.add_theme_font_size_override("font_size", 20)
 	_door_hint.add_theme_color_override("font_color", Color("#eaf3fb"))
 	_door_hint.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
-	_door_hint.add_theme_constant_override("outline_size", 6)
+	# 20px 的字配 6px 描边，笔画会被糊成一坨（「离」几乎认不出），4px 刚好压住背景又不吃笔画
+	_door_hint.add_theme_constant_override("outline_size", 4)
 	_door_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_door_hint.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
 	_door_hint.offset_left = -340.0
@@ -1474,7 +1475,7 @@ func _update_door_hint(delta: float) -> void:
 	_near_dorm = hit
 	_door_hint.visible = hit != ""
 	if hit != "":
-		_door_hint.text = "%s · 按 E 进入「游戏搭子空间」" % hit
+		_door_hint.text = "%s · 按 E 进入「宿舍空间」" % hit
 
 
 func _local_avatar() -> Node:

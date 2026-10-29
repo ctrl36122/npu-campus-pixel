@@ -271,7 +271,7 @@ def build() -> dict:
 
     room = {
         "id": "game_lounge",
-        "name": "游戏搭子空间",
+        "name": "宿舍空间",
         "desc": "五台机位，三块白板，一台贩卖机。",
         "W": r2(W),
         "H": r2(H),
