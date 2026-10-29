@@ -239,6 +239,7 @@ func _build() -> void:
 	_panel = Panel.new()
 	_panel.mouse_filter = Control.MOUSE_FILTER_STOP      # 接住点击，别穿到下面的世界里
 	_panel.add_theme_stylebox_override("panel", _panel_box(0.82))
+	_panel.gui_input.connect(_on_panel_gui_input)
 	add_child(_panel)
 
 	# ── 标题栏：整条是一个 Button（手指好点），右边是 ✕ ──
@@ -279,7 +280,6 @@ func _build() -> void:
 	_scroll.mouse_filter = Control.MOUSE_FILTER_STOP      # 手指能在上面拖着翻历史
 	_scroll.resized.connect(_on_scroll_resized)
 	_panel.add_child(_scroll)
-
 	_log = RichTextLabel.new()
 	_log.bbcode_enabled = true
 	_log.fit_content = true                              # 高度由内容决定，不会被容器压扁
@@ -565,6 +565,23 @@ func _fit_scroll() -> void:
 	var use := avail if _expanded else minf(content, avail)
 	_scroll.size = Vector2(maxf(0.0, w - pad * 2.0), maxf(0.0, use))
 	_scroll.position = Vector2(pad, maxf(top, h - bottom - use))
+
+
+## 滚轮：不管鼠标落在面板的哪个位置（标题栏、空白、消息上），都算「翻聊天记录」，
+## 并且把事件吃掉 —— 否则它会漏到世界层变成镜头缩放：
+## 玩家在聊天框上滚，结果地图在动，看着就像「滚不动」。
+func _on_panel_gui_input(event: InputEvent) -> void:
+	if not (event is InputEventMouseButton) or not event.pressed:
+		return
+	var step := 0
+	if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+		step = -1
+	elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+		step = 1
+	if step == 0:
+		return
+	_scroll.scroll_vertical += step * 60          # 一次约两行
+	_panel.accept_event()
 
 
 func _on_scroll_resized() -> void:
