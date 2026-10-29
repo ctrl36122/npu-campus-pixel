@@ -41,8 +41,8 @@ OpenStreetMap 上长安校区的实测数据，不是手绘示意图 —— 所�
 
 | 平台 | 文件 | 说明 |
 |---|---|---|
-| Windows | `像素工大-win64.zip` | 解压后双击 `像素工大.exe`，免安装 |
-| Android | `像素工大-android.zip` | 解压安装 `.apk`，需要允许「安装未知来源应用」 |
+| Windows | `XGD-Campus-win64.zip` | 解压后双击 `像素工大.exe`，免安装 |
+| Android | `XGD-Campus-android.zip` | 解压安装 `.apk`，需要允许「安装未知来源应用」 |
 
 手机端是竖屏布局，右下角三个按钮依次是 **设置 / 地图 / 聊天**，屏幕左半边任意位置按下就是摇杆。
 
