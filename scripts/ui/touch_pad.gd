@@ -50,6 +50,9 @@ var _font: Font
 ## 大聊天窗展开时把右下三个按钮收起来：它们会和输入框叠在一起，还容易误触
 var hide_buttons := false
 var _hide_reasons := {}          # 谁要求隐藏按钮（地图 / 大聊天窗），避免两处互相覆盖
+## 谁在占用触摸（大聊天窗 / 全屏地图）：占用期间整套触摸都不接管，
+## 否则点浮层下半部分会落进摇杆判定区，人会一边看面板一边往前走
+var _grabbed := {}
 var _last_vp := Vector2.ZERO     # 视口尺寸变化时重画（按钮/摇杆都按它算位置）
 
 
@@ -72,6 +75,24 @@ func set_buttons_hidden_for(reason: String, v: bool) -> void:
 
 func is_touch_ui() -> bool:
 	return OS.has_feature("mobile") or OS.has_environment("XGD_TOUCH")
+
+
+## 浮层（大聊天窗 / 全屏地图）打开时交出触摸控制权：期间不接管任何触摸，
+## 摇杆与按钮都不响应。按「原因」记账，两个浮层互不影响。
+func set_touch_grabbed_for(reason: String, v: bool) -> void:
+	if v:
+		if _grabbed.has(reason):
+			return
+		_grabbed[reason] = true
+		release_all()
+		queue_redraw()
+	else:
+		_grabbed.erase(reason)
+		queue_redraw()
+
+
+func is_touch_grabbed() -> bool:
+	return not _grabbed.is_empty()
 
 
 func _ready() -> void:
@@ -160,7 +181,7 @@ func _btn_hit(pos: Vector2) -> String:
 
 # ---------------------------------------------------------------- 输入
 func _input(event: InputEvent) -> void:
-	if not visible:
+	if not visible or is_touch_grabbed():
 		return
 	if event is InputEventScreenTouch:
 		if event.pressed:

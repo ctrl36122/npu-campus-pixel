@@ -503,6 +503,10 @@ func _build_ui() -> void:
 func _build_settings(layer: CanvasLayer) -> void:
 	var wrap := CenterContainer.new()
 	wrap.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# 这个全屏容器只是用来把设置面板居中的，必须 IGNORE。
+	# 默认是 STOP，会在聊天框（layer 9）上面铺一层看不见的墙，把所有 GUI 点击吃掉 ——
+	# 表现就是「聊天框怎么点都没反应」，而自绘的触屏按钮（走 _input，绕开 GUI）却是好的。
+	wrap.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(wrap)
 
 	_settings = PanelContainer.new()
@@ -800,9 +804,12 @@ func _open_map() -> void:
 		return
 	_map.visible = true
 	set_overlay(true)
-	# 地图自带「✕ 关闭」，右下三个按钮在图上纯属干扰，先收起来
+	# 地图自带「✕ 关闭」，右下三个按钮在图上纯属干扰，先收起来；
+	# 触摸也要交出去，否则点地图下半部分会启动摇杆、人在图后面走动
 	if is_instance_valid(_touch_pad):
 		_touch_pad.call("set_buttons_hidden_for", "map", true)
+		if _touch_pad.has_method("set_touch_grabbed_for"):
+			_touch_pad.call("set_touch_grabbed_for", "map", true)
 	if _map.has_method("reset_view"):
 		_map.call("reset_view")
 	_set_local_blocked(true)
@@ -814,6 +821,8 @@ func _close_map() -> void:
 	set_overlay(false)
 	if is_instance_valid(_touch_pad):
 		_touch_pad.call("set_buttons_hidden_for", "map", false)
+		if _touch_pad.has_method("set_touch_grabbed_for"):
+			_touch_pad.call("set_touch_grabbed_for", "map", false)
 	_set_local_blocked(false)
 
 

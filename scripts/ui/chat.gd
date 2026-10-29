@@ -1,67 +1,68 @@
 extends CanvasLayer
-## 聊天：左下角一个「群聊窗口」+ 说话时头顶气泡。
+## 群聊：屏幕上的聊天窗口 + 说话时头顶的气泡。
 ##
-## 面板是常驻的（不输入时半透明淡出，但仍在），有标题栏（在线人数）、
-## 时间戳、按人名着色的昵称、以及「谁进来了/离开了」的系统提示。
-## 滚轮可以在面板上翻历史（鼠标移出面板后滚轮仍归地图缩放用）。
+## 两种形态，只有两种：
+##   收起 —— 小窗贴着屏幕一角，只显示最近的几条消息，点标题栏展开
+##   展开 —— 占满屏幕，底部是输入行，右上角 ✕ 收起
 ##
-## 联机部分复用 Net.post_message / Net.message_received：服务器校验发言者身份、
-## 截断到 160 字，客户端伪造不了别人的名字。
+## 交互只用 GUI 的 Button.pressed（标题栏整条是一个按钮、✕ 是一个按钮），
+## 不再用 _input 热区自己判位置 —— 之前那套「触摸 + 合成鼠标 + 热区」三路并存，
+## 点一次会被处理两次、互相抵消，才会出现「点了没反应」。
+##
+## 消息用**一个** RichTextLabel 承载全部历史（而不是每条一个节点塞进 VBox）：
+## 后者在固定高度的容器里会被压缩，消息一多就糊成一团。
 
-const MAX_HISTORY := 60         # 最多保留多少条（滚轮可翻）
+const MAX_HISTORY := 60         # 最多保留多少条
 const IDLE_FADE := 12.0         # 多久没消息开始变淡
 const FADE_ALPHA := 0.68
-const PANEL_W := 392.0
-const PANEL_H := 212.0
+
+const SMALL_W_RATIO := 0.42     # 收起时的窗口宽度（占视口宽的比例）
+const SMALL_H_RATIO := 0.13     # 收起时的窗口高度（占视口高的比例）
+const DESK_W := 392.0           # 收起时的窗口尺寸（桌面）
+const DESK_H := 212.0
+const TOUCH_FS := 20            # 触屏字号：视口逻辑宽恒为 1280，13 落到手机上只有 11px
+const TOUCH_FS_BIG := 24
 
 const C_SELF := "#8ec5ff"
 const C_OTHER := "#e6eef6"
 const C_SYS := "#8a99a6"
 const C_TIME := "#5f6f7c"
 
-var _font: SystemFont
-var _panel: PanelContainer
-var _title: Label
+var _font: Font
+var _panel: Panel                    # 用 Panel 而不是 PanelContainer：容器会被内容撑大，
+var _rule: ColorRect                 # 消息一多就把输入行顶到屏幕外
+var _title_btn: Button
+var _close_btn: Button
 var _scroll: ScrollContainer
-var _log: VBoxContainer
+var _log: RichTextLabel
+var _composer: HBoxContainer
 var _edit: LineEdit
-var _bar: Control
-var _lines: Array[RichTextLabel] = []
-var _active := false
-var _idle := 0.0
-var _known: Dictionary = {}      # peer_id -> 昵称，用来识别「谁进来了 / 谁走了」
-var _empty_hint: Label
+var _send_btn: Button
+
 var _expanded := false
-var _toggle_btn: Button
-var _head: HBoxContainer
-var _last_touch_ms := -1000      # 上一次触摸时间，用来压掉「触摸合成的鼠标事件」
+var _active := false
+var _hidden := false
+var _idle := 0.0
+var _history: Array[String] = []      # 每条形如 "[color=#5f7]12:34[/color] [color=..]名字[/color]：正文"
+var _known: Dictionary = {}           # peer_id -> 昵称，用来识别「谁进来了 / 谁走了」
+var _last_vk := 0                     # 上次读到的软键盘高度，变了就重排
 
 
 func _ready() -> void:
-	layer = 9                     # 低于主 UI(10)：全屏地图打开时会盖住它
+	layer = 9                          # 低于主 UI(10)：全屏地图打开时会盖住它
 	_font = GameTheme.font()
 	_build()
-	_show_empty_hint()
 	Net.message_received.connect(_on_message)
 	Net.history_received.connect(_on_history)
 	Net.roster_changed.connect(_on_roster)
+	_apply_layout()
+	_rebuild_log()
 	set_process(true)
-	# 调试用：XGD_CHAT_DEMO=1 灌几条假消息，方便核对群聊面板的排版/换行/滚动
 	if OS.has_environment("XGD_CHAT_DEMO"):
 		_demo.call_deferred()
-	# 调试用：XGD_CHAT_TOGGLE=1 六秒后按一下「收起」按钮（核对按钮真的能收）
-	if OS.has_environment("XGD_CHAT_TOGGLE"):
-		var tt := get_tree().create_timer(6.0)
-		tt.timeout.connect(func():
-			print("[chat] 收起前 expanded=", _expanded)
-			_toggle_expand()
-			print("[chat] 收起后 expanded=", _expanded, " 面板高=", _panel.size.y))
-	# 调试用：XGD_CHAT_EXPAND=1 自动展开聊天大窗（核对放大排版）
 	if OS.has_environment("XGD_CHAT_EXPAND"):
-		var et := get_tree().create_timer(3.0)
-		et.timeout.connect(func():
-			_expanded = true
-			_apply_layout())
+		var t := get_tree().create_timer(3.0)
+		t.timeout.connect(func(): set_expanded(true))
 
 
 func _demo() -> void:
@@ -71,324 +72,297 @@ func _demo() -> void:
 	_on_message("干饭人", "有人一起去食堂吗")
 	_on_message("散步党", "刚从图书馆出来，今天人超多，这条特意写长一点看看会不会正确换行以及会不会把下面的消息挤掉")
 	_on_message("夜跑选手", "等会儿操场见")
+	_on_message("干饭人", "我在云餐二楼，靠窗那排")
 	var me := str(Net.peers.get(Net.my_id(), {}).get("name", "我"))
 	_on_message(me, "我这边刚下课，五分钟就到")
 
 
+# ---------------------------------------------------------------- 对外接口
 func is_typing() -> bool:
 	return _active
 
 
-## 点聊天面板 = 放大看消息（手机小屏上尤其需要），再点一下收起
-func _on_panel_gui(event: InputEvent) -> void:
-	# 触摸设备只认触摸事件、桌面只认鼠标事件（同一次点按会同时产生两种，混着处理会互相抵消）
-	var tapped := false
-	if event is InputEventMouseButton:
-		tapped = (not _touch_device()) and event.pressed and event.button_index == MOUSE_BUTTON_LEFT
-	elif event is InputEventScreenTouch:
-		tapped = _touch_device() and event.pressed
-	if tapped:
-		_toggle_expand()
-		_panel.accept_event()
+## 触屏「聊」按钮：一步到位换成大窗并进入输入，不用先开小窗再点第二下
+func open_typing() -> void:
+	set_expanded(true)
+	_open_input()
 
 
-## 真机上 Button 收不到触摸事件（本项目只有自绘的触屏控件能收到），
-## 所以标题栏用原始触摸自己判定：点标题栏任意位置都算「展开 / 收起」。
-func _input(event: InputEvent) -> void:
-	var pressed := false
-	var pos := Vector2.ZERO
-	if event is InputEventScreenTouch:
-		if not _touch_device():
-			return
-		pressed = event.pressed
-		pos = event.position
-	elif event is InputEventMouseButton:
-		# 触摸设备上同一次点按会再合成一个鼠标事件（且顺序在触摸之前），
-		# 两类都处理就会「展开一次、又收起一次」，表现就是点了没反应 —— 只认一类。
-		if _touch_device():
-			return
-		pressed = event.pressed and event.button_index == MOUSE_BUTTON_LEFT
-		pos = event.position
-	# 大聊天窗展开时，点面板空白处也算收起（消息行已经是 IGNORE，不会吞事件）
-	if not pressed or not is_instance_valid(_panel) or not _panel.visible:
+## 打开设置 / 全屏地图时把群聊让开
+func set_hidden(v: bool) -> void:
+	_hidden = v
+	if is_instance_valid(_panel):
+		_panel.visible = not v
+
+
+## 展开 / 收起。所有入口（标题栏、✕、Esc、触屏按钮）最后都走这里
+func set_expanded(v: bool) -> void:
+	if _expanded == v:
 		return
-	var inside := false
-	if is_instance_valid(_head):
-		inside = _head.get_global_rect().grow(8.0).has_point(pos)
-	# 按钮那块让 Button 自己响应（真机上 GUI 点击是好的），这里排除掉避免翻两次
-	if inside and is_instance_valid(_toggle_btn):
-		if _toggle_btn.get_global_rect().grow(10.0).has_point(pos):
-			inside = false
-	if inside:
-		_toggle_expand()
-		get_viewport().set_input_as_handled()
-
-
-func _toggle_expand() -> void:
-	_expanded = not _expanded
+	_expanded = v
+	if not v and _active:
+		_close_input(false)
 	_apply_layout()
-	_scroll_to_bottom()
+	_scroll_to_bottom(true)
+	_set_local_blocked(v)
+	var boot := get_tree().get_first_node_in_group("boot_ui")
+	if boot != null and boot.has_method("set_overlay"):
+		boot.call("set_overlay", v)
+	# 大窗盖住半个屏幕：右下按钮收起来，摇杆也停掉。
+	# 不接管触摸的话，点大窗下半部分会落到摇杆判定区，人会一边看聊天一边往前走。
+	var tp := get_tree().get_first_node_in_group("touch_pad")
+	if tp != null:
+		if tp.has_method("set_buttons_hidden_for"):
+			tp.call("set_buttons_hidden_for", "chat", v)
+		if tp.has_method("set_touch_grabbed_for"):
+			tp.call("set_touch_grabbed_for", "chat", v)
+	if v:
+		_open_input()
 
 
-## 收起：手机在左上（左下让给摇杆）、桌面在左下；展开：占满屏幕中间的大窗
+func _toggle() -> void:
+	set_expanded(not _expanded)
+
+
+# ---------------------------------------------------------------- 布局
 func _apply_layout() -> void:
 	if _panel == null:
 		return
 	var touch := _is_touch()
 	var vs := get_viewport().get_visible_rect().size
+	var vk := _vk_inset()
+
+	# 一律按左上角定位 + 绝对尺寸：锚点组合太多容易互相打架，只有 4 个数反而不出错
+	_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
 	if _expanded:
-		_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		_panel.offset_left = 10.0
-		_panel.offset_right = -10.0
-		_panel.offset_top = 52.0
-		_panel.offset_bottom = -214.0 if touch else -64.0
-	elif touch:
-		_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
-		_panel.offset_left = 12.0
-		_panel.offset_top = 16.0
-		_panel.offset_right = 12.0 + 272.0
-		_panel.offset_bottom = 16.0 + 158.0
+		# 展开不等于铺满：手机上占半屏就够，露出下面还能看见自己在哪
+		var avail := vs.y - vk
+		var w: float
+		var h: float
+		if touch:
+			w = vs.x * 0.94
+			h = minf(vs.y * 0.54, avail - 24.0)
+		else:
+			w = vs.x * 0.62
+			h = minf(vs.y * 0.80, avail - 40.0)
+		_panel.size = Vector2(w, maxf(h, 200.0))
+		_panel.position = Vector2(
+			(vs.x - w) * 0.5,
+			clampf((avail - _panel.size.y) * 0.5, 8.0, maxf(8.0, avail - _panel.size.y - 8.0)))
 	else:
-		_panel.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
-		_panel.offset_left = 12.0
-		_panel.offset_top = -PANEL_H - 46.0
-		_panel.offset_right = 12.0 + PANEL_W
-		_panel.offset_bottom = -46.0
-	if _panel.get_parent() == null:
-		add_child(_panel)
-	_panel.modulate.a = 1.0
-	_idle = 0.0
-	# 展开时字号放大，站着看也清楚
-	var fs: int = 18 if _expanded else GameTheme.FS_BODY
-	for rt in _lines:
-		rt.add_theme_font_size_override("normal_font_size", fs)
-	if _title != null:
-		_title.add_theme_font_size_override("font_size", GameTheme.FS_BODY if _expanded else GameTheme.FS_SMALL)
-		_refresh_title()
-	_sync_log_height()
-	_scroll_to_bottom()
-	_reposition_bar()
-	var boot := get_tree().get_first_node_in_group("boot_ui")
-	if boot != null and boot.has_method("set_overlay"):
-		boot.call("set_overlay", _expanded)
-	# 大窗占屏时把右下按钮收起来，否则和输入框重叠
-	var tp := get_tree().get_first_node_in_group("touch_pad")
-	if tp != null and tp.has_method("set_buttons_hidden"):
-		tp.call("set_buttons_hidden", _expanded)
-		if _expanded and tp.has_method("release_all"):
-			tp.call("release_all")
+		if touch:
+			# 按视口比例算：逻辑宽恒为 1280，写死 304 落到手机上只有屏宽的两成
+			var w := clampf(vs.x * SMALL_W_RATIO, 360.0, 660.0)
+			var h := clampf(vs.y * SMALL_H_RATIO, 150.0, 280.0)
+			_panel.position = Vector2(12.0, 14.0)
+			_panel.size = Vector2(w, h)
+		else:
+			_panel.position = Vector2(12.0, vs.y - DESK_H - 46.0)
+			_panel.size = Vector2(DESK_W, DESK_H)
+
+	# 大窗盖住整屏，稍微实一点，文字才不被底下的地图干扰；小窗保持薄透
+	_panel.add_theme_stylebox_override("panel", _panel_box(0.90 if _expanded else 0.82))
+
+	_composer.visible = _expanded
+	_close_btn.visible = _expanded
+	_refresh_head()
+	_apply_font()
+	_layout_children()
 
 
-## 输入栏位置：
-##  - 小窗（手机左上）：浮在屏幕中部，避开底部软键盘
-##  - 大窗：贴在面板底边内侧，像一个正经聊天软件的输入行
-##  - 桌面：贴屏幕底边居中
-func _reposition_bar() -> void:
-	if _bar == null:
-		return
+## 子控件全部手动摆位。用 Panel（不是容器）+ 绝对 rect，是为了让消息区高度只由
+## 面板高度决定，不会被聊天内容撑开把输入行顶出屏幕。
+func _layout_children() -> void:
+	var w := _panel.size.x
+	var h := _panel.size.y
+	var pad := 10.0
+	var head_h := 46.0 if _is_touch() else 28.0
+	var comp_h := 50.0 if _is_touch() else 30.0
+	var close_w := 44.0
+
+	var top := 4.0 + head_h + 8.0
+	_title_btn.position = Vector2(pad, 4.0)
+	_title_btn.size = Vector2(w - pad * 2.0 - (close_w if _expanded else 0.0), head_h)
+	_close_btn.position = Vector2(w - pad - close_w, 4.0)
+	_close_btn.size = Vector2(close_w, head_h)
+	_rule.position = Vector2(pad, 4.0 + head_h + 2.0)
+	_rule.size = Vector2(maxf(0.0, w - pad * 2.0), 1.0)
+
+	var bottom := pad
+	if _expanded:
+		bottom += comp_h + 8.0
+		_composer.position = Vector2(pad, h - pad - comp_h)
+		_composer.size = Vector2(w - pad * 2.0, comp_h)
+	_scroll.position = Vector2(pad, top)
+	_scroll.size = Vector2(maxf(0.0, w - pad * 2.0), maxf(0.0, h - top - bottom))
+
+
+## 软键盘挡住的高度（逻辑像素）。键盘没弹出来就是 0。
+## 只有移动端有软键盘，桌面调这个 API 会刷警告，先挡掉。
+func _vk_inset() -> float:
+	if not OS.has_feature("mobile"):
+		return 0.0
+	var h := DisplayServer.virtual_keyboard_get_height()
+	if h <= 0:
+		return 0.0
+	var win_y := float(DisplayServer.window_get_size().y)
+	if win_y <= 0.0:
+		return 0.0
+	return h * (get_viewport().get_visible_rect().size.y / win_y)
+
+
+func _apply_font() -> void:
 	var touch := _is_touch()
+	var fs := TOUCH_FS if touch else GameTheme.FS_BODY
 	if _expanded:
-		var bottom_pad := 214.0 if touch else 64.0
-		_bar.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
-		_bar.offset_left = 24.0
-		_bar.offset_right = -24.0
-		_bar.offset_top = -(bottom_pad + 52.0)
-		_bar.offset_bottom = -(bottom_pad + 10.0)
-	elif touch:
-		_bar.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-		_bar.offset_left = -300.0
-		_bar.offset_right = 300.0
-		_bar.offset_top = -56.0
-		_bar.offset_bottom = -16.0
-	else:
-		_bar.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
-		_bar.offset_left = 240.0
-		_bar.offset_right = -240.0
-		_bar.offset_top = -52.0
-		_bar.offset_bottom = -14.0
+		fs = TOUCH_FS_BIG if touch else 18
+	if is_instance_valid(_log):
+		_log.add_theme_font_size_override("normal_font_size", fs)
+		_log.add_theme_font_size_override("bold_font_size", fs)
+	if is_instance_valid(_edit):
+		_edit.add_theme_font_size_override("font_size", fs)
+	if is_instance_valid(_title_btn):
+		_title_btn.add_theme_font_size_override("font_size", (15 if touch else GameTheme.FS_SMALL) + (1 if _expanded else 0))
 
 
-func _refresh_title() -> void:
-	if _title == null:
+func _refresh_head() -> void:
+	if _title_btn == null:
 		return
-	_title.text = "校园群聊 · 在线 %d 人" % Net.peer_count()
-	if _toggle_btn != null:
-		_toggle_btn.text = "收起" if _expanded else "放大"
-
-
-## 是否运行在触摸设备上（手机包，或桌面用 XGD_TOUCH=1 预览）
-func _touch_device() -> bool:
-	return DisplayServer.is_touchscreen_available() or OS.has_feature("mobile") \
-		or OS.has_environment("XGD_TOUCH")
-
-
-func _is_touch() -> bool:
-	return OS.has_feature("mobile") or OS.has_environment("XGD_TOUCH")
-
-
-## 触屏「聊」按钮调用：**直接换成大聊天窗**并进入输入。
-## 小窗只有 158 高，点「聊」本来就是想看消息 / 要说话，没必要先进小窗再让用户点第二下。
-func open_typing() -> void:
-	if _is_touch() and not _expanded:
-		_expanded = true
-		_apply_layout()
-	if not _active:
-		_open()
-	if OS.has_feature("mobile"):
-		DisplayServer.virtual_keyboard_show("")
-
-
-## 打开设置/全屏地图时把群聊框让开，免得两块 UI 叠在一起
-func set_hidden(v: bool) -> void:
-	if is_instance_valid(_panel):
-		_panel.visible = not v
+	var n := Net.peer_count()
+	_title_btn.text = "校园群聊 · %d 人" % n
+	if _close_btn != null:
+		_close_btn.visible = _expanded
 
 
 # ---------------------------------------------------------------- 界面
 func _build() -> void:
-	# 群聊窗口（左下）
-	var touch := _is_touch()
-	_panel = PanelContainer.new()
-	_panel.mouse_filter = Control.MOUSE_FILTER_STOP      # 要接住点击（点一下放大/收起）
-	_panel.mouse_filter = Control.MOUSE_FILTER_PASS       # 让滚轮能落在面板上
-	var box := StyleBoxFlat.new()
-	box.bg_color = Color(0.031, 0.043, 0.058, 0.82)
-	box.border_color = Color(0.22, 0.30, 0.39, 1.0)
-	box.set_border_width_all(2)                            # 项目约定：2px 实线 + 无圆角
-	box.content_margin_left = 9.0
-	box.content_margin_right = 9.0
-	box.content_margin_top = 6.0
-	box.content_margin_bottom = 6.0
-	_panel.add_theme_stylebox_override("panel", box)
+	_panel = Panel.new()
+	_panel.mouse_filter = Control.MOUSE_FILTER_STOP      # 接住点击，别穿到下面的世界里
+	_panel.add_theme_stylebox_override("panel", _panel_box(0.82))
 	add_child(_panel)
 
-	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 3)
-	# 注意：容器若设成 IGNORE，会把子控件的点击一起吞掉（标题栏按钮就点不动了）
-	col.mouse_filter = Control.MOUSE_FILTER_PASS
-	_panel.add_child(col)
+	# ── 标题栏：整条是一个 Button（手指好点），右边是 ✕ ──
+	_title_btn = Button.new()
+	_title_btn.flat = true
+	_title_btn.focus_mode = Control.FOCUS_NONE
+	_title_btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_title_btn.add_theme_font_override("font", _font)
+	_title_btn.add_theme_font_size_override("font_size", GameTheme.FS_SMALL)
+	_title_btn.add_theme_color_override("font_color", Color("#93a3b0"))
+	_title_btn.add_theme_color_override("font_hover_color", Color("#cfdae4"))
+	_title_btn.add_theme_color_override("font_pressed_color", Color("#ffffff"))
+	_title_btn.pressed.connect(_toggle)
+	_panel.add_child(_title_btn)
 
-	# 标题栏
-	var head := HBoxContainer.new()
-	head.add_theme_constant_override("separation", 6)
-	head.mouse_filter = Control.MOUSE_FILTER_PASS
-	_head = head
-	col.add_child(head)
-	var dot := Label.new()
-	dot.text = "■"
-	dot.add_theme_font_override("font", _font)
-	dot.add_theme_font_size_override("font_size", 8)
-	dot.add_theme_color_override("font_color", Color("#5f9e6a"))
-	head.add_child(dot)
-	_title = Label.new()
-	_title.text = "校园群聊"
-	_title.add_theme_font_override("font", _font)
-	_title.add_theme_font_size_override("font_size", GameTheme.FS_SMALL)
-	_title.add_theme_color_override("font_color", Color(C_SYS))
-	_title.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	head.add_child(_title)
+	_close_btn = Button.new()
+	_close_btn.text = "✕"
+	_close_btn.flat = true
+	_close_btn.focus_mode = Control.FOCUS_NONE
+	_close_btn.add_theme_font_override("font", _font)
+	_close_btn.add_theme_font_size_override("font_size", 22)
+	_close_btn.add_theme_color_override("font_color", Color("#9fb0bf"))
+	_close_btn.add_theme_color_override("font_hover_color", Color("#ffffff"))
+	_close_btn.add_theme_color_override("font_pressed_color", Color("#ffffff"))
+	_close_btn.visible = false
+	_close_btn.pressed.connect(func(): set_expanded(false))
+	_panel.add_child(_close_btn)
 
-	# 明确的「放大 / 收起」按钮：面板上的点击会被消息行吃掉，光靠点空白处不可靠
-	_toggle_btn = Button.new()
-	_toggle_btn.text = "放大"
-	_toggle_btn.flat = true
-	_toggle_btn.focus_mode = Control.FOCUS_NONE
-	_toggle_btn.add_theme_font_override("font", _font)
-	_toggle_btn.add_theme_font_size_override("font_size", GameTheme.FS_SMALL)
-	_toggle_btn.add_theme_color_override("font_color", Color("#8ec5ff"))
-	_toggle_btn.add_theme_color_override("font_hover_color", Color("#cfe6ff"))
-	_toggle_btn.add_theme_color_override("font_pressed_color", Color("#ffffff"))
-	_toggle_btn.custom_minimum_size = Vector2(52, 24)
-	_toggle_btn.pressed.connect(_toggle_expand)   # 按钮自己处理点击
-	head.add_child(_toggle_btn)
+	_rule = ColorRect.new()
+	_rule.color = Color(0.20, 0.27, 0.35, 0.9)
+	_rule.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_panel.add_child(_rule)
 
-	# 分隔线
-	var sep := ColorRect.new()
-	sep.color = Color(0.20, 0.27, 0.35, 0.9)
-	sep.custom_minimum_size = Vector2(0, 1)
-	sep.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	col.add_child(sep)
-
-	# 消息区（滚轮翻历史）
+	# ── 消息区：ScrollContainer 里只放一个 RichTextLabel ──
 	_scroll = ScrollContainer.new()
-	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	_scroll.mouse_filter = Control.MOUSE_FILTER_PASS
-	_scroll.resized.connect(_sync_log_height)
-	col.add_child(_scroll)
+	_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	_scroll.mouse_filter = Control.MOUSE_FILTER_STOP      # 手指能在上面拖着翻历史
+	_scroll.resized.connect(_on_scroll_resized)
+	_panel.add_child(_scroll)
 
-	_log = VBoxContainer.new()
+	_log = RichTextLabel.new()
+	_log.bbcode_enabled = true
+	_log.fit_content = true                              # 高度由内容决定，不会被容器压扁
+	_log.scroll_active = false                           # 滚动交给外面的 ScrollContainer
+	_log.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_log.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_log.alignment = BoxContainer.ALIGNMENT_END
-	_log.add_theme_constant_override("separation", 1)
 	_log.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_log.add_theme_font_override("normal_font", _font)
+	_log.add_theme_font_override("bold_font", _font)
+	_log.add_theme_font_size_override("normal_font_size", GameTheme.FS_BODY)
+	_log.add_theme_color_override("default_color", Color(C_OTHER))
+	_log.add_theme_constant_override("line_separation", 8 if _is_touch() else 3)
 	_scroll.add_child(_log)
 
-	# 输入栏（底部居中，激活时才显示）
-	_bar = PanelContainer.new()
-	_reposition_bar()
-	_bar.visible = false
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.06, 0.08, 0.11, 0.95)
-	sb.border_color = Color(0.29, 0.53, 0.78, 1)
-	sb.set_border_width_all(1)
-	sb.content_margin_left = 10.0
-	sb.content_margin_right = 10.0
-	sb.content_margin_top = 4.0
-	sb.content_margin_bottom = 4.0
-	_bar.add_theme_stylebox_override("panel", sb)
-	add_child(_bar)
+	# ── 输入行：只在大窗里出现，贴在面板底部（键盘弹出时面板跟着变矮） ──
+	_composer = HBoxContainer.new()
+	_composer.add_theme_constant_override("separation", 6)
+	_composer.visible = false
+	_panel.add_child(_composer)
 
 	_edit = LineEdit.new()
-	if _is_touch():
-		_edit.placeholder_text = "说点什么…（键盘上的发送键＝发出）"
-	else:
-		_edit.placeholder_text = "对所有人说…（回车发送，Esc 取消）"
+	_edit.placeholder_text = "说点什么…（键盘上的发送键＝发出）" if _is_touch() else "对所有人说…（回车发送，Esc 取消）"
 	_edit.max_length = 160
+	_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_edit.custom_minimum_size = Vector2(0, 50 if _is_touch() else 30)
 	_edit.add_theme_font_override("font", _font)
 	_edit.add_theme_font_size_override("font_size", GameTheme.FS_BODY)
 	_edit.add_theme_color_override("font_color", Color("#e6eef6"))
 	_edit.add_theme_color_override("font_placeholder_color", Color("#6d7d8b"))
 	_edit.text_submitted.connect(_on_submitted)
-	_bar.add_child(_edit)
+	_composer.add_child(_edit)
 
-	_panel.gui_input.connect(_on_panel_gui)
-	_apply_layout()
+	_send_btn = Button.new()
+	_send_btn.text = "发送"
+	_send_btn.focus_mode = Control.FOCUS_NONE
+	_send_btn.custom_minimum_size = Vector2(72, 50)
+	_send_btn.add_theme_font_override("font", _font)
+	_send_btn.add_theme_font_size_override("font_size", GameTheme.FS_BODY)
+	_send_btn.add_theme_color_override("font_color", Color("#8ec5ff"))
+	_send_btn.add_theme_stylebox_override("normal", _send_box(Color(0.24, 0.44, 0.62, 0.30)))
+	_send_btn.add_theme_stylebox_override("hover", _send_box(Color(0.24, 0.44, 0.62, 0.55)))
+	_send_btn.add_theme_stylebox_override("pressed", _send_box(Color(0.24, 0.44, 0.62, 0.75)))
+	_send_btn.pressed.connect(func(): _on_submitted(_edit.text))
+	_composer.add_child(_send_btn)
+
+
+func _panel_box(alpha: float) -> StyleBoxFlat:
+	var box := StyleBoxFlat.new()
+	box.bg_color = Color(0.031, 0.043, 0.058, alpha)     # 半透明（用户明确要求透出底下地图）
+	box.border_color = Color(0.22, 0.30, 0.39, 1.0)
+	box.set_border_width_all(2)                          # 项目约定：2px 实线 + 无圆角
+	return box
+	return box
+
+
+func _send_box(c: Color) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = c
+	sb.border_color = Color(0.29, 0.53, 0.78, 0.9)
+	sb.set_border_width_all(1)
+	sb.content_margin_left = 8.0
+	sb.content_margin_right = 8.0
+	return sb
 
 
 # ---------------------------------------------------------------- 输入
-func _unhandled_input(event: InputEvent) -> void:
-	if not (event is InputEventKey) or not event.pressed or event.echo:
-		return
-	var key: int = event.keycode
-	if _active:
-		if key == KEY_ESCAPE:
-			_close(false)
-			get_viewport().set_input_as_handled()
-		return
-	if key == KEY_ENTER or key == KEY_KP_ENTER:
-		_open()
-		get_viewport().set_input_as_handled()
-
-
-func _open() -> void:
+func _open_input() -> void:
 	_active = true
-	_bar.visible = true
 	_edit.text = ""
 	_edit.grab_focus()
-	_set_local_blocked(true)
+	if OS.has_feature("mobile"):
+		DisplayServer.virtual_keyboard_show("")
 	_idle = 0.0
 	_panel.modulate.a = 1.0
-	_scroll_to_bottom()
+	_scroll_to_bottom(true)
 
 
-func _close(send: bool) -> void:
+func _close_input(send: bool) -> void:
 	var text: String = _edit.text.strip_edges()
 	_active = false
-	_bar.visible = false
 	_edit.release_focus()
-	_set_local_blocked(false)
+	if OS.has_feature("mobile"):
+		DisplayServer.virtual_keyboard_hide()
 	if send and not text.is_empty():
 		Net.post_message.rpc(text)      # call_local：自己也会立刻收到一条
 		_idle = 0.0
@@ -396,8 +370,28 @@ func _close(send: bool) -> void:
 
 
 func _on_submitted(text: String) -> void:
-	_edit.text = text
-	_close(true)
+	_close_input(true)
+	if _is_touch():
+		set_expanded(false)
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not (event is InputEventKey) or not event.pressed or event.echo:
+		return
+	var key: int = event.keycode
+	if key == KEY_ESCAPE:
+		if _active:
+			_close_input(false)
+		elif _expanded:
+			set_expanded(false)
+		else:
+			return
+		get_viewport().set_input_as_handled()
+		return
+	if key == KEY_ENTER or key == KEY_KP_ENTER:
+		if not _expanded:
+			set_expanded(true)          # 会顺手聚焦输入
+			get_viewport().set_input_as_handled()
 
 
 ## 说话时冻结本地移动（避免打字时人物乱跑）
@@ -447,27 +441,14 @@ func _on_roster() -> void:
 			if not cur.has(id):
 				_append_system("%s 离开了" % _known[id])
 	_known = cur
-	_refresh_title()
+	_refresh_head()
 
 
-# ---------------------------------------------------------------- 渲染一条消息
+# ---------------------------------------------------------------- 渲染
 func _append(speaker: String, text: String, mine: bool, ts: String) -> void:
 	var body := "[color=%s]%s[/color]：%s" % [
-		C_SELF if mine else _name_color(speaker),
-		_bb(speaker), _bb(text)]
+		C_SELF if mine else _name_color(speaker), _bb(speaker), _bb(text)]
 	_push(body, ts)
-
-
-## 一条消息都没有时，面板里给句提示，别是一大块黑
-func _show_empty_hint() -> void:
-	var l := Label.new()
-	l.text = "还没有人说话 · 点右下「聊」发言" if _is_touch() else "还没有人说话 · 按回车发言"
-	l.add_theme_font_override("font", _font)
-	l.add_theme_font_size_override("font_size", GameTheme.FS_SMALL)
-	l.add_theme_color_override("font_color", Color(C_SYS))
-	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_log.add_child(l)
-	_empty_hint = l
 
 
 func _append_system(text: String) -> void:
@@ -475,33 +456,46 @@ func _append_system(text: String) -> void:
 
 
 func _push(bbcode: String, ts: String) -> void:
-	var rt := RichTextLabel.new()
-	rt.bbcode_enabled = true
-	rt.fit_content = true
-	rt.scroll_active = false
-	rt.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	rt.custom_minimum_size = Vector2(0, 0)
-	rt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	rt.add_theme_font_override("normal_font", _font)
-	rt.add_theme_font_size_override("normal_font_size", 18 if _expanded else GameTheme.FS_BODY)
-	rt.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	rt.add_theme_color_override("default_color", Color(C_OTHER))
-	rt.add_theme_constant_override("line_separation", 1)
-	rt.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var stamp := ts if ts != "" else Time.get_time_string_from_system().left(5)
-	rt.text = "[color=%s]%s[/color] %s" % [C_TIME, stamp, bbcode]
-	if _empty_hint != null:
-		_empty_hint.queue_free()
-		_empty_hint = null
-	_log.add_child(rt)
-	_lines.append(rt)
-	while _lines.size() > MAX_HISTORY:
-		var old: RichTextLabel = _lines.pop_front()
-		old.queue_free()
+	_history.append("[color=%s]%s[/color] %s" % [C_TIME, stamp, bbcode])
+	while _history.size() > MAX_HISTORY:
+		_history.pop_front()
+	_rebuild_log()
 	_panel.modulate.a = 1.0
 	_idle = 0.0
-	_sync_log_height()
-	_scroll_to_bottom()
+
+
+## 整段重排。60 条文本的量，重建比逐条删节点省心（也避免节点高度算错）。
+## 关键：重建会重算滚动范围，所以先记下「当前是否贴着底」和「离底多远」，
+## 重建后按原样恢复 —— 用户正往上翻历史时，新消息不能把他拽回底部。
+func _rebuild_log() -> void:
+	if not is_instance_valid(_log) or not is_instance_valid(_scroll):
+		return
+	var bar := _scroll.get_v_scroll_bar()
+	var bottom_before := int(bar.max_value - bar.page)
+	var stick := _scroll.scroll_vertical >= bottom_before - 8
+	var keep := _scroll.scroll_vertical
+
+	if _history.is_empty():
+		_log.text = "[color=%s]还没有人说话%s[/color]" % [
+			C_SYS, " · 点右下「聊」发言" if _is_touch() else " · 按回车发言"]
+	else:
+		_log.text = "\n".join(_history)
+
+	# RichTextLabel 换了文本之后，高度要等它重新排版完才准 —— 一帧不够，两帧才稳
+	await get_tree().process_frame
+	await get_tree().process_frame
+	if not is_instance_valid(_scroll):
+		return
+	_fit_panel()
+	_fit_scroll()
+	bar = _scroll.get_v_scroll_bar()
+	var bottom := int(bar.max_value - bar.page)
+	# 贴底就跟到底；正在翻历史就原地不动（新消息加在下面，视图不该被推走）
+	if stick:
+		_scroll.scroll_vertical = int(bar.max_value)      # 超出部分由 ScrollContainer 自己 clamp
+	else:
+		_scroll.scroll_vertical = mini(keep, bottom)
 
 
 ## 等人的昵称哈希成固定颜色（同一个人永远同一个色）
@@ -518,23 +512,89 @@ func _bb(s: String) -> String:
 	return s.replace("[", "[lb]")
 
 
-## ScrollContainer 只按内容高度排子节点，内容少时 VBox 会贴在顶部、alignment=END 不生效。
-## 把 VBox 的最小高度拉到视口高度，消息少时也会贴着底边（像正经聊天窗口）。
-func _sync_log_height() -> void:
-	if is_instance_valid(_scroll) and is_instance_valid(_log):
-		_log.custom_minimum_size.y = _scroll.size.y
-		_scroll_to_bottom()
-
-
-func _scroll_to_bottom() -> void:
+## force=true 一定跳到最新；否则只在已经贴着底的时候跟（别打断正在翻历史的人）
+func _scroll_to_bottom(force: bool = false) -> void:
 	await get_tree().process_frame
-	if is_instance_valid(_scroll):
-		_scroll.scroll_vertical = int(_scroll.get_v_scroll_bar().max_value)
+	await get_tree().process_frame
+	if not is_instance_valid(_scroll):
+		return
+	_fit_panel()
+	_fit_scroll()
+	var bar := _scroll.get_v_scroll_bar()
+	var bottom := int(bar.max_value - bar.page)
+	if force or _scroll.scroll_vertical >= bottom - 8:
+		_scroll.scroll_vertical = int(bar.max_value)
 
 
+## 消息区尺寸变了（展开 / 收起 / 键盘弹出）之后重新贴底，
+## 不然最后一行会被下边缘切掉半截
+## 大窗高度跟着消息条数长，最多到半屏 —— 消息少时不会是一整块空面板。
+## 跑完如果高度变了会重排子控件，所以调用方要在它之后再做贴底。
+func _fit_panel() -> void:
+	if not _expanded or not is_instance_valid(_log) or not is_instance_valid(_panel):
+		return
+	var vs := get_viewport().get_visible_rect().size
+	var avail := vs.y - _vk_inset()
+	var pad := 10.0
+	var head_h := 46.0 if _is_touch() else 28.0
+	var comp_h := 50.0 if _is_touch() else 30.0
+	var chrome := (4.0 + head_h + 8.0) + (pad + comp_h + 8.0)
+	var content := float(_log.get_content_height()) + 6.0
+	var cap := avail * (0.54 if _is_touch() else 0.80)
+	var want := clampf(content + chrome, 240.0, cap)
+	if absf(_panel.size.y - want) > 2.0:
+		_panel.size.y = want
+		_panel.position.y = clampf((avail - want) * 0.5, 8.0, maxf(8.0, avail - want - 8.0))
+		_layout_children()
+
+
+## 消息没几行时，把消息区缩到内容高度、贴着输入行往上排（聊天软件都是底部对齐）；
+## 内容超出一屏就铺满可用高度，交给滚动条
+func _fit_scroll() -> void:
+	if not is_instance_valid(_scroll) or not is_instance_valid(_log):
+		return
+	var w := _panel.size.x
+	var h := _panel.size.y
+	var pad := 10.0
+	var head_h := 46.0 if _is_touch() else 28.0
+	var comp_h := 50.0 if _is_touch() else 30.0
+	var top := 4.0 + head_h + 8.0
+	var bottom := pad + (comp_h + 8.0 if _expanded else 0.0)
+	var avail := maxf(0.0, h - top - bottom)
+	var content := float(_log.get_content_height()) + 6.0
+	var use := avail if _expanded else minf(content, avail)
+	_scroll.size = Vector2(maxf(0.0, w - pad * 2.0), maxf(0.0, use))
+	_scroll.position = Vector2(pad, maxf(top, h - bottom - use))
+
+
+func _on_scroll_resized() -> void:
+	call_deferred("_stick_bottom_if_needed")
+
+
+func _stick_bottom_if_needed() -> void:
+	if not is_instance_valid(_scroll):
+		return
+	var bar := _scroll.get_v_scroll_bar()
+	var bottom := int(bar.max_value - bar.page)
+	if _scroll.scroll_vertical >= bottom - 48:
+		_scroll.scroll_vertical = int(bar.max_value)
+
+
+# ---------------------------------------------------------------- 每帧
 func _process(delta: float) -> void:
-	if _active:
+	# 软键盘弹出 / 收起时窗口高度会变，面板要跟着让出位置，否则输入行被键盘盖住
+	if OS.has_feature("mobile"):
+		var vk := DisplayServer.virtual_keyboard_get_height()
+		if vk != _last_vk:
+			_last_vk = vk
+			_apply_layout()
+	if _hidden or _active or _expanded:
 		return
 	_idle += delta
 	if _idle > IDLE_FADE and _panel.modulate.a > FADE_ALPHA:
 		_panel.modulate.a = maxf(FADE_ALPHA, _panel.modulate.a - delta * 1.2)
+
+
+## 是否运行在触摸设备上（手机包，或桌面用 XGD_TOUCH=1 预览）
+func _is_touch() -> bool:
+	return OS.has_feature("mobile") or OS.has_environment("XGD_TOUCH")
