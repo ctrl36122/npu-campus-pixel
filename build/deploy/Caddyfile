@@ -1,0 +1,44 @@
+# 像素工大 · 长安校区
+#
+# 同一个世界，两种接入方式：
+#   网页版  https://118.178.95.110/         （自签证书，浏览器需点一次「继续前往」）
+#           └─ wss://118.178.95.110/ws
+#   exe 版  ws://118.178.95.110/ws          （明文 WS，不需要证书，填进设置里的「服务器地址」）
+#
+# 为什么网页版必须 https：Godot Web 强制要求 Secure Context。
+# 为什么证书是自签：大陆 ECS 上未备案域名走 80/443 会被按 Host 掐断（LE 验证被 reset）。
+# 以后有了备案域名，把 :443 换成 `你的域名 { ... }` 并删掉 tls 两行即可自动签证书。
+:443 {
+	tls /etc/caddy/xgd.crt /etc/caddy/xgd.key
+
+	encode gzip
+
+	handle /ws* {
+		reverse_proxy 127.0.0.1:9080
+	}
+
+	handle {
+		root * /opt/xgd/web
+		file_server
+	}
+
+	header /index.wasm Cache-Control "public, max-age=31536000, immutable"
+	header /index.pck Cache-Control "public, max-age=31536000, immutable"
+	header /index.js Cache-Control "public, max-age=86400"
+
+	header {
+		-Server
+		X-Content-Type-Options nosniff
+	}
+}
+
+# 80 端口：/ws 走明文 WebSocket（给 exe 客户端用），其余跳 https（给浏览器用）
+:80 {
+	handle /ws* {
+		reverse_proxy 127.0.0.1:9080
+	}
+
+	handle {
+		redir https://{host}{uri} permanent
+	}
+}

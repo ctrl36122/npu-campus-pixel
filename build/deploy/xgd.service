@@ -1,0 +1,40 @@
+[Unit]
+Description=XGD Campus 联机服务器 (Godot headless)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=xgd
+WorkingDirectory=/opt/xgd/server
+Environment=HOME=/opt/xgd
+Environment=GODOT_SILENCE_ROOT_WARNING=1
+ExecStart=/opt/xgd/server/xgd-server.x86_64 --headless --server
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+# --- 沙箱限制（最小权限）---
+# 它只需要：读写 /opt/xgd（user:// 落在 HOME 下）、TCP 监听、读系统库。
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadWritePaths=/opt/xgd
+# 内存上限：万一被刷爆也只压死自己，不牵连服务器上的其他服务（含 QQ 机器人）
+MemoryMax=900M
+
+[Install]
+WantedBy=multi-user.target

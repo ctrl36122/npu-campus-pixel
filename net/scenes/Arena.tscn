@@ -1,0 +1,50 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://net/scenes/Arena.gd" id="script"]
+
+[sub_resource type="RectangleShape2D" id="horizontal"]
+size = Vector2(7600, 40)
+
+[sub_resource type="RectangleShape2D" id="vertical"]
+size = Vector2(40, 13000)
+
+[node name="Arena" type="Node2D"]
+script = ExtResource("script")
+
+[node name="Players" type="Node2D" parent="."]
+
+[node name="PlayerSpawner" type="MultiplayerSpawner" parent="."]
+_spawnable_scenes = PackedStringArray("res://net/scenes/Player.tscn")
+spawn_path = NodePath("../Players")
+
+[node name="North" type="StaticBody2D" parent="."]
+position = Vector2(3392, -30)
+collision_layer = 1
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="North"]
+shape = SubResource("horizontal")
+
+[node name="South" type="StaticBody2D" parent="."]
+position = Vector2(3392, 12830)
+collision_layer = 1
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="South"]
+shape = SubResource("horizontal")
+
+[node name="West" type="StaticBody2D" parent="."]
+position = Vector2(-30, 6400)
+collision_layer = 1
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="West"]
+shape = SubResource("vertical")
+
+[node name="East" type="StaticBody2D" parent="."]
+position = Vector2(6814, 6400)
+collision_layer = 1
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="East"]
+shape = SubResource("vertical")

@@ -1,0 +1,96 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://net/scripts/player/PlayerAvatar.gd" id="script"]
+[ext_resource type="SpriteFrames" path="res://assets/sandbox/frames_adam.tres" id="frames"]
+
+[sub_resource type="CircleShape2D" id="collision"]
+radius = 14.0
+
+[sub_resource type="StyleBoxFlat" id="bubble_bg"]
+content_margin_left = 8.0
+content_margin_top = 5.0
+content_margin_right = 8.0
+content_margin_bottom = 5.0
+bg_color = Color(0.07, 0.09, 0.12, 0.93)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.29, 0.38, 0.47, 1)
+
+[sub_resource type="SceneReplicationConfig" id="replication"]
+properties/0/path = NodePath(".:position")
+properties/0/spawn = true
+properties/0/replication_mode = 0
+properties/1/path = NodePath(".:round_id")
+properties/1/spawn = true
+properties/1/replication_mode = 0
+properties/2/path = NodePath(".:server_position")
+properties/2/spawn = true
+properties/2/replication_mode = 1
+properties/3/path = NodePath(".:facing")
+properties/3/spawn = true
+properties/3/replication_mode = 1
+properties/4/path = NodePath(".:server_state")
+properties/4/spawn = true
+properties/4/replication_mode = 1
+properties/5/path = NodePath(".:hero_id")
+properties/5/spawn = true
+properties/5/replication_mode = 1
+
+[node name="Player" type="CharacterBody2D" groups=["players"]
+scale = Vector2(0.22, 0.22)]
+collision_layer = 2
+collision_mask = 1
+script = ExtResource("script")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("collision")
+
+[node name="Sync" type="MultiplayerSynchronizer" parent="." groups=["world_sync"]]
+replication_interval = 0.0333333
+public_visibility = false
+replication_config = SubResource("replication")
+
+[node name="Visual" type="Node2D" parent="."]
+
+[node name="Sprite" type="AnimatedSprite2D" parent="Visual"]
+sprite_frames = ExtResource("frames")
+animation = &"down_idle"
+offset = Vector2(0, -24)
+
+[node name="Name" type="Label" parent="."]
+offset_left = -60.0
+offset_top = -66.0
+offset_right = 60.0
+offset_bottom = -46.0
+mouse_filter = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_outline_color = Color(0.05, 0.07, 0.09, 1)
+theme_override_constants/outline_size = 5
+theme_override_font_sizes/font_size = 21
+text = "Player"
+horizontal_alignment = 1
+clip_text = true
+text_overrun_behavior = 3
+
+[node name="Bubble" type="Label" parent="."]
+visible = false
+offset_left = -90.0
+offset_top = -112.0
+offset_right = 90.0
+offset_bottom = -74.0
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.95, 0.97, 1, 1)
+theme_override_font_sizes/font_size = 21
+theme_override_styles/normal = SubResource("bubble_bg")
+text = ""
+horizontal_alignment = 1
+vertical_alignment = 1
+autowrap_mode = 3
+clip_text = true
+text_overrun_behavior = 3
+
+[node name="Camera" type="Camera2D" parent="."]
+zoom = Vector2(1.2, 1.2)
+enabled = false
