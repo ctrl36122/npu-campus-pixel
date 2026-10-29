@@ -19,6 +19,14 @@ const VIEW_CELLS := Vector2(100.0, 200.0)
 const CELL_PX := 8.0
 
 var tex: Texture2D
+## 校园底图原样留着：进房间时换成房间图，出来时换回去
+var _campus_tex: Texture2D
+## 当前底图覆盖的世界尺寸（校园 3392×6400，房间 910×754）
+var _map_size := CAMPUS_LOCAL
+## 房间模式：整间一次显示，不裁剪、不跟随（房间就一个屋子，没有「视野」可言）
+var _room_mode := false
+## 房间左上角在 campus 局部空间的像素坐标（房间挂在校园外，坐标要减掉它）
+var _room_origin := Vector2.ZERO
 var campus: Node2D
 var font: Font
 var _img: TextureRect
@@ -32,6 +40,7 @@ var last_names: int = 0              # 上一帧实际画出的名字数（调�
 
 func setup(t: Texture2D, c: Node2D, f: Font) -> void:
 	tex = t
+	_campus_tex = t
 	campus = c
 	font = f
 	# PASS 而不是 STOP：左键在本控件里被 accept_event 吃掉，
@@ -92,13 +101,55 @@ func _process(_delta: float) -> void:
 func _follow_player() -> void:
 	if tex == null or campus == null:
 		return
+	if _room_mode:
+		return                      # 房间整间显示，不裁剪也不跟随
 	var c := _local_local_pos()
 	_view_origin = c - _view_size * 0.5
-	_view_origin.x = clampf(_view_origin.x, 0.0, maxf(0.0, CAMPUS_LOCAL.x - _view_size.x))
-	_view_origin.y = clampf(_view_origin.y, 0.0, maxf(0.0, CAMPUS_LOCAL.y - _view_size.y))
+	_view_origin.x = clampf(_view_origin.x, 0.0, maxf(0.0, _map_size.x - _view_size.x))
+	_view_origin.y = clampf(_view_origin.y, 0.0, maxf(0.0, _map_size.y - _view_size.y))
 	if _atlas != null:
 		# 底图是校园的一半分辨率（1696×3200），裁切区域也要折半
 		_atlas.region = Rect2(_view_origin * 0.5, _view_size * 0.5)
+
+
+## 切到房间：底图换成房间平面图，整间铺满，坐标从房间左上角算起
+func set_room(room_tex: Texture2D, origin_local: Vector2, room_local: Vector2) -> void:
+	if room_tex == null or room_local.x < 1.0 or room_local.y < 1.0:
+		return
+	_room_mode = true
+	_room_origin = origin_local
+	_map_size = room_local
+	_view_origin = Vector2.ZERO
+	_view_size = room_local
+	tex = room_tex
+	_buildings.clear()
+	if _atlas == null:
+		_build_image_node()
+	else:
+		_atlas.atlas = room_tex
+		_atlas.region = Rect2(Vector2.ZERO, room_tex.get_size())
+	if _img != null and is_instance_valid(_img):
+		_img.texture = _atlas
+	queue_redraw()
+
+
+## 回到校园
+func clear_room() -> void:
+	if not _room_mode:
+		return
+	_room_mode = false
+	_room_origin = Vector2.ZERO
+	_map_size = CAMPUS_LOCAL
+	_view_size = VIEW_CELLS * CELL_PX
+	_view_origin = Vector2.ZERO
+	tex = _campus_tex
+	if _atlas != null and _campus_tex != null:
+		_atlas.atlas = _campus_tex
+		_atlas.region = Rect2(Vector2.ZERO, _campus_tex.get_size() * 0.5)
+	if _img != null and is_instance_valid(_img):
+		_img.texture = _atlas
+	_collect_buildings()
+	queue_redraw()
 
 
 func _local_local_pos() -> Vector2:
@@ -149,6 +200,8 @@ func _draw_names() -> void:
 
 ## 相机可见范围
 func _draw_viewport_box() -> void:
+	if _room_mode:
+		return                      # 房间整间可见，不需要「你看到了哪一块」的框
 	var cam := get_viewport().get_camera_2d()
 	if cam == null:
 		return
@@ -191,7 +244,7 @@ func _to_mini(world_pos: Vector2) -> Vector2:
 
 
 func _to_mini_local(local_pos: Vector2) -> Vector2:
-	return (local_pos - _view_origin) / _view_size * size
+	return (local_pos - _room_origin - _view_origin) / _view_size * size
 
 
 func _gui_input(event: InputEvent) -> void:

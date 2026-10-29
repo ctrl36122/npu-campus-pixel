@@ -48,11 +48,16 @@ var _addr_edit: LineEdit
 var _net_info: Label
 var _hero_btns: Array[Button] = []
 var _mini: Control
+## 当前世界（Arena），进/出房间时要把小地图切成房间的
+var _arena: Node
+var _mini_title: Label
 var _mini_panel: Control
 var _touch_pad: Control
 ## 小地图实际尺寸（手机上会缩小，见 _ready）
 var _mini_w: float = MINI_W
 var _mini_h: float = MINI_H
+## 校园模式下的面板宽度：横屏 200，竖屏 132。从房间回来时按它复位。
+var _base_mini_w: float = MINI_W
 var _map: Control
 var _chat: Node
 var _clock: Label
@@ -82,6 +87,7 @@ func _ready() -> void:
 		# 手机屏小：小地图缩到 140 宽（保持 424:800 比例），不然右上角占掉半屏
 		_mini_w = 132.0
 		_mini_h = 132.0 * MINI_H / MINI_W
+		_base_mini_w = 132.0
 	# 专用服务器（--server）：没有窗口也没有 UI，直接开房等别人连进来。
 	# 世界由 SessionFlow 在 session_ready 里建，所以这里什么都不用画。
 	if Net.is_dedicated:
@@ -714,10 +720,10 @@ func _build_map_ui(arena: Node) -> void:
 	head.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vb.add_child(head)
 
-	var title := _label("校园地图", 13, "#dbe6f0", true)
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	head.add_child(title)
+	_mini_title = _label("校园地图", 13, "#dbe6f0", true)
+	_mini_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_mini_title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	head.add_child(_mini_title)
 
 	var compass := _label("N", 12, "#e2b45c", true)
 	compass.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -733,6 +739,11 @@ func _build_map_ui(arena: Node) -> void:
 	vb.add_child(_mini)
 	_mini.call("setup", tex, camp, _font)
 	_mini.connect("pressed_open", _open_map)
+
+	# 进/出建筑内景时把右上角那块换成房间平面图（房间是横的，面板高度要跟着改）
+	_arena = arena
+	if arena.has_signal("room_changed"):
+		arena.room_changed.connect(_on_room_changed)
 
 	_map = Control.new()
 	_map.name = "WorldMap"
@@ -759,6 +770,51 @@ func _map_panel_box() -> StyleBoxFlat:
 	sb.shadow_size = 10
 	sb.shadow_offset = Vector2(0, 4)
 	return sb
+
+
+## 房间 / 校园 切换小地图。房间比校园小得多，整间一次铺满，
+## 另外房间是横的（910×754），面板按它的比例重新定高，不然会被压扁。
+func _on_room_changed(inside: bool) -> void:
+	if _mini == null or not is_instance_valid(_mini) or _arena == null:
+		return
+	if inside:
+		var rm: Node = _arena.get("room")
+		if rm == null or not is_instance_valid(rm):
+			return
+		var tex: Texture2D = rm.get("minimap_tex")
+		var sz: Vector2 = rm.get("size_px")
+		if tex == null or sz.y < 1.0:
+			return
+		_mini.call("set_room", tex, rm.position, sz)
+		if _mini_title != null and is_instance_valid(_mini_title):
+			_mini_title.text = String(rm.get("data").get("name", "内景"))
+		_resize_mini(_mini_w, _mini_w * sz.y / sz.x)
+	else:
+		_mini.call("clear_room")
+		if _mini_title != null and is_instance_valid(_mini_title):
+			_mini_title.text = "校园地图"
+		_resize_mini(_base_mini_w, _base_mini_w * MINI_H / MINI_W)
+
+
+## 现在是否在建筑内景里（房间没有校园图，M 键要挡掉）
+func _in_room() -> bool:
+	return _arena != null and is_instance_valid(_arena) and bool(_arena.get("in_room"))
+
+
+func _resize_mini(w: float, h: float) -> void:
+	if w < 40.0 or h < 40.0:
+		return
+	_mini_w = w
+	_mini_h = h
+	if _mini != null and is_instance_valid(_mini):
+		_mini.custom_minimum_size = Vector2(w, h)
+		_mini.size = Vector2(w, h)
+	if _mini_panel != null and is_instance_valid(_mini_panel):
+		var panel_w: float = w + MINI_PAD * 2.0
+		var panel_h: float = h + MINI_PAD * 2.0 + MINI_HEAD + 6.0
+		_mini_panel.offset_left = -12.0 - panel_w
+		_mini_panel.offset_right = -12.0
+		_mini_panel.offset_bottom = _mini_panel.offset_top + panel_h
 
 
 func _free_map_ui() -> void:
@@ -834,7 +890,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if key == KEY_TAB:
 		_toggle_settings(not _settings.visible)
 		get_viewport().set_input_as_handled()
-	elif key == KEY_M and _online:
+	elif key == KEY_M and _online and not _in_room():
 		# M 打开全屏校园地图（也等价于点右上角小地图）
 		if _map != null and is_instance_valid(_map) and _map.visible:
 			_close_map()

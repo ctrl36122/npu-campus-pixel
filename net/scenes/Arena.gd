@@ -147,9 +147,15 @@ func _ready() -> void:
 	_collect_xray()
 	queue_redraw()
 
-	# 调试：启动即进房间（正常玩法按 R）
+	_collect_dorms()
+	_build_door_hint()
+
+	# 调试：启动即进房间（正常玩法走到宿舍旁按 E）
 	if OS.has_environment("XGD_ROOM"):
 		_auto_enter_room()
+	# 调试：模拟按一次 E，验证的是「按键 → 就近判定 → 进房间」整条链路
+	if OS.has_environment("XGD_TEST_E"):
+		_auto_press_e()
 
 
 ## 生成校园 NPC。挂在 Objects 下是为了和建筑/树共用 y 排序（走到树后面会被遮住）。
@@ -770,6 +776,7 @@ func _update_daynight() -> void:
 func _process(delta: float) -> void:
 	_update_xray(delta)
 	_update_daynight()
+	_update_door_hint(delta)
 
 
 ## 有人被楼盖住 → 在楼身上挖一个「透视窗」（只透玩家周围一小块，楼体其余实心），
@@ -1233,7 +1240,13 @@ func _find_safe(local: Vector2) -> Vector2:
 ##
 ## 进出房间目前绑在 R 键上，等「走到宿舍门口自动进」做好了再换成触发器。
 const RoomScript := preload("res://net/scenes/Room.gd")
+signal room_changed(inside: bool)
+
 const ROOM_ORIGIN := Vector2(0, -1500)      # 格：校园北界（y=0）之外
+## 走到宿舍楼旁多少格以内显示「按 E 进入」
+const DOOR_RADIUS := 8.0
+## 门口检测跑得多勤（不必每帧扫 20 栋楼）
+const DOOR_CHECK_HZ := 8.0
 ## 房间比校园开阔得多（一个机位就顶几个人宽），校园那档视距进去只能看到一小块
 const ROOM_ZOOM := 0.85
 const CAMPUS_ZOOM := 1.2
@@ -1244,6 +1257,12 @@ var _return_cell := Vector2.ZERO
 ## 本地玩家相机原来的边界。相机被限制在校园范围内（0..6784 / 0..12800），
 ## 而房间远在校园之外 —— 不临时放开的话，画面会死死卡在校园边缘不动。
 var _cam_limit := {}
+## 可进入的建筑：[{name, rect}]。rect 是格坐标的包围盒外扩前原尺寸。
+var _dorms: Array = []
+var _near_dorm := ""
+var _room_title := ""
+var _door_hint: Label
+var _door_clock := 0.0
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -1252,12 +1271,13 @@ func _unhandled_input(event: InputEvent) -> void:
 	var k := event as InputEventKey
 	if not k.pressed or k.echo:
 		return
-	if k.keycode == KEY_R:
+	if k.keycode == KEY_E:
 		if in_room:
 			leave_room()
-		else:
+			get_viewport().set_input_as_handled()
+		elif _near_dorm != "":
 			enter_room("res://assets/rooms/game_lounge.json")
-		get_viewport().set_input_as_handled()
+			get_viewport().set_input_as_handled()
 
 
 ## 把一个房间挂到校园的 Objects 下并把人送进去。成功返回 true。
@@ -1298,6 +1318,11 @@ func enter_room(path: String) -> bool:
 	# 房间没有烘焙光照图，全屏夜幕会把它压成一片黑
 	if _night_dark != null:
 		_night_dark.visible = false
+	_room_title = String(room.get("data").get("name", "房间"))
+	if _door_hint != null:
+		_door_hint.visible = true
+	_door_clock = 0.0
+	room_changed.emit(true)
 	return true
 
 
@@ -1314,6 +1339,31 @@ func leave_room() -> void:
 		me.set("_cam_zoom_target", CAMPUS_ZOOM)
 	if room != null:
 		room.visible = false
+	if _door_hint != null:
+		_door_hint.visible = false
+	_door_clock = 0.0
+	room_changed.emit(false)
+
+
+## 调试用：真的注入一次 E 键事件，走 _unhandled_input 那条路。
+## 直接调 enter_room() 测不出「按键到底有没有被吞掉」这类问题。
+func _auto_press_e() -> void:
+	var times: int = maxi(1, OS.get_environment("XGD_TEST_E").to_int())
+	await get_tree().create_timer(3.0).timeout
+	for i in range(times):
+		var down := InputEventKey.new()
+		down.keycode = KEY_E
+		down.physical_keycode = KEY_E
+		down.pressed = true
+		Input.parse_input_event(down)
+		await get_tree().create_timer(0.12).timeout
+		var up := InputEventKey.new()
+		up.keycode = KEY_E
+		up.physical_keycode = KEY_E
+		up.pressed = false
+		Input.parse_input_event(up)
+		await get_tree().create_timer(1.6).timeout
+		print("[arena] 第 %d 次注入 E 之后 in_room=%s" % [i + 1, in_room])
 
 
 ## 等玩家 spawn 出来再进房间（联机会话建立有延迟）
@@ -1347,6 +1397,84 @@ func _set_cam_limit(avatar: Node, free_it: bool) -> void:
 		_cam_limit.clear()
 	cam.call("reset_smoothing")
 	cam.call("force_update_scroll")
+
+
+## 收集可进入的宿舍楼。命名规则：带「座」或「宿舍」，排除餐厅/食堂 ——
+## 星天苑 A~H、云天苑 A~F、海天苑 1/2 号楼都符合，星天苑北餐厅之类不会误入。
+func _collect_dorms() -> void:
+	_dorms.clear()
+	for b in MapData.buildings():
+		var n := str(b.get("name", ""))
+		if not (n.contains("座") or n.contains("宿舍")):
+			continue
+		if n.contains("餐厅") or n.contains("食堂"):
+			continue
+		var w := float(b.get("w_cells", 0.0))
+		var h := float(b.get("h_cells", 0.0))
+		if w <= 0.0 or h <= 0.0:
+			continue
+		var cen: Vector2 = b.get("cen", Vector2.ZERO)
+		_dorms.append({
+			"name": n,
+			"rect": Rect2(cen - Vector2(w, h) * 0.5, Vector2(w, h)),
+		})
+	print("[arena] 可进入的建筑 %d 栋" % _dorms.size())
+
+
+func _build_door_hint() -> void:
+	var layer := CanvasLayer.new()
+	layer.name = "DoorHint"
+	layer.layer = 5
+	add_child(layer)
+
+	_door_hint = Label.new()
+	_door_hint.visible = false
+	_door_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_door_hint.add_theme_font_size_override("font_size", 20)
+	_door_hint.add_theme_color_override("font_color", Color("#eaf3fb"))
+	_door_hint.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
+	_door_hint.add_theme_constant_override("outline_size", 6)
+	_door_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_door_hint.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+	_door_hint.offset_left = -340.0
+	_door_hint.offset_right = 340.0
+	_door_hint.offset_top = -196.0
+	_door_hint.offset_bottom = -156.0
+	layer.add_child(_door_hint)
+
+
+## 每隔一小段时间看一次：人在哪栋宿舍旁 / 是否已经在房间里。
+## 不每帧扫是有原因的 —— 20 栋楼 × 每帧，在一台老机器上就是白烧的 CPU。
+func _update_door_hint(delta: float) -> void:
+	if _door_hint == null:
+		return
+	_door_clock -= delta
+	if _door_clock > 0.0:
+		return
+	_door_clock = 1.0 / DOOR_CHECK_HZ
+
+	if in_room:
+		_door_hint.visible = true
+		_door_hint.text = "按 E 离开「%s」" % _room_title
+		return
+
+	var me: Node = _local_avatar()
+	if me == null:
+		_near_dorm = ""
+		_door_hint.visible = false
+		return
+
+	var cell: Vector2 = (me as Node2D).position / TS
+	var hit := ""
+	for d in _dorms:
+		var r: Rect2 = d["rect"]
+		if r.grow(DOOR_RADIUS).has_point(cell):
+			hit = String(d["name"])
+			break
+	_near_dorm = hit
+	_door_hint.visible = hit != ""
+	if hit != "":
+		_door_hint.text = "%s · 按 E 进入「游戏搭子空间」" % hit
 
 
 func _local_avatar() -> Node:

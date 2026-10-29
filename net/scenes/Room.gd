@@ -26,6 +26,8 @@ var glow: Node2D             ## 发光层（additive，画在家具之上）
 var solids: StaticBody2D     ## 家具/边界的碰撞
 var spawn_px := Vector2.ZERO
 var size_px := Vector2.ZERO
+## 小地图底图（4px/格），右上角那块面板直接用它
+var minimap_tex: Texture2D
 
 
 ## 读一份房间数据并搭好场景。失败返回 false，调用方决定怎么兜底。
@@ -92,6 +94,7 @@ func _build() -> void:
 	for item in data.get("seats", []):
 		_add_prop("chair", item)
 
+	minimap_tex = _bake_minimap()
 	_setup_glow()
 	_add_bounds()
 
@@ -261,6 +264,81 @@ func _bake_floor() -> Image:
 			img.fill_rect(Rect2i(ex + 3, ly, ew - 6, 1), Color(1, 1, 1, 0.05))
 
 	return img
+
+
+## 小地图：4px/格，比地板图（8px/格）低一半分辨率，跟校园小地图同规格。
+## 不直接缩地板图 —— 家具是独立节点、不在图里，缩出来只有一块空地。
+## 这里按类型重新铺一遍色块，读图的人一眼能认出机位区、会议区和白板。
+func _bake_minimap() -> Texture2D:
+	var px := 4.0
+	var w := int(round(size_px.x / TS * px))
+	var h := int(round(size_px.y / TS * px))
+	if w < 8 or h < 8:
+		return null
+	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
+	# 小地图是「示意图」不是「截图」：底色抬到中等亮度，家具用饱和色块，
+	# 200px 宽的面板上一眼能分出机位区 / 会议区 / 白板。照搬地板的深棕只会糊成一团黑。
+	img.fill(Color("463e34"))
+
+	var k := px                # 格 → 小地图像素（data 里全是格坐标，直接乘 4）
+	var COL := {
+		"wall": Color("74839b"),
+		"table": Color("9a7a52"),
+		"desk": Color("5d93cc"),
+		"board": Color("eef4fa"),
+		"vending": Color("a463b4"),
+		"block": Color("866c4a"),
+		"deco": Color("5e7a58"),
+		"pit": Color("232830"),
+	}
+
+	# 工位区地毯先铺一层，跟大地图对得上
+	var desk_box := Rect2()
+	for item in data.get("props", []):
+		var p: Dictionary = item
+		if String(p.get("k", "")) != "desk":
+			continue
+		var r := Rect2(float(p["x"]), float(p["y"]), float(p["w"]), float(p["h"]))
+		desk_box = r if desk_box.size == Vector2.ZERO else desk_box.merge(r)
+	if desk_box.size != Vector2.ZERO:
+		_fill_cells(img, desk_box.grow(6.0), k, Color("34414f"))
+
+	for item in data.get("walls", []):
+		var p: Dictionary = item
+		_fill_cells(img, Rect2(float(p["x"]), float(p["y"]), float(p["w"]), float(p["h"])), k, COL["wall"])
+	for item in data.get("props", []):
+		var p: Dictionary = item
+		var kind := String(p.get("k", ""))
+		var rect := Rect2(float(p["x"]), float(p["y"]), float(p["w"]), float(p["h"]))
+		_fill_cells(img, rect, k, COL.get(kind, Color("888888")))
+		if kind == "desk":
+			# 屏幕画个亮点，小地图上也看得出哪几个机位
+				_fill_cells(img, Rect2(rect.position.x + rect.size.x * 0.26, rect.position.y + 0.8,
+				rect.size.x * 0.48, 1.6), k, Color("b8f0ff"))
+	for item in data.get("seats", []):
+		var s: Dictionary = item
+		_fill_cells(img, Rect2(float(s["x"]) + 0.6, float(s["y"]) + 3.0, 2.1, 2.6), k, Color("cf9a5c"))
+
+	# 出入口
+	var e: Dictionary = data.get("exit", {})
+	if not e.is_empty():
+		_fill_cells(img, Rect2(float(e["x"]), float(e["y"]), float(e["w"]), float(e["h"])), k, Color("9fb3c6"))
+
+	return ImageTexture.create_from_image(img)
+
+
+func _fill_cells(img: Image, r: Rect2, k: float, col: Color) -> void:
+	var x0 := int(floor(r.position.x * k))
+	var y0 := int(floor(r.position.y * k))
+	var x1 := int(ceil(r.end.x * k))
+	var y1 := int(ceil(r.end.y * k))
+	x0 = maxi(0, x0)
+	y0 = maxi(0, y0)
+	x1 = mini(img.get_width(), x1)
+	y1 = mini(img.get_height(), y1)
+	if x1 <= x0 or y1 <= y0:
+		return
+	img.fill_rect(Rect2i(x0, y0, x1 - x0, y1 - y0), col)
 
 
 ## 一块地毯：深色底 + 一圈包边 + 细织纹
