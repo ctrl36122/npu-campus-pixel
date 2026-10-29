@@ -133,9 +133,16 @@ func host_game(port: int = DEFAULT_PORT, max_players: int = MAX_PLAYERS, use_upn
 	# 把明文 ws 转发到本机的 _ws_port。
 	if is_dedicated or OS.has_environment("XGD_WS_SERVER"):
 		var wsp := WebSocketMultiplayerPeer.new()
-		var werr: Error = wsp.create_server(_ws_port)
+		# 专用服务器前面必然有一层反向代理（Caddy/nginx 把 443 解开再转 9080），
+		# 所以只监听本机就够 —— 绑 0.0.0.0 会让 9080 直接对公网敞开，
+		# 绕过代理的 TLS 和限流，等于多开一扇没人看的门。
+		# 裸机直连（没有反代）可以用 XGD_WS_BIND=0.0.0.0 覆盖。
+		var bind := "127.0.0.1" if is_dedicated else "*"
+		if OS.has_environment("XGD_WS_BIND"):
+			bind = OS.get_environment("XGD_WS_BIND")
+		var werr: Error = wsp.create_server(_ws_port, bind)
 		if werr != OK:
-			last_error = "无法在 TCP %d 上开 WebSocket（错误 %d）" % [_ws_port, werr]
+			last_error = "无法在 TCP %s:%d 上开 WebSocket（错误 %d）" % [bind, _ws_port, werr]
 			print("[net] ", last_error)
 			return werr
 		multiplayer.multiplayer_peer = wsp
