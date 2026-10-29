@@ -12,8 +12,12 @@
 !/build/deploy/xgd.service
 !/build/deploy/README.md
 
-# ── 本机私有配置（内含真实服务器地址，不要提交）────────
+# ── 本机私有配置（内含真实服务器地址 / 签名密钥密码）──────
 assets/server.local.json
+export_presets.cfg
+export_presets.cfg.*
+!export_presets.example.cfg
+*.keystore
 
 # ── 开发期临时文件 ────────────────────────────────────
 _scratch/

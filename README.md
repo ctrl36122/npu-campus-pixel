@@ -111,7 +111,7 @@ sxgd-game/
 ├── scripts/                   渲染与着色器（楼体 2.5D、窗光、光照图、昼夜）
 ├── addons/godot_ai/           开发期用的编辑器 AI 插件，不影响游戏，可以整个删掉
 ├── tools/                     构建与烘焙脚本（世界场景生成、字体子集、图标、小地图底图）
-└── export_presets.cfg         Web / Windows / Android 三套导出预设
+└── export_presets.example.cfg  三套导出预设（复制成 export_presets.cfg 再填签名，别提交密钥）
 ```
 
 **改地图** — 编辑 `assets/world.json` 后重新烘焙场景：
@@ -126,7 +126,9 @@ godot --headless --path . --script tools/build_world_scene.gd --force
 python tools/make_font.py
 ```
 
-**导出** — Godot 里 `项目 → 导出`，三套预设都在 `export_presets.cfg` 里配好了。
+**导出** — 先把 `export_presets.example.cfg` 复制成 `export_presets.cfg`，填上自己生成的
+Android 签名密钥库路径与密码（这个文件被 git 忽略，不要把密钥提交上来），
+之后 Godot 里 `项目 → 导出` 就有三套预设了。
 
 ## 实现上几个关键选择
 
