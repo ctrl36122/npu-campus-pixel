@@ -1,0 +1,22 @@
+[gd_scene format=3 uid="uid://d3b44jbtd07bm"]
+
+[ext_resource type="Script" uid="uid://cpwkxy2u6o7tq" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="PackedScene" path="res://scenes/world.tscn" id="2_world"]
+[ext_resource type="PackedScene" path="res://scenes/player.tscn" id="3_player"]
+
+[node name="Main" type="Node2D" unique_id=1633900005]
+script = ExtResource("1_main")
+
+[node name="World" parent="." unique_id=1978833380 instance=ExtResource("2_world")]
+position = Vector2(-2007, -160)
+
+[node name="Player" parent="." unique_id=1320869970 instance=ExtResource("3_player")]
+position = Vector2(1568, 480)
+
+[node name="EditorHint" type="Label" parent="." unique_id=7171226]
+offset_left = -279.0
+offset_top = -291.0
+offset_right = 689.0
+offset_bottom = -207.0
+theme_override_font_sizes/font_size = 20
+text = "地图已做成可编辑场景 scenes/world.tscn —— 打开它就能拖楼/拖树/加物件；按 F5 运行"

@@ -1,0 +1,35 @@
+; Engine configuration file.
+; Godot Multiplayer Starter
+; Server-authoritative ENet co-op: host or join, a ready-up lobby, rounds,
+; predicted movement with reconciliation, interpolation, chat and a lag dial.
+; Run two instances: --host and --join=127.0.0.1 (Debug > Customize Run Instances).
+
+config_version=5
+[application]
+config/name="Godot Multiplayer Starter"
+config/description="A server-authoritative co-op multiplayer starter for Godot 4: lobby, prediction, reconciliation and validation. From codingquests.io"
+run/main_scene="res://scenes/Boot.tscn"
+config/features=PackedStringArray("4.7", "GL Compatibility")
+[autoload]
+Net="*res://autoload/Net.gd"
+NetDebug="*res://autoload/NetDebug.gd"
+NetTick="*res://autoload/NetTick.gd"
+GameState="*res://scenes/GameState.tscn"
+SessionFlow="*res://autoload/SessionFlow.gd"
+[display]
+window/size/viewport_width=960
+window/size/viewport_height=540
+window/stretch/mode="canvas_items"
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+environment/defaults/default_clear_color=Color(0.05, 0.06, 0.08, 1)
+[input]
+toggle_inspector={"deadzone": 0.2, "events": [Object(InputEventKey,"physical_keycode":4194334)]}
+toggle_lag_dial={"deadzone": 0.2, "events": [Object(InputEventKey,"physical_keycode":4194335)]}
+move_left={"deadzone": 0.2, "events": [Object(InputEventKey,"physical_keycode":65)]}
+move_right={"deadzone": 0.2, "events": [Object(InputEventKey,"physical_keycode":68)]}
+move_up={"deadzone": 0.2, "events": [Object(InputEventKey,"physical_keycode":87)]}
+move_down={"deadzone": 0.2, "events": [Object(InputEventKey,"physical_keycode":83)]}
+sprint={"deadzone": 0.2, "events": [Object(InputEventKey,"physical_keycode":4194325)]}
+emote={"deadzone": 0.2, "events": [Object(InputEventKey,"physical_keycode":32)]}

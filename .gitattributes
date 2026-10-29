@@ -1,0 +1,23 @@
+# 统一换行，避免 Windows / Linux 来回改文件
+* text=auto eol=lf
+
+# 二进制资源不参与换行转换与 diff
+*.png binary
+*.jpg binary
+*.ico binary
+*.ttf binary
+*.otf binary
+*.wav binary
+*.ogg binary
+*.pck binary
+*.zip binary
+*.keystore binary
+
+# Godot 场景/资源用文本 diff 没意义，但保留可读
+*.tscn text
+*.tres text
+
+# GitHub 语言统计不要被这些带偏
+*.import linguist-generated=true
+*.uid linguist-generated=true
+addons/** linguist-vendored

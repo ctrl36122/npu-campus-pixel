@@ -1,0 +1,1220 @@
+extends Node2D
+## 联机共享世界：校园地图 + 玩家。
+##
+## 校园是 scenes/world.tscn（从网页版烘出来的静态场景：28 块地面、53 栋楼、1531 个装饰、
+## 448 个水面碰撞）。它完全静态，所以每个客户端各自实例化一份即可，不需要走网络同步——
+## 网络上只传玩家。
+##
+## 两个坐标系的换算要注意：
+##   world.tscn 里的坐标是「8px/格」的原生像素（世界 3392×6400）；
+##   玩家角色是 32×48，直接放进去会变成 6 格高的巨人，
+##   所以整个校园放大 CAMPUS_SCALE 倍（2×）→ 视觉上等于 16px/格，玩家约 3 格高。
+
+const PLAYER: PackedScene = preload("res://net/scenes/Player.tscn")
+const CAMPUS: PackedScene = preload("res://scenes/world.tscn")
+const NPC: PackedScene = preload("res://net/scenes/Npc.tscn")
+const LabelsScript := preload("res://scripts/labels.gd")
+const MapData := preload("res://scripts/ui/map_data.gd")
+
+## 校园里的 NPC。位置取自 world.json 的 npc 出生点，两个压在楼里的已就近挪开
+## （用 Python 遍历建筑多边形和水面验证过）。
+const NPC_SPAWNS: Array = [
+	{"name": "早八人", "cell": Vector2(230, 270), "hero": "adam", "radius": 26.0, "speed": 1.0},
+	{"name": "阅览常客", "cell": Vector2(247, 392), "hero": "lucy", "radius": 20.0, "speed": 0.6},
+	{"name": "散步党", "cell": Vector2(266, 305), "hero": "ash", "radius": 44.0, "speed": 1.15},
+	{"name": "干饭人", "cell": Vector2(285, 184), "hero": "nancy", "radius": 30.0, "speed": 1.3},
+	{"name": "夜跑选手", "cell": Vector2(88, 270), "hero": "ash", "radius": 52.0, "speed": 1.6},
+	{"name": "考研人", "cell": Vector2(157, 344), "hero": "lucy", "radius": 22.0, "speed": 0.75},
+]
+
+const CAMPUS_SCALE: float = 2.0
+const TS: float = 8.0
+## 出生点（格）：教学区之间的开阔路口。
+## 这个点是用 Python 遍历 world.json 挑出来的——本点和周围 8 个散开位置
+## 都不在任何建筑轮廓或水面里（北门那个点周围有楼，玩家出生就会被楼压住看不见）。
+## 出生点（格）。显示调试：XGD_SPAWN="x,y" 可临时改出生点（截图、验景用），正常玩不受影响。
+const SPAWN_CELL: Vector2 = Vector2(220, 240)
+
+
+func _spawn_cell() -> Vector2:
+	if OS.has_environment("XGD_SPAWN"):
+		var parts := OS.get_environment("XGD_SPAWN").split(",")
+		if parts.size() == 2 and parts[0].is_valid_float() and parts[1].is_valid_float():
+			return Vector2(float(parts[0]), float(parts[1]))
+	return SPAWN_CELL
+## 相邻玩家的散开半径（校园局部像素，未放大）= 10 格。
+## 人多时靠这个半径一圈圈往外排，避免几十个人叠成一坨。
+const SPREAD: float = 80.0
+## 被楼遮住时的透视方式：只在玩家身边挖一个柔和椭圆「透视窗」（楼体其余部分
+## 保持实心），而不是整栋楼变半透明 —— 后者夜里会把楼后被路灯照亮的路面整片透出来。
+const XRAY_SHADER := preload("res://net/shaders/building_xray.gdshader")
+const XRAY_RX: float = 17.0       # 透视窗半宽（贴图局部像素）
+const XRAY_RY: float = 24.0       # 透视窗半高
+const XRAY_HOLE_ALPHA: float = 0.20
+
+## 小地图：1 像素 = 1 格，整张校园 424×800
+const CELLS: Vector2 = Vector2(424, 800)
+## 底图分辨率：每格 4 像素（424×800 → 1696×3200）。比原来 1px/格 清晰得多，
+## 全屏地图放大到 8× 也不糊。
+const MINI_PXP: int = 4
+## 校园局部像素尺寸（8px/格）
+const LOCAL_PX: Vector2 = Vector2(3392, 6400)
+## 小地图缓存（首次启动烘焙，之后直接读；分辨率变了要换文件名）
+const MINIMAP_CACHE: String = "user://minimap_cache_v20.png"
+
+@onready var players: Node2D = $Players
+@onready var spawner: MultiplayerSpawner = $PlayerSpawner
+
+var campus: Node2D
+var labels: CanvasLayer
+## 小地图纹理，UI 层（online_boot）读取它来做右上角小地图与全屏地图
+var minimap_tex: Texture2D
+## 透视墙：每栋楼的 Sprite + 它的脚线 y（局部坐标）
+## 玩家走到楼"后面"（被 2.5D 立面盖住）时把这栋楼调成半透明，否则完全看不见自己
+var _xray: Array = []
+
+## 夜晚视觉（昼夜系统 DayNight 驱动）：
+##  - 夜幕叠加层：独立画布（layer 1），盖在世界之上、UI 之下，把整张校园压暗染色
+##  - 夜灯层：独立画布（layer 2），叠加在夜幕之上、用加色混合画建筑窗户暖光，
+##    因为是独立画布、不参与夜幕的乘色，所以夜里灯是真亮的
+##  - 楼名标注抬到 layer 3，夜里也看得清
+var _night_dark: CanvasLayer
+var _night_dark_rect: ColorRect   ## 夜幕：全屏矩形 + shader（按光照图决定哪里不压暗）
+var _night_warm_rect: ColorRect   ## 路灯光照区的暖色补光（add 混合）
+var _dark_mat: ShaderMaterial
+var _warm_mat: ShaderMaterial
+var _glow_root: Node2D
+var _lamp_tex: Texture2D          ## 路灯：灯头光晕（白图，染暖色）
+var _lamp_glows: Array = []       ## 每盏路灯一组光（带轻微闪烁 phase）
+var _glow_tex_empty: Texture2D    ## 没有烘焙窗光的楼用的 1×1 透明贴图
+## MC 式格子光照图：路灯当光源做 flood-fill 传播，夜里用它把路面"点亮"
+var _light_tex: Texture2D
+var _world_origin := Vector2.ZERO
+var _world_size := Vector2.ONE
+## 昼夜单例（运行时通过 Engine 取，避免编辑器脚本缓存没刷新时解析报错）
+var _dn: Object
+
+
+func _ready() -> void:
+	# 1) 挂校园
+	campus = CAMPUS.instantiate()
+	campus.name = "Campus"
+	campus.scale = Vector2(CAMPUS_SCALE, CAMPUS_SCALE)
+	add_child(campus)
+
+	# 2) 把玩家容器挪进校园的 Objects 层。
+	#    y 排序只在「同一个父节点的直接子节点」之间比较，
+	#    玩家如果留在 Arena 下，就会整体盖在所有建筑上面（或全被盖住）。
+	#    ⚠️ players 本身也必须 y_sort_enabled：Godot 4 会把嵌套的 y-sort 容器
+	#    展开合并到父级那一趟排序里，角色才能和楼、树逐个体比较。
+	#    不设的话玩家容器整体按自身 y=0 排，等于永远在所有建筑后面。
+	var objs: Node2D = campus.get_node_or_null("Objects")
+	if objs != null:
+		players.reparent(objs)
+		# reparent 为保持全局变换会自动给容器补 scale=0.5，这会让角色的
+		# position 变成「全局值存在半尺度空间里」——y-sort 比较的是各父空间
+		# 的局部 y，两套值域混用导致人物永远画在楼上面（楼后也挡不住）。
+		# 归一成 1：Players 空间 = Objects 空间 = 校园局部坐标，
+		# 角色视觉尺寸靠 Player.tscn 自身的 scale=0.5 保持不变。
+		players.scale = Vector2.ONE
+		players.y_sort_enabled = true
+		spawner.spawn_path = spawner.get_path_to(players)
+
+	# 专用服务器（--server）：只跑「碰撞 + 玩家生成 + 同步」，整套视觉全部跳过。
+	# 无头模式没有渲染，光照图/小地图/夜灯既用不上又要吃掉几十秒 CPU 和几百 MB 内存。
+	if Net.is_dedicated:
+		queue_redraw()
+		return
+
+	# 3) 楼名标注（和网页版一样：缩放够近才显示，挂在楼体顶部）
+	labels = CanvasLayer.new()
+	labels.name = "BuildingLabels"
+	labels.set_script(LabelsScript)
+	add_child(labels)
+	labels.call("setup_from_world", campus)
+
+	# 3.5) 昼夜视觉：夜幕叠加 + 建筑夜灯（夜灯强度/染色由 DayNight 单例每帧驱动）
+	_setup_daynight()
+
+	# 4) 小地图纹理（整张校园缩略图，给 UI 用）
+	minimap_tex = _build_minimap_texture()
+
+	# 5) NPC 闲逛（纯本地，不进 "players" 分组，免得被当成真人玩家处理）
+	_spawn_npcs()
+	_setup_wildlife()
+	_setup_lamps()
+
+	_collect_xray()
+	queue_redraw()
+
+
+## 生成校园 NPC。挂在 Objects 下是为了和建筑/树共用 y 排序（走到树后面会被遮住）。
+func _setup_wildlife() -> void:
+	## 水波层 + 小动物（猫/鸟/蝴蝶），全部程序绘制、零素材
+	var wf: GDScript = load("res://net/scenes/Wildlife.gd")
+	var anchors: Array = []
+	for info in NPC_SPAWNS:
+		anchors.append((info["cell"] as Vector2) * TS)
+	# 水波层：贴在 Ground 之上、Objects 之下（先 add 再挪到 Objects 前）
+	var fx := Node2D.new()
+	fx.name = "WaterFX"
+	fx.set_script(load("res://net/scenes/WaterFX.gd"))
+	campus.add_child(fx)
+	fx.call("setup", _water_rects())
+	var objs: Node2D = campus.get_node_or_null("Objects")
+	if objs != null:
+		campus.move_child(fx, objs.get_index())
+		# 猫：挂进 Objects 参与 y 排序，走到楼后会被挡住
+		var ground: Node2D = wf.new()
+		ground.name = "WildlifeGround"
+		ground.set("mode", "ground")
+		objs.add_child(ground)
+		ground.call("setup", anchors)
+	# 鸟 + 蝴蝶：空中层，永远在人/楼上面
+	var air: Node2D = wf.new()
+	air.name = "WildlifeAir"
+	air.set("mode", "air")
+	campus.add_child(air)
+	air.call("setup", anchors)
+
+
+func _water_rects() -> Array:
+	var f := FileAccess.open("res://assets/world.json", FileAccess.READ)
+	if f == null:
+		return []
+	var parsed = JSON.parse_string(f.get_as_text())
+	if parsed is Dictionary:
+		return parsed.get("water", [])
+	return []
+
+
+## 沿真实路网放置路灯实体（位置由 OSM 路网一次性烘焙到 assets/lamps.json）。
+## 每盏是独立 Node2D 参与 y 排序（人走到灯后会被挡），并加入 props 组逃开透视墙判定。
+func _setup_lamps() -> void:
+	var objs := campus.get_node_or_null("Objects")
+	if objs == null:
+		return
+	var f := FileAccess.open("res://assets/lamps.json", FileAccess.READ)
+	if f == null:
+		return
+	var parsed = JSON.parse_string(f.get_as_text())
+	if not (parsed is Dictionary and parsed.has("lamps")):
+		return
+	var lamp_script: GDScript = load("res://net/scenes/Lamp.gd")
+	var lamps: Array = parsed["lamps"]
+	for i in lamps.size():
+		var p: Array = lamps[i]
+		var node := Node2D.new()
+		node.name = "lamp_%d" % i
+		node.set_script(lamp_script)
+		node.position = Vector2(float(p[0]), float(p[1]))
+		node.add_to_group("props")
+		objs.add_child(node)
+		node.call("setup", 1.0 if i % 2 == 0 else -1.0)
+
+
+func _spawn_npcs() -> void:
+	var objs := campus.get_node_or_null("Objects")
+	if objs == null:
+		return
+	for i in NPC_SPAWNS.size():
+		var info: Dictionary = NPC_SPAWNS[i]
+		var n: Node2D = NPC.instantiate()
+		n.name = "npc_%d" % i
+		n.position = (info["cell"] as Vector2) * TS
+		n.set("display_name", str(info["name"]))
+		n.set("hero_id", str(info["hero"]))
+		n.set("radius", float(info["radius"]))
+		n.set("move_scale", float(info["speed"]))
+		n.set("phase_seed", float(i) * 1.9)
+		objs.add_child(n)
+
+
+## 收集可透视的建筑。全部用**全局坐标**记录：
+## players 被 reparent 进放大 2 倍的校园层时，Godot 自动补了 scale=0.5，
+## 角色的 position 是半尺度局部坐标——拿它去比建筑的校园坐标会差 2 倍，
+## 结果站在楼前（南侧）的人也被判成「在楼后」，楼被错误地变半透明（穿模错觉）。
+func _collect_xray() -> void:
+	_xray.clear()
+	if campus == null:
+		return
+	var objs := campus.get_node_or_null("Objects")
+	if objs == null:
+		return
+	for n in objs.get_children():
+		if not (n is StaticBody2D):
+			continue
+		if n.is_in_group("props"):
+			continue          # 小物件不做透视墙
+		var spr: Sprite2D = n.get_node_or_null("Sprite")
+		if spr == null or spr.texture == null:
+			continue
+		# 像素级精确判定：缓存楼的贴图数据，每帧采样「玩家脚下那一点」
+		# 对应贴图像素的 alpha。alpha>0 = 楼的这个像素真的会画在人身上。
+		# 之前的贴图包围盒 / footprint x 范围都太粗：楼角、立面挤出、透明边距
+		# 都会把站在楼旁的人误判成被挡，整栋楼莫名变透明（穿模错觉）。
+		var img := spr.texture.get_image()
+		if img.is_compressed():
+			img.decompress()
+		# 楼体材质：透视窗 + 夜间压暗 + 窗光（窗光必须画在这里，才能跟着楼一起参与
+		# y 排序、被前面的楼挡住；挂在独立 CanvasLayer 上就会永远显示在最上层）
+		var mat := ShaderMaterial.new()
+		mat.shader = XRAY_SHADER
+		mat.set_shader_parameter("tex_size", Vector2(img.get_width(), img.get_height()))
+		mat.set_shader_parameter("hole_radius", Vector2(XRAY_RX, XRAY_RY))
+		mat.set_shader_parameter("hole_alpha", XRAY_HOLE_ALPHA)
+		mat.set_shader_parameter("strength", 0.0)
+		mat.set_shader_parameter("glow_tex", _glow_tex_for(spr))
+		mat.set_shader_parameter("glow_strength", 0.0)
+		mat.set_shader_parameter("night_alpha", 0.0)
+		mat.set_shader_parameter("night_color", Color(0.03, 0.05, 0.12))
+		spr.material = mat
+		_xray.append({
+			"spr": spr,
+			"img": img,
+			"mat": mat,
+			"tl": spr.get_global_transform() * spr.offset,   # 贴图左上角（全局）
+			"scale": spr.global_scale.x,                     # 均匀缩放
+			"foot": (n as Node2D).global_position.y,         # 楼脚线（footprint 南缘）
+			"a": 0.0,                                        # 0=实心，1=完全挖开
+		})
+		spr.modulate.a = 1.0
+
+
+## 楼体 Sprite 对应的烘焙窗光贴图（buildings/b{i}.png → assets/glow_winb_{i}.png）。
+## 找不到就给一张 1×1 全透明，保证 shader 的 sampler 总有东西可采。
+func _glow_tex_for(spr: Sprite2D) -> Texture2D:
+	if spr.texture != null:
+		var stem := spr.texture.resource_path.get_file().get_basename().trim_prefix("b")
+		if stem.is_valid_int():
+			var p := "res://assets/glow_winb_%s.png" % stem
+			if ResourceLoader.exists(p):
+				return load(p) as Texture2D
+	if _glow_tex_empty == null:
+		var im := Image.create(1, 1, false, Image.FORMAT_RGBA8)
+		im.fill(Color(0, 0, 0, 0))
+		_glow_tex_empty = ImageTexture.create_from_image(im)
+	return _glow_tex_empty
+
+
+# ---------------------------------------------------------------- 昼夜
+## 搭建夜幕叠加层与夜灯层。两层都是独立 CanvasLayer（有自己的画布），
+## 所以既不参与校园的 y-sort，也不会被任何乘色节点影响——夜灯要的是「真亮」。
+func _setup_daynight() -> void:
+	_dn = DayNight
+	# 夜幕：全屏矩形 + shader。shader 会采样「格子光照图」，被路灯照到的地方
+	# 夜幕变薄（露出底下的砖路/草地），没照到的地方照常压暗 —— 路灯就真的"点亮附近"了。
+	_night_dark = CanvasLayer.new()
+	_night_dark.name = "NightDark"
+	_night_dark.layer = 1
+
+	_light_tex = _build_lightmap()
+
+	_night_dark_rect = ColorRect.new()
+	_night_dark_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_night_dark_rect.color = Color(1, 1, 1, 1)
+	_night_dark_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if _light_tex != null:
+		_dark_mat = ShaderMaterial.new()
+		_dark_mat.shader = load("res://net/shaders/night_dark.gdshader") as Shader
+		_dark_mat.set_shader_parameter("lightmap", _light_tex)
+		_dark_mat.set_shader_parameter("dark_color", _dn.overlay_color() if _dn != null else Color(0.02, 0.05, 0.14, 1.0))
+		_dark_mat.set_shader_parameter("night_alpha", 0.0)
+		_dark_mat.set_shader_parameter("world_origin", _world_origin)
+		_dark_mat.set_shader_parameter("world_size", _world_size)
+		_night_dark_rect.material = _dark_mat
+	elif _dn != null:
+		# 兜底：没有光照图就退回原来的均匀压暗
+		_night_dark_rect.color = _dn.overlay_color()
+		_night_dark_rect.modulate.a = 0.0
+	_night_dark.add_child(_night_dark_rect)
+
+	# 路灯照亮区的暖色补光（add）：灯脚下的路面偏暖黄，向外渐隐
+	_night_warm_rect = ColorRect.new()
+	_night_warm_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_night_warm_rect.color = Color(1, 1, 1, 1)
+	_night_warm_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if _light_tex != null:
+		_warm_mat = ShaderMaterial.new()
+		_warm_mat.shader = load("res://net/shaders/night_light.gdshader") as Shader
+		_warm_mat.set_shader_parameter("lightmap", _light_tex)
+		_warm_mat.set_shader_parameter("strength", 0.0)
+		_warm_mat.set_shader_parameter("world_origin", _world_origin)
+		_warm_mat.set_shader_parameter("world_size", _world_size)
+		_night_warm_rect.material = _warm_mat
+	else:
+		_night_warm_rect.modulate.a = 0.0
+	_night_dark.add_child(_night_warm_rect)
+	add_child(_night_dark)
+
+	# 夜灯：独立画布 + 一个跟随相机的根节点，里面挂每栋楼的暖光
+	var glow_layer := CanvasLayer.new()
+	glow_layer.name = "NightGlow"
+	glow_layer.layer = 2
+	_glow_root = Node2D.new()
+	glow_layer.add_child(_glow_root)
+	add_child(glow_layer)
+
+	# 楼名标注抬到夜幕之上，夜里也看得清
+	if labels != null and is_instance_valid(labels):
+		labels.layer = 3
+
+	_lamp_tex = _make_lamp_light_texture()
+	_collect_glows()
+
+
+# ---------------------------------------------------------------- MC 式格子光照图
+## 照搬 Minecraft 火把的光照算法：光源有亮度等级（火把 14），向四邻 flood-fill 传播，
+## 每走一格衰减固定等级、取最大值。我们世界本来就是 8px 一格，所以直接烘一张
+## 「一个光照单元 = 一个像素」的光照图（LM_UNIT 格合成一单元，省 4 倍开销）。
+## 夜幕 shader 采样它：有光 → 夜幕变薄 → 砖路/草地露出本色，就是"路灯点亮了附近"；
+## 没光 → 照常压暗成夜色。结果缓存到 user://，改灯位或调参记得升 LIGHTMAP_VER。
+const LM_CACHE := "user://lightmap_v5.png"
+const LM_UNIT := 2        # 一个光照单元 = 2 格（16 校园像素）
+const LAMP_LEVEL := 14    # 路灯亮度等级（= MC 火把 14），灯与灯的光会连成一条光带
+const LM_FALLOFF := 2     # 每传播一单元衰减的等级 → 有效半径 ≈ 7 单元 = 14 格
+
+## 建筑占地掩码：落在楼体 footprint 多边形内的光照单元标记为 1（挡光）。
+## 光不能进入、也不能穿过这些单元 —— 楼会投下一片阴影，楼内院/楼背后保持夜里该有的黑。
+func _building_block_mask(gw: int, gh: int) -> PackedByteArray:
+	var blocked := PackedByteArray()
+	blocked.resize(gw * gh)
+	blocked.fill(0)
+	var wf := FileAccess.open("res://assets/world.json", FileAccess.READ)
+	if wf == null:
+		return blocked
+	var wd = JSON.parse_string(wf.get_as_text())
+	if not (wd is Dictionary):
+		return blocked
+	var blist := (wd as Dictionary).get("buildings", []) as Array
+	for b in blist:
+		var poly := (b as Dictionary).get("poly", []) as Array
+		if poly.size() < 3:
+			continue
+		var pts := PackedVector2Array()
+		var minx := 1e9
+		var maxx := -1e9
+		var miny := 1e9
+		var maxy := -1e9
+		for p in poly:
+			var vx := float((p as Array)[0])
+			var vy := float((p as Array)[1])
+			pts.append(Vector2(vx, vy))
+			minx = minf(minx, vx)
+			maxx = maxf(maxx, vx)
+			miny = minf(miny, vy)
+			maxy = maxf(maxy, vy)
+		var gx0 := int(maxf(0.0, floorf(minx / float(LM_UNIT))))
+		var gx1 := int(minf(float(gw - 1), floorf(maxx / float(LM_UNIT))))
+		var gy0 := int(maxf(0.0, floorf(miny / float(LM_UNIT))))
+		var gy1 := int(minf(float(gh - 1), floorf(maxy / float(LM_UNIT))))
+		for gy in range(gy0, gy1 + 1):
+			for gx in range(gx0, gx1 + 1):
+				var idxc := gy * gw + gx
+				if blocked[idxc] != 0:
+					continue
+				if _point_in_poly(
+						Vector2((float(gx) + 0.5) * float(LM_UNIT),
+								(float(gy) + 0.5) * float(LM_UNIT)), pts):
+					blocked[idxc] = 1
+	return blocked
+
+
+## 建筑「屏幕阴影」掩码：楼是 2.5D 挤出的，它在屏幕上盖住的地面 = footprint
+## + 屋顶向北挤出 hp 格的那一条带（一一对应：屏幕上楼的每个像素，反算回地面平面
+## 都落在这条带里）。夜幕/暖光是全屏层，靠「屏幕像素 → 地面坐标」采样光照图，
+## 所以如果不把这条带屏蔽掉，楼后面被路灯照亮的路面就会整片糊在楼墙和屋顶上
+## —— 就是之前看到的「楼在发光 / 光斑形状跟楼对不上」。
+## 逐列求 footprint 的上下沿，再向北扩展 hp，凹形楼（L 形）的缺口不会被误伤。
+func _building_shadow_mask(gw: int, gh: int) -> PackedByteArray:
+	var sh := PackedByteArray()
+	sh.resize(gw * gh)
+	sh.fill(0)
+	var wf := FileAccess.open("res://assets/world.json", FileAccess.READ)
+	if wf == null:
+		return sh
+	var wd = JSON.parse_string(wf.get_as_text())
+	if not (wd is Dictionary):
+		return sh
+	var blist := (wd as Dictionary).get("buildings", []) as Array
+	for b in blist:
+		var bd := b as Dictionary
+		var poly := bd.get("poly", []) as Array
+		if poly.size() < 3:
+			continue
+		var pts := PackedVector2Array()
+		var minx := 1e9
+		var maxx := -1e9
+		var miny := 1e9
+		var maxy := -1e9
+		for p in poly:
+			var vx := float((p as Array)[0])
+			var vy := float((p as Array)[1])
+			pts.append(Vector2(vx, vy))
+			minx = minf(minx, vx)
+			maxx = maxf(maxx, vx)
+			miny = minf(miny, vy)
+			maxy = maxf(maxy, vy)
+		var gx0 := int(clampf(floorf(minx / float(LM_UNIT)), 0.0, float(gw - 1)))
+		var gx1 := int(clampf(floorf(maxx / float(LM_UNIT)), 0.0, float(gw - 1)))
+		var gy0 := int(clampf(floorf(miny / float(LM_UNIT)), 0.0, float(gh - 1)))
+		var gy1 := int(clampf(floorf(maxy / float(LM_UNIT)), 0.0, float(gh - 1)))
+		# 每一列 footprint 覆盖的单元范围（col_lo=-1 表示该列没有楼）
+		var col_lo := PackedInt32Array()
+		var col_hi := PackedInt32Array()
+		col_lo.resize(gw)
+		col_hi.resize(gw)
+		for i in gw:
+			col_lo[i] = -1
+			col_hi[i] = -1
+		for gx in range(gx0, gx1 + 1):
+			for gy in range(gy0, gy1 + 1):
+				if _point_in_poly(
+						Vector2((float(gx) + 0.5) * float(LM_UNIT),
+								(float(gy) + 0.5) * float(LM_UNIT)), pts):
+					if col_lo[gx] < 0:
+						col_lo[gx] = gy
+					col_hi[gx] = gy
+		# 屋顶挤出高度（格）→ 向北（y 减小）扩展多少单元；+1 单元当安全余量
+		var ext := int(ceilf(float(bd.get("hp", 0.0)) / float(LM_UNIT))) + 1
+		for gx in range(gx0, gx1 + 1):
+			if col_lo[gx] < 0:
+				continue
+			var y0 := maxi(0, col_lo[gx] - ext)
+			var y1 := mini(gh - 1, col_hi[gx])
+			for gy in range(y0, y1 + 1):
+				sh[gy * gw + gx] = 1
+	return sh
+
+
+## 射线法判点在多边形内（格坐标）
+func _point_in_poly(pt: Vector2, poly: PackedVector2Array) -> bool:
+	var inside := false
+	var n := poly.size()
+	var j := n - 1
+	for i in n:
+		var pi: Vector2 = poly[i]
+		var pj: Vector2 = poly[j]
+		if ((pi.y > pt.y) != (pj.y > pt.y)) and \
+				(pt.x < (pj.x - pi.x) * (pt.y - pi.y) / (pj.y - pi.y) + pi.x):
+			inside = not inside
+		j = i
+	return inside
+
+
+func _build_lightmap() -> Texture2D:
+	var TS := 8.0
+	var sc: float = campus.scale.x if campus != null else 1.0
+	var gw := int(ceil(424.0 / float(LM_UNIT)))
+	var gh := int(ceil(800.0 / float(LM_UNIT)))
+	_world_origin = campus.to_global(Vector2(0.0, 0.0)) if campus != null else Vector2.ZERO
+	_world_size = Vector2(float(gw * LM_UNIT) * TS * sc, float(gh * LM_UNIT) * TS * sc)
+	var cache := ProjectSettings.globalize_path(LM_CACHE)
+	if FileAccess.file_exists(LM_CACHE):
+		var im := Image.load_from_file(cache)
+		if im != null and im.get_width() == gw and im.get_height() == gh:
+			print("[Arena] 光照图命中缓存 ", LM_CACHE)
+			return ImageTexture.create_from_image(im)
+	var grid := PackedByteArray()
+	grid.resize(gw * gh)
+	grid.fill(0)
+	var queue := PackedInt32Array()
+	# 建筑占地挡光（MC 里不透明方块会阻断光照）：否则光会穿过楼体，
+	# 把楼内院、楼背后这些「本该被楼挡住」的地面照亮，夜里就整片露出来。
+	var blocked := _building_block_mask(gw, gh)
+	var lf := FileAccess.open("res://assets/lamps.json", FileAccess.READ)
+	if lf != null:
+		var parsed = JSON.parse_string(lf.get_as_text())
+		var arr: Array = []
+		if parsed is Dictionary and parsed.has("lamps"):
+			arr = parsed["lamps"] as Array
+		elif parsed is Array:
+			arr = parsed as Array
+		var unit_px := TS * float(LM_UNIT)
+		for lp in arr:
+			var p: Array = lp as Array
+			if p == null or p.size() < 2:
+				continue
+			var gx := int(float(p[0]) / unit_px)
+			var gy := int(float(p[1]) / unit_px)
+			if gx < 0 or gy < 0 or gx >= gw or gy >= gh:
+				continue
+			var idx := gy * gw + gx
+			if blocked[idx] != 0:
+				continue
+			if int(grid[idx]) < LAMP_LEVEL:
+				grid[idx] = LAMP_LEVEL
+				queue.append(idx)
+	# flood-fill 传播（MC 的光照更新：邻格 = 本格 - 衰减，只有更亮才写入并继续扩散）
+	var head := 0
+	var nq := queue.size()
+	while head < nq:
+		var idx: int = queue[head]
+		head += 1
+		var v := int(grid[idx]) - LM_FALLOFF
+		if v <= 0:
+			continue
+		var x := idx % gw
+		var y := idx / gw
+		if x > 0 and blocked[idx - 1] == 0 and int(grid[idx - 1]) < v:
+			grid[idx - 1] = v
+			queue.append(idx - 1)
+			nq += 1
+		if x + 1 < gw and blocked[idx + 1] == 0 and int(grid[idx + 1]) < v:
+			grid[idx + 1] = v
+			queue.append(idx + 1)
+			nq += 1
+		if y > 0 and blocked[idx - gw] == 0 and int(grid[idx - gw]) < v:
+			grid[idx - gw] = v
+			queue.append(idx - gw)
+			nq += 1
+		if y + 1 < gh and blocked[idx + gw] == 0 and int(grid[idx + gw]) < v:
+			grid[idx + gw] = v
+			queue.append(idx + gw)
+			nq += 1
+	# 轻度平滑（等价 MC 的 smooth lighting）：横竖各一次 1-2-1，去掉格子棱角
+	var tmp := PackedFloat32Array()
+	tmp.resize(gw * gh)
+	for y in gh:
+		for x in gw:
+			var c0 := float(grid[y * gw + x])
+			var lv_l := c0 if x == 0 else float(grid[y * gw + x - 1])
+			var lv_r := c0 if x + 1 >= gw else float(grid[y * gw + x + 1])
+			tmp[y * gw + x] = (lv_l + c0 * 2.0 + lv_r) * 0.25
+	for y in gh:
+		for x in gw:
+			var c0 := float(tmp[y * gw + x])
+			var lv_u := c0 if y == 0 else float(tmp[(y - 1) * gw + x])
+			var lv_d := c0 if y + 1 >= gh else float(tmp[(y + 1) * gw + x])
+			grid[y * gw + x] = int(round((lv_u + c0 * 2.0 + lv_d) * 0.25))
+	# g 通道 = 「这块地面在屏幕上看得见」= 1 - 建筑屏幕阴影（footprint + 屋顶挤出带）。
+	# 夜幕/暖光只有在这一类格子上才被挖薄，楼墙与屋顶因此绝不会糊上楼后的路灯光。
+	# 直接拼像素缓冲（set_pixel 写多通道在这版引擎上不可靠，g 通道会被丢）。
+	var shadow := _building_shadow_mask(gw, gh)
+	var vis := PackedFloat32Array()
+	vis.resize(gw * gh)
+	for y in gh:
+		for x in gw:
+			# 3×3 均值柔化：阴影边界从「2 格的硬角」变成一格渐变，楼脚不至于割手
+			var acc := 0.0
+			var cnt := 0
+			for dy in range(-1, 2):
+				var yy := y + dy
+				if yy < 0 or yy >= gh:
+					continue
+				for dx in range(-1, 2):
+					var xx := x + dx
+					if xx < 0 or xx >= gw:
+						continue
+					acc += float(shadow[yy * gw + xx])
+					cnt += 1
+			vis[y * gw + x] = 1.0 - acc / float(cnt)
+	var px := PackedByteArray()
+	px.resize(gw * gh * 4)
+	for y in gh:
+		for x in gw:
+			var idxc := y * gw + x
+			var lv: float = clampf(float(grid[idxc]) / 15.0, 0.0, 1.0)
+			lv = pow(lv, 1.15)          # 略压暗部、抬亮部，让光池边界清楚又不生硬
+			var o := idxc * 4
+			var b := int(round(clampf(lv, 0.0, 1.0) * 255.0))
+			px[o] = b
+			px[o + 1] = int(round(clampf(vis[idxc], 0.0, 1.0) * 255.0))
+			px[o + 2] = b
+			px[o + 3] = 255
+	var img := Image.create_from_data(gw, gh, false, Image.FORMAT_RGBA8, px)
+	img.save_png(cache)
+	print("[Arena] 光照图已生成 ", gw, "x", gh, " → ", LM_CACHE)
+	return ImageTexture.create_from_image(img)
+
+
+## 生成一盏路灯的完整光斑（白图，运行时由 modulate 染成暖色）：
+##   - 地面光池：灯杆底部一圈柔和椭圆暖光，模拟灯光铺在路面（最关键的"真实"元素）
+##   - 灯头光晕：灯泡自身发出的小团柔光
+##   - 向下洒光：灯头→地面之间一段柔和光柱，截面高斯淡出、无硬边（不像旧版的硬三角锥）
+## 锚点 = 灯杆底部（贴图中心），挂到灯的世界坐标即可。
+func _make_lamp_light_texture() -> Texture2D:
+	var S := 192
+	var img := Image.create(S, S, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0, 0, 0, 0))
+	var cx := float(S) * 0.5
+	# 光池中心放在贴图正中心：Sprite 默认 centered=true，锚点=贴图中心=灯杆底部，
+	# 这样地面光池正好落在灯杆脚下（之前放在贴图底部，会被按中心摆放而偏离灯杆）。
+	var cyc := float(S) * 0.5
+	var bulb_y := cyc - 56.0             # 灯泡（灯头）在光池上方 56px
+	var pool_rx := 52.0                  # 地面光池横半径
+	var pool_ry := 22.0                  # 地面光池纵半径（压扁，像贴地）
+	for yy in S:
+		for xx in S:
+			var x := float(xx)
+			var y := float(yy)
+			var a := 0.0
+			# 1) 灯脚下热点：地面「照亮」已由 MC 式光照图（night_dark shader）负责，
+			#    这里只留一小团更亮的热区，避免两层光叠加过曝
+			var pdx := (x - cx) / pool_rx
+			var pdy := (y - cyc) / pool_ry
+			var pd := pdx * pdx + pdy * pdy
+			if pd <= 1.0:
+				a = maxf(a, pow(1.0 - pd, 2.0) * 0.16)
+			# 2) 灯头光晕：灯泡自身发光的小团柔光
+			var bd := Vector2(x - cx, y - bulb_y).length() / 18.0
+			if bd <= 1.0:
+				a = maxf(a, pow(1.0 - bd, 1.5) * 0.9)
+			# 3) 向下洒光：灯头→地面之间柔和光柱，截面高斯淡出、无硬边
+			if y >= bulb_y and y <= cyc:
+				var t: float = (y - bulb_y) / (cyc - bulb_y)   # 0=灯头 1=地面
+				# 用显式算式代替 lerp（Godot 4.7 的全局 lerp 返回 Variant，会破坏类型推断）
+				var half_w: float = 9.0 + (pool_rx * 0.82 - 9.0) * t  # 向下张开
+				var dx: float = absf(x - cx)
+				if half_w > 0.001 and dx <= half_w:
+					var ax: float = 1.0 - dx / half_w             # 横向高斯淡出
+					var vert: float = (1.0 - t) * 0.5 + 0.18       # 越靠灯头越亮
+					a = maxf(a, vert * ax * ax * 0.30)
+			if a > 0.0:
+				img.set_pixel(xx, yy, Color(1.0, 1.0, 1.0, clampf(a, 0.0, 1.0)))
+	return ImageTexture.create_from_image(img)
+
+
+## 夜灯：路灯光（地面光池 + 灯头光晕）。
+## 楼的窗光不在这里 —— 它是楼体 shader 的一部分（见 building_xray.gdshader），
+## 这样被前面的楼挡住时窗光也会一起被挡住。
+## 路灯的 position 用「世界全局坐标」，_update_daynight 里 _glow_root 的相机变换
+## 把它映射到屏幕——镜头移动时灯始终贴在世界里的灯杆上。
+func _collect_glows() -> void:
+	if campus == null or _glow_root == null:
+		return
+	# 路灯光：整组（地面光池+灯头光晕）贴在灯杆底部的世界坐标
+	var lf := FileAccess.open("res://assets/lamps.json", FileAccess.READ)
+	if lf != null:
+		var parsed = JSON.parse_string(lf.get_as_text())
+		if parsed is Dictionary and parsed.has("lamps"):
+			for lp in parsed["lamps"]:
+				var p: Array = lp
+				var base: Vector2 = campus.to_global(Vector2(float(p[0]), float(p[1])))
+				_add_lamp_light(base)
+
+
+## 在 _glow_root 下挂一盏路灯的完整光（柔和地面光池 + 灯头光晕 + 洒光柱），锚在灯杆底部。
+## 纹理本身已把三种光画在一起，运行时只改整体亮度（含轻微闪烁）。
+func _add_lamp_light(world_pos: Vector2) -> void:
+	var sp := Sprite2D.new()
+	sp.texture = _lamp_tex
+	sp.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	sp.position = world_pos
+	sp.scale = Vector2(0.6, 0.6)
+	var mat := CanvasItemMaterial.new()
+	mat.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
+	sp.material = mat
+	sp.modulate = Color(1.0, 0.80, 0.45)
+	sp.modulate.a = 0.0
+	_glow_root.add_child(sp)
+	_lamp_glows.append({"sprite": sp, "phase": randf() * TAU})
+
+
+## 每帧：夜幕深浅 + 夜灯跟随相机 + 灯的亮度。
+## _glow_root 的变换 = 「世界坐标 → 屏幕坐标」的相机投影，
+## 所以子节点只要 position = 楼的世界坐标，灯就会牢牢贴在楼身上。
+func _update_daynight() -> void:
+	if _night_dark == null or _glow_root == null:
+		return
+	if _dn == null:
+		_dn = DayNight
+	if _dn == null:
+		return
+	# 夜幕：交给 shader（按光照图挖薄），没有光照图时退回原来的整体调 alpha
+	var night_a := float(_dn.overlay_alpha())
+	if _dark_mat != null:
+		_dark_mat.set_shader_parameter("night_alpha", night_a)
+	elif _night_dark_rect != null:
+		_night_dark_rect.modulate.a = night_a
+	var cam := get_viewport().get_camera_2d()
+	if cam != null:
+		var vs := get_viewport().get_visible_rect().size
+		var vc := vs * 0.5
+		var z: Vector2 = cam.zoom
+		var c: Vector2 = cam.get_screen_center_position()
+		var ox := vc.x - c.x * z.x
+		var oy := vc.y - c.y * z.y
+		# 世界坐标 → 屏幕坐标 的投影（x 轴=z.x, y 轴=z.y, 原点=(ox,oy)）
+		_glow_root.global_transform = Transform2D(Vector2(z.x, 0.0), Vector2(0.0, z.y), Vector2(ox, oy))
+		# 夜幕/暖光是屏幕空间的矩形，shader 需要相机参数把屏幕像素反算回世界坐标
+		for mat in [_dark_mat, _warm_mat]:
+			if mat == null:
+				continue
+			(mat as ShaderMaterial).set_shader_parameter("cam_center", c)
+			(mat as ShaderMaterial).set_shader_parameter("zoom", z)
+			(mat as ShaderMaterial).set_shader_parameter("screen_size", vs)
+	var g := float(_dn.glow_strength())
+	# 路灯照亮区染一层暖黄（灯脚下最暖，向外渐隐）
+	if _warm_mat != null:
+		_warm_mat.set_shader_parameter("strength", g * 0.36)
+	# 楼体：夜幕压暗 + 窗光都走楼自己的 shader（这样窗光跟着楼参与 y 排序，
+	# 被前面的楼挡住时一起被挡），每帧按当前夜色把两个参数推过去
+	var nc: Color = _dn.overlay_color()
+	for item in _xray:
+		var bm: ShaderMaterial = item["mat"]
+		bm.set_shader_parameter("night_alpha", night_a)
+		bm.set_shader_parameter("night_color", nc)
+		bm.set_shader_parameter("glow_strength", g)
+	# 路灯：在窗户光基础上加一点正弦闪烁，更像真实气体/LED 灯
+	var tnow := Time.get_ticks_msec() / 1000.0
+	for item in _lamp_glows:
+		var fl := 0.85 + 0.15 * sin(tnow * 3.0 + float(item["phase"]))
+		(item["sprite"] as Sprite2D).modulate.a = g * fl
+
+
+func _process(delta: float) -> void:
+	_update_xray(delta)
+	_update_daynight()
+
+
+## 有人被楼盖住 → 在楼身上挖一个「透视窗」（只透玩家周围一小块，楼体其余实心），
+## 同时把被挡的人也调淡（经典 RPG 做法：位置一眼看清）。
+func _update_xray(delta: float) -> void:
+	if _xray.is_empty() or players == null:
+		return
+	var avs := players.get_children()
+	var hidden: Dictionary = {}
+	for item in _xray:
+		var target: float = 0.0        # 0=实心
+		var img: Image = item["img"]
+		var tl: Vector2 = item["tl"]
+		var sc: float = item["scale"]
+		for a in avs:
+			if not (a is Node2D):
+				continue
+			# 用全局坐标和建筑比：坐标空间已统一（Players 空间 = Objects 空间）。
+			# 判定点取「胸口」而不是脚：脚被楼角擦到一两像素不该开窗。
+			var gp: Vector2 = (a as Node2D).global_position - Vector2(0, 16)
+			# 玩家在楼的南侧（y 更大）时，楼画在人前面，不需要开窗
+			if gp.y > item["foot"]:
+				continue
+			var px := Vector2i((gp - tl) / sc)
+			if px.x < 0 or px.y < 0 or px.x >= img.get_width() or px.y >= img.get_height():
+				continue
+			if img.get_pixelv(px).a > 0.1:
+				target = 1.0
+				hidden[a] = true
+				# 透视窗跟着人走：把玩家位置换算成贴图局部像素坐标
+				(item["mat"] as ShaderMaterial).set_shader_parameter(
+					"hole_center", Vector2(gp - tl) / sc)
+		# 平滑过渡：走过楼边时不该「啪」一下开窗
+		var cur: float = float(item.get("a", 0.0))
+		cur = move_toward(cur, target, delta * 4.0)
+		item["a"] = cur
+		(item["mat"] as ShaderMaterial).set_shader_parameter("strength", cur)
+
+	for a in avs:
+		if a.has_method("set_occluded"):
+			a.set_occluded(hidden.has(a))
+
+
+## 底图（发布级美术版）：
+##   地面降噪 → 低分辨率软阴影 → 2px/格树冠层 → 4px/格屋顶受光渐变 + 2px 描边 → 暗角。
+## 分层绘制是为了性能：阴影/树在低分辨率画再放大，自带柔边；建筑在 4px/格保持锐利。
+func _build_minimap_texture() -> Texture2D:
+	var w: int = int(CELLS.x) * MINI_PXP
+	var h: int = int(CELLS.y) * MINI_PXP
+	if FileAccess.file_exists(MINIMAP_CACHE):
+		var cached := Image.load_from_file(MINIMAP_CACHE)
+		if cached != null and cached.get_width() == w and cached.get_height() == h:
+			return ImageTexture.create_from_image(cached)
+
+	var out := Image.create(w, h, false, Image.FORMAT_RGBA8)
+	out.fill(MapData.C_GROUND)
+	_paint_ground(out)
+	_paint_shadow(out)
+	_paint_trees(out)
+	_paint_buildings(out)
+	_paint_vignette(out)
+	out.save_png(MINIMAP_CACHE)
+	return ImageTexture.create_from_image(out)
+
+
+## 地面：拼接后缩到 1/2 再放大做一次降噪（保留道路/广场/湖水的大形，抹掉草地的沙粒噪点），
+## 再轻微压暗降饱和，让建筑和道路从草地里跳出来。
+func _paint_ground(out: Image) -> void:
+	var chunk_cells: int = 1024 / int(TS)
+	for cy in MapData.GROUND_ROWS:
+		for cx in MapData.GROUND_COLS:
+			var path := "res://assets/ground/g%d_%d.png" % [cx, cy]
+			if not ResourceLoader.exists(path):
+				continue
+			var tex: Texture2D = load(path)
+			if tex == null:
+				continue
+			var img := tex.get_image()
+			if img == null:
+				continue
+			if img.is_compressed():
+				img.decompress()
+			img.convert(Image.FORMAT_RGBA8)
+			var tw: int = maxi(1, int(round(img.get_width() / TS * MINI_PXP)))
+			var th: int = maxi(1, int(round(img.get_height() / TS * MINI_PXP)))
+			img.resize(tw, th, Image.INTERPOLATE_BILINEAR)
+			out.blit_rect(img, Rect2i(0, 0, tw, th),
+				Vector2i(cx * chunk_cells * MINI_PXP, cy * chunk_cells * MINI_PXP))
+	var w := out.get_width()
+	var h := out.get_height()
+	out.resize(maxi(1, w / 2), maxi(1, h / 2), Image.INTERPOLATE_BILINEAR)
+	out.resize(w, h, Image.INTERPOLATE_CUBIC)
+	out.adjust_bcs(0.94, 1.03, 0.96)
+
+	# 海天苑大楼中央庭院：草地 + 中央楼一圈步道（与 assets/haitian_courtyard.png 对齐）
+	out.fill_rect(Rect2i(199 * MINI_PXP, 471 * MINI_PXP, 48 * MINI_PXP, 58 * MINI_PXP),
+		Color("4a6f42"))
+	out.fill_rect(Rect2i(205 * MINI_PXP, 480 * MINI_PXP, 36 * MINI_PXP, 34 * MINI_PXP),
+		Color("b9a98a"))
+
+	# 北门广场铺装 + 门址金点
+	out.fill_rect(Rect2i(197 * MINI_PXP, 32 * MINI_PXP, 44 * MINI_PXP, 24 * MINI_PXP),
+		Color("c9bda2"))
+	for gx in range(197, 241, 2):
+		out.fill_rect(Rect2i(gx * MINI_PXP, 32 * MINI_PXP, 1, 24 * MINI_PXP), Color("b3a78c"))
+	for gy in range(32, 56, 2):
+		out.fill_rect(Rect2i(197 * MINI_PXP, gy * MINI_PXP, 44 * MINI_PXP, 1), Color("b3a78c"))
+	out.fill_rect(Rect2i(200 * MINI_PXP, 31 * MINI_PXP, 36 * MINI_PXP, 2 * MINI_PXP),
+		Color("6f747a"))
+	out.fill_rect(Rect2i(216 * MINI_PXP, 31 * MINI_PXP, 4 * MINI_PXP, 2 * MINI_PXP),
+		Color("d6b45a"))
+
+	# 图书馆前广场 + 喷泉
+	_fill_disc(out, 223 * MINI_PXP, 390 * MINI_PXP, 13 * MINI_PXP, Color("c9bda2"))
+	_fill_disc(out, 223 * MINI_PXP, 390 * MINI_PXP, 6 * MINI_PXP, Color("3f7fae"))
+	_fill_disc(out, 223 * MINI_PXP, 390 * MINI_PXP, 2.2 * MINI_PXP, Color("9fd0e8"))
+
+	# 东门「为国铸剑」纪念广场：切角铺装 + 中央石环（与 assets/props_plaza_east.png 对齐）
+	out.fill_rect(Rect2i(380 * MINI_PXP, 331 * MINI_PXP, 27 * MINI_PXP, 27 * MINI_PXP),
+		Color("d2c6ab"))
+	for gx in range(380, 407, 2):
+		out.fill_rect(Rect2i(gx * MINI_PXP, 331 * MINI_PXP, 1, 27 * MINI_PXP), Color("bfb39a"))
+	for gy in range(331, 358, 2):
+		out.fill_rect(Rect2i(380 * MINI_PXP, gy * MINI_PXP, 27 * MINI_PXP, 1), Color("bfb39a"))
+	_fill_disc(out, 393 * MINI_PXP, 344 * MINI_PXP, 10.4 * MINI_PXP, Color("b3a68b"))
+	_fill_disc(out, 393 * MINI_PXP, 344 * MINI_PXP, 9.0 * MINI_PXP, Color("d2c6ab"))
+
+
+## 软阴影：1px/格 画楼体投影，再双线性放大到 4px/格——放大过程本身就产生了柔边，
+## 比在高分辨率上做高斯模糊省几十倍。
+func _paint_shadow(out: Image) -> void:
+	var sh := Image.create(int(CELLS.x), int(CELLS.y), false, Image.FORMAT_RGBA8)
+	sh.fill(Color(0, 0, 0, 0))
+	var scol := Color(0.03, 0.05, 0.07, 0.55)
+	for b in MapData.buildings():
+		var poly: Array = b.get("poly", [])
+		if poly.size() < 3:
+			continue
+		var pts := PackedVector2Array()
+		for p in poly:
+			var v: Vector2 = p
+			pts.append(v + Vector2(1.4, 2.0))       # 光从左上打，影子往右下偏
+		_fill_poly(sh, pts, scol)
+	sh.resize(out.get_width(), out.get_height(), Image.INTERPOLATE_BILINEAR)
+	out.blend_rect(sh, Rect2i(0, 0, out.get_width(), out.get_height()), Vector2i.ZERO)
+
+
+## 树冠：2px/格 层上画「底盘 + 左上高光」两个圆，放大后自带柔边，收敛成低对比质感。
+func _paint_trees(out: Image) -> void:
+	var tp: int = 2
+	var layer := Image.create(int(CELLS.x) * tp, int(CELLS.y) * tp, false, Image.FORMAT_RGBA8)
+	layer.fill(Color(0, 0, 0, 0))
+	for i in MapData.trees():
+		var x: float = float(i.get("x", 0.0)) * tp
+		var y: float = float(i.get("y", 0.0)) * tp
+		var r: float = clampf(float(i.get("s", 2.0)) * tp * 0.72, 1.5, 5.5)
+		var col: Color = MapData.C_TREE_A if int(i.get("sp", 0)) % 2 == 0 else MapData.C_TREE_B
+		_fill_disc(layer, x, y, r, col)
+		_fill_disc(layer, x - r * 0.32, y - r * 0.36, r * 0.52, col.lightened(0.18))
+	layer.resize(out.get_width(), out.get_height(), Image.INTERPOLATE_BILINEAR)
+	out.blend_rect(layer, Rect2i(0, 0, out.get_width(), out.get_height()), Vector2i.ZERO)
+
+
+## 建筑：逐行做竖向受光渐变（上亮下暗），再描 2px 深色边——比单色平涂有体积感。
+func _paint_buildings(out: Image) -> void:
+	var w := out.get_width()
+	var h := out.get_height()
+	for b in MapData.buildings():
+		var poly: Array = b.get("poly", [])
+		if poly.size() < 3:
+			continue
+		var pts := PackedVector2Array()
+		for p in poly:
+			var v: Vector2 = p
+			pts.append(v * MINI_PXP)
+		var base: Color = MapData.roof_color(str(b.get("cat", "b")))
+		if str(b.get("name", "")) == "海天苑大楼·中楼":
+			base = Color("5f8f5a")        # 中楼是绿化屋顶
+		var top_c := base.lightened(0.15)
+		var bot_c := base.darkened(0.15)
+		var miny := INF
+		var maxy := -INF
+		for p in pts:
+			miny = minf(miny, p.y)
+			maxy = maxf(maxy, p.y)
+		var y0 := maxi(0, int(floor(miny)))
+		var y1 := mini(h - 1, int(ceil(maxy)))
+		var span := maxf(1.0, maxy - miny)
+		var n := pts.size()
+		for y in range(y0, y1 + 1):
+			var col := top_c.lerp(bot_c, clampf((float(y) - miny) / span, 0.0, 1.0))
+			var sy := float(y) + 0.5
+			var xs: Array[float] = []
+			for i in n:
+				var a := pts[i]
+				var bb := pts[(i + 1) % n]
+				if (a.y <= sy and bb.y > sy) or (bb.y <= sy and a.y > sy):
+					var tt := (sy - a.y) / (bb.y - a.y)
+					xs.append(a.x + (bb.x - a.x) * tt)
+			if xs.size() < 2:
+				continue
+			xs.sort()
+			var k := 0
+			while k + 1 < xs.size():
+				var xa := clampi(int(round(xs[k])), 0, w - 1)
+				var xb := clampi(int(round(xs[k + 1])), 0, w - 1)
+				if xb > xa:
+					out.fill_rect(Rect2i(xa, y, xb - xa, 1), col)
+				k += 2
+		_stroke_poly_thick(out, pts, MapData.C_OUTLINE, 2)
+
+
+## 暗角：低分辨率算径向 alpha 再放大，边缘微微压暗，画面更聚焦。
+func _paint_vignette(out: Image) -> void:
+	var lw := 64
+	var lh := 120
+	var v := Image.create(lw, lh, false, Image.FORMAT_RGBA8)
+	for y in lh:
+		for x in lw:
+			var nx := (float(x) + 0.5) / float(lw) * 2.0 - 1.0
+			var ny := (float(y) + 0.5) / float(lh) * 2.0 - 1.0
+			var d := sqrt(nx * nx + ny * ny) / 1.4142
+			var a := clampf((d - 0.55) / 0.45, 0.0, 1.0)
+			v.set_pixel(x, y, Color(0.03, 0.05, 0.08, a * 0.55))
+	v.resize(out.get_width(), out.get_height(), Image.INTERPOLATE_BILINEAR)
+	out.blend_rect(v, Rect2i(0, 0, out.get_width(), out.get_height()), Vector2i.ZERO)
+
+
+## 实心圆（树冠）。逐像素画 + 边界裁剪，避免 set_pixel 越界。
+func _fill_disc(img: Image, cx: float, cy: float, r: float, col: Color) -> void:
+	var W := img.get_width()
+	var H := img.get_height()
+	var x0 := maxi(0, int(floor(cx - r)))
+	var x1 := mini(W - 1, int(ceil(cx + r)))
+	var y0 := maxi(0, int(floor(cy - r)))
+	var y1 := mini(H - 1, int(ceil(cy + r)))
+	var r2 := r * r
+	for yy in range(y0, y1 + 1):
+		var dy := float(yy) - cy
+		for xx in range(x0, x1 + 1):
+			var dx := float(xx) - cx
+			if dx * dx + dy * dy <= r2:
+				img.set_pixel(xx, yy, col)
+
+
+## 扫描线填充多边形（支持凹多边形）。逐行用 fill_rect，比逐像素快得多。
+func _fill_poly(img: Image, pts: PackedVector2Array, col: Color) -> void:
+	var n := pts.size()
+	if n < 3:
+		return
+	var miny := INF
+	var maxy := -INF
+	for p in pts:
+		miny = minf(miny, p.y)
+		maxy = maxf(maxy, p.y)
+	var W := img.get_width()
+	var y0 := maxi(0, int(floor(miny)))
+	var y1 := mini(img.get_height() - 1, int(ceil(maxy)))
+	for y in range(y0, y1 + 1):
+		var sy := float(y) + 0.5
+		var xs: Array[float] = []
+		for i in n:
+			var a := pts[i]
+			var b := pts[(i + 1) % n]
+			if (a.y <= sy and b.y > sy) or (b.y <= sy and a.y > sy):
+				var t := (sy - a.y) / (b.y - a.y)
+				xs.append(a.x + (b.x - a.x) * t)
+		if xs.size() < 2:
+			continue
+		xs.sort()
+		var k := 0
+		while k + 1 < xs.size():
+			var xa := clampi(int(round(xs[k])), 0, W - 1)
+			var xb := clampi(int(round(xs[k + 1])), 0, W - 1)
+			if xb > xa:
+				img.fill_rect(Rect2i(xa, y, xb - xa, 1), col)
+			k += 2
+
+
+func _stroke_poly_thick(img: Image, pts: PackedVector2Array, col: Color, thick: int) -> void:
+	var n := pts.size()
+	for i in n:
+		_line_thick(img, pts[i], pts[(i + 1) % n], col, thick)
+
+
+## 整数 Bresenham 直线，可指定线宽（每个步进画 thick×thick 的方块）。
+func _line_thick(img: Image, a: Vector2, b: Vector2, col: Color, thick: int) -> void:
+	var W := img.get_width()
+	var H := img.get_height()
+	var x0 := int(round(a.x))
+	var y0 := int(round(a.y))
+	var x1 := int(round(b.x))
+	var y1 := int(round(b.y))
+	var dx := absi(x1 - x0)
+	var dy := -absi(y1 - y0)
+	var sx := 1 if x0 < x1 else -1
+	var sy := 1 if y0 < y1 else -1
+	var err := dx + dy
+	while true:
+		for oy in thick:
+			for ox in thick:
+				var px := x0 + ox
+				var py := y0 + oy
+				if px >= 0 and px < W and py >= 0 and py < H:
+					img.set_pixel(px, py, col)
+		if x0 == x1 and y0 == y1:
+			break
+		var e2 := err * 2
+		if e2 >= dy:
+			err += dy
+			x0 += sx
+		if e2 <= dx:
+			err += dx
+			y0 += sy
+
+
+## 世界外的底色（比纯黑柔和一点，走到地图边缘时不刺眼）
+func _draw() -> void:
+	draw_rect(Rect2(Vector2(-800, -800), Vector2(8600, 14600)), Color("151b21"))
+
+
+## Server only: show every replicated world node to a peer whose world is ready.
+func allow_peer(id: int) -> void:
+	if not Net.is_server():
+		return
+	for node in get_tree().get_nodes_in_group("world_sync"):
+		var sync: MultiplayerSynchronizer = node
+		sync.set_visibility_for(id, true)
+
+
+## Server only: create a player's avatar at a free spawn point.
+func spawn_avatar(id: int) -> void:
+	if not Net.is_server() or not Net.peers.has(id) or players.has_node(str(id)):
+		return
+	var avatar: CharacterBody2D = PLAYER.instantiate()
+	avatar.name = str(id)
+	# 按序号环形散开，避免两个人叠在同一点互相推挤。
+	# 搜索槽位跟着房间上限走：以前写死 12，第 13 个人起就再也找不到空位，
+	# 会一路落到 (0,0) 或和别人重叠。现在按 MAX_PLAYERS 展开足够多的环。
+	var chosen: Vector2 = _spawn_point(0)
+	for slot in range(Net.MAX_PLAYERS + 8):
+		var candidate: Vector2 = _spawn_point(slot)
+		var available: bool = true
+		for existing in players.get_children():
+			if (existing as Node2D).position.distance_to(candidate) < SPREAD * 0.8:
+				available = false
+				break
+		if available:
+			chosen = candidate
+			break
+		chosen = candidate      # 全满也至少用最后一个候选，别把新玩家丢到世界原点
+	# 外环候选可能蹭到楼体或水面，螺旋找最近空地，保证不会出生就被卡住
+	avatar.position = _find_safe(chosen)
+	avatar.server_position = avatar.position
+	avatar.server_state = {"seq": 0, "position": avatar.position}
+	avatar.round_id = GameState.round_id
+	avatar.hero_id = str(Net.peers.get(id, {}).get("hero", "adam"))
+	players.add_child(avatar)
+
+
+## 出生点：以开阔点为中心，第 2 人起按 8 个方向环绕散开（坐标是校园局部像素）。
+## 环间步长要 > 「最小间距」SPREAD*0.8，否则相邻两环只差一点点、会被判定
+## 为「离已有玩家太近」而整环作废，人一多就只能跳环，很快排满后重叠。
+## 0.9*SPREAD = 72px > 0.8*SPREAD = 64px，正好保证每一环都能用。
+func _spawn_point(slot: int) -> Vector2:
+	var base: Vector2 = _spawn_cell() * TS
+	if slot == 0:
+		return base
+	var k: int = (slot - 1) % 8
+	var ring: int = (slot - 1) / 8
+	var ang: float = float(k) * TAU / 8.0
+	var rad: float = SPREAD * (1.0 + float(ring) * 0.9)
+	return base + Vector2(cos(ang), sin(ang)) * rad
+
+
+func remove_player(id: int) -> void:
+	if not Net.is_server():
+		return
+	var avatar: Node = players.get_node_or_null(str(id))
+	if avatar != null:
+		avatar.queue_free()
+
+
+## Server only: 玩家在游戏里换外观时，把新的 hero_id 写进他的 avatar。
+## hero_id 已在 SceneReplicationConfig 里（spawn + on_change），会自动同步到所有客户端。
+func set_hero_of(id: int, hero: String) -> void:
+	if not Net.is_server():
+		return
+	var avatar: Node = players.get_node_or_null(str(id))
+	if avatar != null:
+		avatar.hero_id = hero
+
+
+func clear_run() -> void:
+	if not Net.is_server():
+		return
+	for child in players.get_children():
+		# Remove now so the next round cannot see old names this frame.
+		players.remove_child(child)
+		child.queue_free()
+
+
+# ---------------------------------------------------------------- 传送
+## 网页版「点地图传送」的等价物。联机下位置是服务器权威，客户端只能请求，
+## 由服务器把人放到位再同步回去（否则会被校正逻辑拉回原地）。
+
+func request_teleport(world_pos: Vector2) -> void:
+	if not Net.has_session():
+		return
+	if Net.is_server():
+		call_deferred("_do_teleport", Net.my_id(), world_pos)
+	else:
+		_teleport_request.rpc_id(1, world_pos)
+
+
+@rpc("any_peer", "call_remote", "reliable", 0)
+func _teleport_request(world_pos: Vector2) -> void:
+	if not Net.is_server():
+		return
+	# 物理空间查询不能在 RPC 回调里直接做（会撞上物理刷写），延后一帧
+	call_deferred("_do_teleport", multiplayer.get_remote_sender_id(), world_pos)
+
+
+func _do_teleport(id: int, world_pos: Vector2) -> void:
+	if not Net.is_server():
+		return
+	var avatar: Node = players.get_node_or_null(str(id))
+	if avatar == null or not avatar.has_method("teleport_to"):
+		return
+	var local: Vector2 = players.to_local(world_pos)
+	var safe: Vector2 = _find_safe(local)
+	avatar.teleport_to(safe)
+	if OS.has_environment("XGD_DEBUG"):
+		print("[tp] id=%d world=%s → local=%s → safe=%s" % [id, world_pos, local, safe])
+
+
+## 目标点压在建筑或水面上时，螺旋往外找最近的空地（步长 1 格）
+func _find_safe(local: Vector2) -> Vector2:
+	var space := get_world_2d().direct_space_state
+	for ring in range(0, 24):
+		var n: int = 1 if ring == 0 else 12
+		for i in n:
+			var a: float = float(i) * TAU / float(n)
+			var p: Vector2 = local + Vector2(cos(a), sin(a)) * (float(ring) * TS)
+			var params := PhysicsPointQueryParameters2D.new()
+			params.position = players.to_global(p)
+			params.collision_mask = 1
+			params.collide_with_areas = false
+			params.collide_with_bodies = true
+			if space.intersect_point(params, 1).is_empty():
+				return p
+	return local
