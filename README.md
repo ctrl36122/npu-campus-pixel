@@ -4,7 +4,7 @@
 
 **把西北工业大学长安校区做成一张可以走进去的像素地图。**
 
-Godot 4 实现 · 桌面 / 手机 / 网页三端 · 支持多人在线同屏与群聊
+Godot 4 实现 · Windows / macOS / Android / 网页四端 · 支持多人在线同屏与群聊
 
 <p>
 <img src="docs/screenshots/day.png" width="32%" alt="白天">
@@ -46,9 +46,21 @@ OpenStreetMap 上长安校区的实测数据，不是手绘示意图 —— 所�
 | 平台 | 文件 | 说明 |
 |---|---|---|
 | Windows | `XGD-Campus-win64.zip` | 解压后双击 `像素工大.exe`，免安装 |
+| macOS | `XGD-Campus-macos.zip` | 通用版（Apple 芯片 + Intel），解压后看包里的「macOS 安装说明.txt」，**第一次要跑一次本地签名命令** |
 | Android | `XGD-Campus-android.zip` | 解压安装 `.apk`，需要允许「安装未知来源应用」 |
 
-最新版本是 [v1.2.1](../../releases/tag/v1.2.1)（2026-10-30），桌面版压缩包里附了「玩法说明.txt」。
+macOS 包没有 Apple 开发者签名，Apple 芯片上未签名的程序会被系统直接拦掉，
+所以解压后先在终端里跑一次（只跑一次）：
+
+```bash
+cd ~/Downloads
+xattr -cr 像素工大.app && codesign --force --deep --sign - 像素工大.app
+```
+
+之后双击就能玩。要正经分发（不弹警告）得用 Apple 开发者账号签名 + 公证，
+这个只能在 Mac 上做。
+
+最新版本是 [v1.2.1](../../releases/tag/v1.2.1)（2026-10-30），压缩包里都附了说明文件。
 
 ## 更新日志
 
@@ -66,6 +78,11 @@ OpenStreetMap 上长安校区的实测数据，不是手绘示意图 —— 所�
 
 **注意**：这次改到了联机协议，**服务端和新客户端要一起更新**；旧版客户端连新版服务器
 会提示版本不一致、进不去。公共服务器 `<你的服务器IP>` 已同步更新。
+
+**新增 macOS 版** — 导出的是通用二进制（arm64 + x86_64），Apple 芯片和 Intel 都能跑，
+要求 macOS 11 以上（Intel 10.13 以上）。包内附「macOS 安装说明.txt」：因为这个包没有
+Apple 开发者签名，第一次打开前要在终端跑一次 `xattr -cr` + `codesign --sign -`
+做本地 ad-hoc 签名，否则 Apple 芯片上会被系统直接拦掉。
 
 ### v1.2.0 · 2026-10-30
 
@@ -258,7 +275,7 @@ sxgd-game/
 ├── scripts/                   渲染与着色器（楼体 2.5D、窗光、光照图、昼夜）
 ├── addons/godot_ai/           开发期用的编辑器 AI 插件，不影响游戏，可以整个删掉
 ├── tools/                     构建与烘焙脚本（世界场景、房间布局、字体子集、图标、小地图底图）
-└── export_presets.example.cfg  三套导出预设（复制成 export_presets.cfg 再填签名，别提交密钥）
+└── export_presets.example.cfg  四套导出预设（Web / Windows / Linux 服务端 / macOS，复制成 export_presets.cfg 再填签名）
 ```
 
 **改地图** — 编辑 `assets/world.json` 后重新烘焙场景：
@@ -275,7 +292,19 @@ python tools/make_font.py
 
 **导出** — 先把 `export_presets.example.cfg` 复制成 `export_presets.cfg`，填上自己生成的
 Android 签名密钥库路径与密码（这个文件被 git 忽略，不要把密钥提交上来），
-之后 Godot 里 `项目 → 导出` 就有三套预设了。
+之后 Godot 里 `项目 → 导出` 就有四套预设了。命令行导出：
+
+```bash
+godot --headless --path . --export-release "Windows Desktop" "build/windows/像素工大.exe"
+godot --headless --path . --export-release "macOS"           "build/macos/像素工大.zip"
+godot --headless --path . --export-release "Android"         "build/android/像素工大.apk"
+godot --headless --path . --export-release "Linux Server"    "build/server/xgd-server.x86_64"
+godot --headless --path . --export-release "Web"             "build/web/index.html"
+```
+
+macOS 预设的要点写在 `export_presets.example.cfg` 末尾的注释里：通用二进制（arm64 + x86_64）、
+`export_path` 用 `.zip`（`.dmg` 只能在 macOS 上打）、非 Mac 主机上 `codesign/codesign=0`，
+生成的 app 没有签名，macOS 端第一次打开前要 ad-hoc 签一次。
 
 ## 实现上几个关键选择
 
