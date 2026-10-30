@@ -167,6 +167,8 @@ func teleport_to(pos: Vector2) -> void:
 func sit_at(pos: Vector2, dir_name: String) -> void:
 	var i := SIT_DIRS.find(dir_name)
 	sit_dir = (i if i >= 0 else 0) + 1
+	if is_local_player:
+		_local_pose = sit_dir
 	teleport_to(pos)
 	_set_collision(false)
 	_apply_sit_anim()
@@ -175,7 +177,24 @@ func sit_at(pos: Vector2, dir_name: String) -> void:
 ## 躺着：sit_dir 5..8 表示躺下（5 + SIT_DIRS 的朝向下标），沿用同一个整型好走属性同步。
 const LIE_BASE := 5
 
+## 本机自己摆的姿势（0 = 没摆）。sit_dir 是要走属性同步的，服务器那份还是 0 时，
+## 每个同步包都会把本地刚坐下的姿势按回去 —— 一按 E 坐下/躺下，下一帧就站起来。
+## 服务器版本比客户端旧、坐/躺这两个 RPC 直接被丢时，就是「椅子和床完全没反应」。
+## 所以本地再存一份，每帧贴回去（见 _hold_local_pose），直到真的起身。
+var _local_pose: int = 0
+
+
+## 每帧把本机自己摆的姿势贴回 sit_dir（同步包改回去就再改回来）
+func _hold_local_pose() -> void:
+	if _local_pose == 0 or not is_local_player:
+		return
+	if sit_dir != _local_pose:
+		sit_dir = _local_pose
+		_apply_sit_anim()
+
+
 func stand_up() -> void:
+	_local_pose = 0
 	if sit_dir == 0:
 		return
 	sit_dir = 0
@@ -195,6 +214,8 @@ func stand_up() -> void:
 func lay_at(pos: Vector2, dir_name: String) -> void:
 	var i := SIT_DIRS.find(dir_name)
 	sit_dir = LIE_BASE + (i if i >= 0 else 0)
+	if is_local_player:
+		_local_pose = sit_dir
 	teleport_to(pos)
 	_set_collision(false)
 	_apply_sit_anim()
@@ -516,6 +537,7 @@ func _step_out() -> bool:
 
 
 func _process(delta: float) -> void:
+	_hold_local_pose()
 	_update_visual()
 	_update_camera_zoom(delta)
 	if not Net.is_server():

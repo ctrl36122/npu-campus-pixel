@@ -517,27 +517,35 @@ signal seat_changed(id: int, dir: int, pos: Vector2)
 var _seat_gate: Dictionary = {}
 
 
-## 坐下 / 起身。座位状态由**服务端裁定**，客户端只发请求：
-## 联机时位置是服务端模拟的，客户端先自己挪过去会在下一个 tick 被拉回原地，
-## 表现就是「坐下的一瞬间闪回站着」。
-## dir：1..4 = 坐下（面朝 down/left/right/up），5..8 = 躺下，0 = 起身。
+## 坐下 / 起身。dir：1..4 = 坐下（面朝 down/left/right/up），5..8 = 躺下，0 = 起身。
+##
+## 客户端**先在本地生效**再发请求：座位只是自己的姿势，位置也已经由自己算好。
+## 以前客户端纯等服务端回包，而服务端的 _request_seat 只改了它自己那份、
+## 根本没广播 —— 结果客户端按 E 完全没反应（椅子坐不下、床躺不下）。
 func sit_down(dir: int, pos: Vector2) -> void:
 	var d: int = clampi(dir, 0, 8)
 	if not has_session():
-		seat_changed.emit(0, d, pos)          # 单机：自己说了算
+		seat_changed.emit(my_id(), d, pos)          # 单机：自己说了算
 		return
 	if is_server():
 		_apply_seat(1, d, pos)
-		broadcast(self, &"_show_seat", [d, pos])
-	else:
-		_request_seat.rpc_id(1, d, pos)
+		broadcast(self, &"_show_seat", [1, d, pos])
+		return
+	seat_changed.emit(my_id(), d, pos)              # 本地先落地（界面立刻响应）
+	_request_seat.rpc_id(1, d, pos)                 # 再请服务端裁定并广播给别人
 
 
 @rpc("any_peer", "call_remote", "reliable", 0)
 func _request_seat(dir: int, pos: Vector2) -> void:
 	if not is_server():
 		return
-	_apply_seat(multiplayer.get_remote_sender_id(), clampi(dir, 0, 4), pos)
+	var id: int = multiplayer.get_remote_sender_id()
+	# 这里以前 clamp 到 0..4，5..8 的躺姿被削成「面朝上的坐姿」—— 床等于废了
+	var d: int = clampi(dir, 0, 8)
+	_apply_seat(id, d, pos)
+	# 转发给所有人（含发起者）：以前这里不广播，别人看不到你坐下，
+	# 你自己也收不到任何确认，表现就是「按 E 没反应」。
+	broadcast(self, &"_show_seat", [id, d, pos])
 
 
 ## 服务端：改这个玩家的座位状态并推给所有人
@@ -551,11 +559,23 @@ func _apply_seat(id: int, dir: int, pos: Vector2) -> void:
 	seat_changed.emit(id, dir, pos)
 
 
+## 收到某人的姿势变化。参数兼容两种形状，方便新旧服务端混跑：
+##   新：(玩家 id, 姿势, 坐标)   旧：(姿势, 坐标)，只可能是服务端自己
 @rpc("any_peer", "call_remote", "reliable", 0)
-func _show_seat(dir: int, pos: Vector2) -> void:
-	var sender: int = multiplayer.get_remote_sender_id()
-	if peers.has(sender):
-		seat_changed.emit(sender, clampi(dir, 0, 4), pos)
+func _show_seat(a: Variant, b: Variant, c: Variant = null) -> void:
+	var id := 1
+	var dir := 0
+	var pos := Vector2.ZERO
+	if c == null:
+		dir = int(a)
+		pos = Vector2(b)
+	else:
+		id = int(a)
+		dir = int(b)
+		pos = Vector2(c)
+	if not peers.has(id):
+		return
+	seat_changed.emit(id, clampi(dir, 0, 8), pos)
 
 
 # --- 楼层 ---------------------------------------------------------------
@@ -596,17 +616,21 @@ signal room_claims_changed
 var room_claims: Dictionary = {}
 
 
-## 认领 / 取消某间房（name 为空 = 取消）。服务端校验后广播全量快照。
+## 认领 / 取消某间房（name 为空 = 取消）。
+## **客户端也先本地落地**：等服务端回包才改界面，一旦对面是旧版服务端（这个 RPC
+## 它不认识，包直接被丢掉），就会变成「提示说认领成功、牌子上还是空房」。
+## 先写本地再发请求，界面永远和操作一致；服务端随后广播的全量快照会覆盖它。
 func claim_room(floor_n: int, room_idx: int, display_name: String) -> void:
 	var nm: String = display_name.strip_edges().left(24)
 	if not has_session():
-		_apply_claim(0, floor_n, room_idx, nm)
+		_write_claim(local_uid, floor_n, room_idx, nm)
 		return
 	if is_server():
-		_apply_claim(1, floor_n, room_idx, nm)
+		_write_claim(local_uid, floor_n, room_idx, nm)
 		_sync_claims.rpc(room_claims)
-	else:
-		_request_claim.rpc_id(1, floor_n, room_idx, nm)
+		return
+	_write_claim(local_uid, floor_n, room_idx, nm)
+	_request_claim.rpc_id(1, floor_n, room_idx, nm)
 
 
 @rpc("any_peer", "call_remote", "reliable", 0)
@@ -620,16 +644,23 @@ func _request_claim(n: int, r: int, nm: String) -> void:
 ## 服务端：写入认领。**一个人同时只能有一间**：认领新房间会自动退掉他之前的房间。
 ## 已被别人的 uid 认领的房不抢；name 为空则取消。
 func _apply_claim(peer_id: int, n: int, r: int, nm: String) -> void:
-	if n < 1 or r < 0:
-		return
-	var key := "%d:%d" % [n, r]
 	var uid := local_uid if peer_id <= 1 else str(peers.get(peer_id, {}).get("uid", ""))
-	if uid.is_empty():
-		return
+	_write_claim(uid, n, r, nm)
+
+
+## 真正改 room_claims 的地方（服务端裁定和客户端本地预写共用一套规则）。
+## 返回 true 表示这次改动确实生效了 —— 调用方据此判断「是不是真认领到」，
+## 而不是靠“我发过请求了”就报成功。
+func _write_claim(uid: String, n: int, r: int, nm: String) -> bool:
+	if n < 1 or r < 0 or uid.is_empty():
+		return false
+	var key := "%d:%d" % [n, r]
 	var cur: Dictionary = room_claims.get(key, {})
 	if not cur.is_empty() and String(cur.get("uid", "")) != uid:
-		return                         # 是别人的房间，不允许覆盖
+		return false                   # 是别人的房间，不允许覆盖
 	if nm.is_empty():
+		if cur.is_empty():
+			return false
 		room_claims.erase(key)
 	else:
 		# 退掉同一 uid 名下的其它房间（「每个人只能同时占有一个房间」）
@@ -640,6 +671,7 @@ func _apply_claim(peer_id: int, n: int, r: int, nm: String) -> void:
 				room_claims.erase(k)
 		room_claims[key] = {"name": nm, "uid": uid}
 	room_claims_changed.emit()
+	return true
 
 
 ## 某个 uid 现在认领的是哪间房，返回 "楼层:房号"；没有就返回 ""。
@@ -673,8 +705,10 @@ func set_room_note(room_idx: int, note: String) -> void:
 	if is_server():
 		_apply_note(local_uid, room_idx, txt)
 		_sync_claims.rpc(room_claims)
-	else:
-		_request_note.rpc_id(1, room_idx, txt)
+		return
+	# 客户端同样先本地写，理由和 claim_room 一样（旧服务端会把请求丢掉）
+	_apply_note(local_uid, room_idx, txt)
+	_request_note.rpc_id(1, room_idx, txt)
 
 
 @rpc("any_peer", "call_remote", "reliable", 0)

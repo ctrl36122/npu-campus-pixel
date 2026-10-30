@@ -2557,15 +2557,25 @@ func _try_claim_room() -> bool:
 	if d.is_empty():
 		return false
 	var idx: int = int(d["index"])
-	var cur: Dictionary = Net.room_claims.get("%d:%d" % [current_floor, idx], {})
+	var key := "%d:%d" % [current_floor, idx]
+	var cur: Dictionary = Net.room_claims.get(key, {})
 	var no: int = idx + 1
 	if cur.is_empty():
 		Net.claim_room(current_floor, idx, Net.local_name)
+		# 别急着宣布成功：以 room_claims 的实际结果为准。否则服务端一旦不认
+		# （旧版服务端 / 请求被丢掉），就成了「提示说贴上了、牌子上还是空房」。
+		var now: Dictionary = Net.room_claims.get(key, {})
+		if Net.local_uid.is_empty() or String(now.get("uid", "")) != Net.local_uid:
+			_notice("没能认领 %d 层 %d 号房（服务器没接受请求，可能是服务端版本较旧）" % [current_floor, no])
+			return false
 		_save_my_room(current_floor, idx)          # 记下来：下次上线直接从这间房的床上出生
 		_notice("已在 %d 层 %d 号房门口贴上公告：这是「%s」的房间" % [current_floor, no, Net.local_name])
 		return true
 	if String(cur.get("uid", "")) == Net.local_uid and Net.local_uid != "":
 		Net.claim_room(current_floor, idx, "")      # 空名字 = 撕下来
+		if Net.room_claims.has(key):
+			_notice("没能撕下 %d 层 %d 号房的公告（服务器没接受请求）" % [current_floor, no])
+			return false
 		_clear_my_room()
 		_notice("已撕下 %d 层 %d 号房的公告，下次上线从校园出生" % [current_floor, no])
 		return true
