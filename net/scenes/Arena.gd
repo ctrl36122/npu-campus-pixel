@@ -783,6 +783,7 @@ func _process(delta: float) -> void:
 	_update_xray(delta)
 	_update_daynight()
 	_update_interact_hint(delta)
+	_place_hint_above_player()
 
 
 ## 有人被楼盖住 → 在楼身上挖一个「透视窗」（只透玩家周围一小块，楼体其余实心），
@@ -1305,7 +1306,7 @@ func _try_interact() -> bool:
 	if not _near_seat.is_empty():
 		Net.sit_down(_face_code(String(_near_seat["face"])), _near_seat["pos"])
 		return true
-	if in_room:
+	if in_room and _near_door((me as Node2D).position):
 		leave_room()
 		return true
 	if _near_dorm != "":
@@ -1473,8 +1474,24 @@ func _auto_walk_out() -> void:
 	await get_tree().create_timer(3.0).timeout
 	Input.action_release("move_down")
 	await get_tree().create_timer(0.4).timeout
-	print("[dbg] 走到门口后 in_room=", in_room,
-		" pos=", (_local_avatar() as Node2D).position if _local_avatar() != null else Vector2.ZERO)
+	var me: Node = _local_avatar()
+	print("[dbg] 走到门口 in_room=", in_room,
+		" pos=", (me as Node2D).position if me != null else Vector2.ZERO,
+		" 门旁判定=", _near_door((me as Node2D).position) if me != null else false)
+	# 在门口按 E 应该出门（不在门口按 E 什么都不做）
+	var d := InputEventKey.new()
+	d.keycode = KEY_E
+	d.physical_keycode = KEY_E
+	d.pressed = true
+	Input.parse_input_event(d)
+	await get_tree().create_timer(0.12).timeout
+	var u := InputEventKey.new()
+	u.keycode = KEY_E
+	u.physical_keycode = KEY_E
+	u.pressed = false
+	Input.parse_input_event(u)
+	await get_tree().create_timer(0.6).timeout
+	print("[dbg] 门口按 E 之后 in_room=", in_room)
 
 
 ## 等玩家 spawn 出来再进房间（联机会话建立有延迟）
@@ -1545,6 +1562,36 @@ func _collect_dorms() -> void:
 	print("[arena] 可进入的宿舍 %d 栋" % _dorms.size())
 
 
+## 提示条尺寸（逻辑像素）。够放「星天苑H座 · 按 E 进入「宿舍空间」」这一整行。
+const HINT_W := 420.0
+const HINT_H := 34.0
+## 提示底边离人物脚底多少世界像素（人物约 18px 高，名牌到 -25）
+const HINT_LIFT := 34.0
+
+
+## 把提示条摆到人物头顶正上方。CanvasLayer 里的坐标是屏幕像素，
+## 所以用 canvas_transform 把世界坐标换算过去（自动带上相机位置和视距）。
+func _place_hint_above_player() -> void:
+	if _door_hint == null or not _door_hint.visible:
+		return
+	var me: Node = _local_avatar()
+	if me == null:
+		return
+	var vp := get_viewport()
+	# 头顶那个名牌的具体高度会随字号/缩放变，直接拿它的世界矩形当基准，
+	# 比猜一个固定偏移稳（第一版就是猜的，结果提示正好压在名字上）。
+	var anchor_y: float = (me as Node2D).global_position.y - HINT_LIFT
+	var nm: Control = me.get_node_or_null("Name")
+	if nm != null and nm.visible and nm.size.y > 0.0:
+		anchor_y = nm.get_global_rect().position.y - 6.0
+	var world := Vector2((me as Node2D).global_position.x, anchor_y)
+	var screen: Vector2 = vp.get_canvas_transform() * world
+	var half := HINT_W * 0.5
+	var x := clampf(screen.x, half + 6.0, vp.get_visible_rect().size.x - half - 6.0)
+	var y := clampf(screen.y - HINT_H, 6.0, vp.get_visible_rect().size.y - HINT_H - 6.0)
+	_door_hint.position = Vector2(x - half, y)
+
+
 func _build_door_hint() -> void:
 	var layer := CanvasLayer.new()
 	layer.name = "DoorHint"
@@ -1568,13 +1615,11 @@ func _build_door_hint() -> void:
 	_door_hint.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
 	# 20px 的字配 6px 描边，笔画会被糊成一坨（「离」几乎认不出），4px 刚好压住背景又不吃笔画
 	_door_hint.add_theme_constant_override("outline_size", 4)
-	# 放上方居中：底部中央正好落在手机摇杆的判定区（左下 55%×下方 62%），
-	# 点提示会顺带把角色推走两步。上部中间在竖屏和横屏下都是空的。
-	_door_hint.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
-	_door_hint.offset_left = -340.0
-	_door_hint.offset_right = 340.0
-	_door_hint.offset_top = 62.0
-	_door_hint.offset_bottom = 102.0
+	# 位置每帧算（跟着人物头顶），这里只定尺寸和锚点。
+	# 之前钉在屏幕上方居中：换场景/换分辨率都还好，但玩家眼睛盯着人物时
+	# 根本注意不到上方那行字 —— 提示就该长在人物头上。
+	_door_hint.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	_door_hint.size = Vector2(HINT_W, HINT_H)
 	layer.add_child(_door_hint)
 
 
@@ -1600,17 +1645,6 @@ func _update_interact_hint(delta: float) -> void:
 
 	var pos: Vector2 = (me as Node2D).position
 
-	# 走到门口那块垫子上就直接出去。比「站在门边按 E」更符合直觉，
-	# 也彻底堵掉「站在隔间里按 E 一直坐下、以为被卡住」的死循环。
-	if in_room and room != null and int(me.get("sit_dir")) == 0:
-		var ex: Dictionary = room.get("data").get("exit", {})
-		if not ex.is_empty():
-			var ex_rect := Rect2(float(ex["x"]), float(ex["y"]),
-				float(ex["w"]), float(ex["h"]))
-			if ex_rect.has_point((pos - room.position) / TS):
-				leave_room()
-				return
-
 	if int(me.get("sit_dir")) != 0:
 		_near_seat = {}
 		_near_dorm = ""
@@ -1626,10 +1660,15 @@ func _update_interact_hint(delta: float) -> void:
 		_door_hint.text = "按 E 坐下"
 		return
 
+	# 房间里：只有站到门口才提示离开（房间中间按 E 不做任何事，
+	# 免得「想坐下却走出房间」）
 	if in_room:
 		_near_dorm = ""
-		_door_hint.visible = true
-		_door_hint.text = "按 E 离开「%s」" % _room_title
+		if _near_door(pos):
+			_door_hint.visible = true
+			_door_hint.text = "按 E 离开「%s」" % _room_title
+		else:
+			_door_hint.visible = false
 		return
 
 	var cell: Vector2 = pos / TS
@@ -1643,6 +1682,20 @@ func _update_interact_hint(delta: float) -> void:
 	_door_hint.visible = hit != ""
 	if hit != "":
 		_door_hint.text = "%s · 按 E 进入「宿舍空间」" % hit
+
+
+## 是否站在门口（房间局部坐标，格）。门洞在 exit 矩形里，外扩 2.5 格算「门附近」——
+## 太窄的话贴着门框反而判定不到，太宽又会在休息区就被误判成「可以出门」。
+const DOOR_EXIT_PAD := 2.5
+
+func _near_door(pos: Vector2) -> bool:
+	if room == null or not is_instance_valid(room):
+		return false
+	var ex: Dictionary = room.get("data").get("exit", {})
+	if ex.is_empty():
+		return false
+	var r := Rect2(float(ex["x"]), float(ex["y"]), float(ex["w"]), float(ex["h"]))
+	return r.grow(DOOR_EXIT_PAD).has_point((pos - room.position) / TS)
 
 
 ## 点提示文字 = 按 E。手机上唯一的交互入口。
