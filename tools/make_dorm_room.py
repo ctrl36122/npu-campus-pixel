@@ -1,16 +1,27 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""生成「宿舍空间」的房间数据（assets/rooms/dorm_space.json）。
+"""生成「宿舍空间」内景（assets/rooms/dorm_space.json）。
 
-一排小隔间 + 中间的休息区，全部按本项目的 8px/格 尺度排的。
-加 --ascii 打印俯视草图，方便核对隔间、桌椅、门的位置。
+布局：中间一条横向走廊贯通东西，走廊两侧各 4 间、共 8 间带门的宿舍。
+每间配床 + 书桌 + 椅子 + 衣柜 + 绿植；房间铺深色地胶，和走廊的木地板分开。
 
-尺度怎么定的（别随手改，改了所有家具都会失调）：
-  人物约 18px 高（2.25 格）、11px 宽（1.4 格），这是唯一的标尺。
-  - 隔间内净宽 5 格 = 40px ≈ 3.6 个人宽，桌宽 4 格（32px）刚好塞满，
-    两侧各留半格 —— 像网吧的独立包厢，不是空房间。
-  - 桌深 1.75 格（14px），椅子 2×1.5 格，人坐进去贴着桌沿。
-  - 房高 34 格（272px）在室内视距 2.7 下正好一屏，进门一眼看全。
+俯视（格）：
+    ┌────────────────────────────────────────────┐  ← 北外墙
+    │ 房0 │ 房1 │ 房2 │ 房3 │                       ← 北排 4 间（门朝南、开向走廊）
+    ├──门─┼──门─┼──门─┼──门─┤                       ← 墙 A（2 格厚，每间一个 3 格门洞）
+    ╞═══════════ 走 廊（贯通东西，西端是出入口/出生点）═══════════╡
+    ├──门─┼──门─┼──门─┼──门─┤                       ← 墙 B
+    │ 房4 │ 房5 │ 房6 │ 房7 │                       ← 南排 4 间（门朝北、开向走廊）
+    └────────────────────────────────────────────┘  ← 南外墙
+
+尺度（别随手改，改了所有家具都会失调）：
+  人物约 18px 高（2.25 格）、11px 宽（1.4 格），是唯一的标尺。
+  房间净宽 12 格、净深 8 格，够摆下一张床 + 一张桌 + 衣柜。
+  门洞 3 格宽、正对房间中线；家具都摆在左右两侧，中央进门通道保持空着，
+  这样人一进门就站在房间中央，不会一进门就撞家具。
+
+用法：
+  python tools/make_dorm_room.py --ascii      # 打印俯视草图 + 写盘
 """
 
 import argparse
@@ -18,112 +29,124 @@ import io
 import json
 import os
 
-# ── 房间整体 ────────────────────────────────────────────────────────────
-W, H = 59, 22
-T = 2                       # 外墙厚度
+# ── 整体 ────────────────────────────────────────────────────────────────
+T = 2                    # 外墙厚
+PART = 1                 # 房间之间竖向隔墙厚
+BAND = 2                 # 房间 ↔ 走廊之间那堵墙的厚度（2 格才放得下一个门）
+N = 4                    # 每侧房间数
+ROOM_W = 12              # 房间净宽
+ROOM_D = 8               # 房间净深
+CR_H = 6                 # 走廊净高
+DW = 3                   # 房间门洞宽
 
-# ── 隔间 ────────────────────────────────────────────────────────────────
-POD_N = 8                   # 隔间数
-POD_W = 6                   # 每个隔间占地（净宽 5 + 右隔板 1）
-POD_X0 = 2
-POD_Y0 = 2
-POD_H = 7                   # 隔间深度（2 .. 9）
-PART_W = 1                  # 隔板厚度
+X0 = T                   # 最西一间房间内部起点
+ENTR_Y0 = 13             # 西端出入口门洞起点（走廊正中）
+ENTR_H = 3               # 西端出入口门洞高
 
-DESK_W, DESK_D = 4, 2.25    # 桌宽 / 桌深（格）
-CHAIR_W, CHAIR_H = 2.0, 1.5
+# ── 竖向（y）版式 ──────────────────────────────────────────────────────
+N_Y0 = T                 # 北排房间内部起点（2）
+N_Y1 = N_Y0 + ROOM_D     # 10
+A_Y0 = N_Y1              # 墙 A 起点（10，占 10..11）
+CR_Y0 = A_Y0 + BAND      # 走廊起点（12）
+CR_Y1 = CR_Y0 + CR_H     # 走廊终点（18）
+B_Y0 = CR_Y1             # 墙 B 起点（18，占 18..19）
+S_Y0 = B_Y0 + BAND       # 南排房间内部起点（20）
+S_Y1 = S_Y0 + ROOM_D     # 28
 
-DOOR_X0, DOOR_W = 26, 6     # 南墙的门洞
+# ── 横向（x）版式 ──────────────────────────────────────────────────────
+ROOM_X = [X0 + i * (ROOM_W + PART) for i in range(N)]   # 2, 15, 28, 41
+EAST_X = ROOM_X[-1] + ROOM_W                            # 53
+
+W = EAST_X + T           # 55
+H = S_Y1 + T             # 30
 
 
 def r2(v):
     return round(float(v) + 0.0, 3)
 
 
+def room_cx(i):
+    """第 i 间房间的中线 x（门洞以此居中）。"""
+    return ROOM_X[i] + ROOM_W * 0.5
+
+
 def build():
     walls, props, seats, pod_floors, rugs = [], [], [], [], []
 
-    # ── 外墙（南墙留门洞） ──────────────────────────────────────────────
+    # ── 外墙（西墙留出入口门洞） ────────────────────────────────────────
     walls.append({"x": 0, "y": 0, "w": W, "h": T})                       # 北
-    walls.append({"x": 0, "y": T, "w": T, "h": H - T * 2})               # 西
+    walls.append({"x": 0, "y": H - T, "w": W, "h": T})                   # 南
+    walls.append({"x": 0, "y": T, "w": T, "h": ENTR_Y0 - T})             # 西（出入口上方）
+    walls.append({"x": 0, "y": ENTR_Y0 + ENTR_H, "w": T,
+                  "h": (H - T) - (ENTR_Y0 + ENTR_H)})                    # 西（出入口下方）
     walls.append({"x": W - T, "y": T, "w": T, "h": H - T * 2})           # 东
-    walls.append({"x": 0, "y": H - T, "w": DOOR_X0, "h": T})             # 南（左段）
-    walls.append({"x": DOOR_X0 + DOOR_W, "y": H - T,
-                  "w": W - DOOR_X0 - DOOR_W, "h": T})                    # 南（右段）
-    # 门垛：让门像是「开在墙上」，而不是墙断了一截
-    walls.append({"x": DOOR_X0 - 1, "y": H - T - 1.5, "w": 1, "h": 1.5})
-    walls.append({"x": DOOR_X0 + DOOR_W, "y": H - T - 1.5, "w": 1, "h": 1.5})
 
-    # ── 隔间 ────────────────────────────────────────────────────────────
-    for k in range(POD_N):
-        px = POD_X0 + k * POD_W
-        inner = POD_W - PART_W                      # 净宽
-        pod_floors.append({"x": px, "y": POD_Y0, "w": inner, "h": POD_H})
+    # 西端出入口的门（洞外是虚空，不加门就是一块纯黑）
+    props.append({"k": "door", "x": 0.1, "y": ENTR_Y0, "w": T - 0.2, "h": ENTR_H})
 
-        # 隔板（最后一间靠着东侧区域，不用再立）
-        if k < POD_N - 1:
-            walls.append({"x": px + inner, "y": POD_Y0, "w": PART_W, "h": POD_H})
+    # ── 房间与走廊之间的两堵横墙（每间留一个门洞） ──────────────────────
+    for band_y in (A_Y0, B_Y0):
+        cursor = X0
+        for i in range(N):
+            gap0 = room_cx(i) - DW * 0.5
+            gap1 = gap0 + DW
+            if gap0 - cursor > 0.01:
+                walls.append({"x": r2(cursor), "y": band_y,
+                              "w": r2(gap0 - cursor), "h": BAND})
+            cursor = gap1
+        if EAST_X - cursor > 0.01:
+            walls.append({"x": r2(cursor), "y": band_y,
+                          "w": r2(EAST_X - cursor), "h": BAND})
 
-        # 桌子：贴北墙，居中
-        props.append({
-            "k": "desk",
-            "x": r2(px + (inner - DESK_W) * 0.5), "y": r2(POD_Y0 + 0.3),
-            "w": DESK_W, "h": DESK_D, "solid": True,
-        })
+    # 每个门洞上的门（北排门朝南、南排门朝北，画法一样，都是关门）
+    for i in range(N):
+        props.append({"k": "door", "x": r2(room_cx(i) - DW * 0.5), "y": A_Y0,
+                      "w": DW, "h": BAND})
+        props.append({"k": "door", "x": r2(room_cx(i) - DW * 0.5), "y": B_Y0,
+                      "w": DW, "h": BAND})
 
-        # 椅子：桌子正前方，跟桌沿留半格
-        seats.append({
-            "id": "pod%d" % k,
-            "x": r2(px + (inner - CHAIR_W) * 0.5), "y": r2(POD_Y0 + 3.1),
-            "w": CHAIR_W, "h": CHAIR_H, "face": "up",
-        })
+    # ── 房间之间的竖向隔墙（贯穿整个房间深度，与横墙接齐） ──────────────
+    for i in range(N - 1):
+        px = ROOM_X[i] + ROOM_W                       # 14, 27, 40
+        walls.append({"x": px, "y": N_Y0, "w": PART, "h": (A_Y0 + BAND) - N_Y0})
+        walls.append({"x": px, "y": B_Y0, "w": PART, "h": S_Y1 - B_Y0})
 
-        # 隔间角落一件小物：交替放收纳箱 / 绿植，地板别空着
-        props.append({
-            "k": "block" if k % 2 == 0 else "plant",
-            "x": r2(px + 0.4), "y": r2(POD_Y0 + 4.6),
-            "w": 1.3, "h": 1.2, "solid": True,
-        })
+    # ── 每间宿舍：地胶 + 家具 ──────────────────────────────────────────
+    bed_w, bed_h = 2.2, 3.6
+    for i in range(N):
+        rx = ROOM_X[i]
+        for ry in (N_Y0, S_Y0):
+            # 深色地胶，把房间和走廊的木地板分开
+            pod_floors.append({"x": rx, "y": ry, "w": ROOM_W, "h": ROOM_D})
 
-    # 门：把南墙的门洞填上（洞外是虚空，不加门就是一块纯黑）
-    props.append({"k": "door", "x": DOOR_X0, "y": H - T - 0.8,
-                  "w": DOOR_W, "h": T + 0.8})
+            # 床：贴左墙、头朝上墙
+            props.append({"k": "bed", "x": r2(rx + 0.4), "y": r2(ry + 0.6),
+                          "w": bed_w, "h": bed_h, "solid": True})
+            # 衣柜：左下角
+            props.append({"k": "block", "x": r2(rx + 0.5), "y": r2(ry + 5.0),
+                          "w": 1.6, "h": 2.4, "solid": True})
+            # 书桌：贴右墙
+            props.append({"k": "desk", "x": r2(rx + 7.6), "y": r2(ry + 0.6),
+                          "w": 3.4, "h": 2.0, "solid": True})
+            # 椅子：桌子正前方
+            seats.append({"id": "room%d_%s" % (i, "n" if ry == N_Y0 else "s"),
+                          "x": r2(rx + 8.3), "y": r2(ry + 2.7),
+                          "w": 2.0, "h": 1.5, "face": "up"})
+            # 绿植：右下角，房间别太素
+            props.append({"k": "plant", "x": r2(rx + 10.1), "y": r2(ry + 5.6),
+                          "w": 1.2, "h": 1.0, "solid": True})
 
-    # ── 休息区 ──────────────────────────────────────────────────────────
-    rugs.append({"x": 23, "y": 12.6, "w": 12.5, "h": 6.2})
-
-    # 沙发：摆在休息区北侧、面朝镜头（也就是面朝门口）
-    props.append({"k": "sofa", "x": 27.4, "y": 10.8, "w": 3.8, "h": 1.5, "solid": True})
-    # 茶几
-    props.append({"k": "table", "x": 28.4, "y": 14.2, "w": 2.4, "h": 1.2, "solid": True})
-    # 地毯上的坐垫
-    props.append({"k": "cushion", "x": 24.2, "y": 17.2, "w": 1.3, "h": 1.0})
-    props.append({"k": "cushion", "x": 33.4, "y": 17.2, "w": 1.3, "h": 1.0})
-
-    # 西侧聊天角：一张矮桌 + 两个坐垫，把左半边填起来
-    props.append({"k": "table", "x": 9.2, "y": 14.4, "w": 2.6, "h": 1.2, "solid": True})
-    props.append({"k": "cushion", "x": 8.0, "y": 16.6, "w": 1.3, "h": 1.0})
-    props.append({"k": "cushion", "x": 11.4, "y": 16.6, "w": 1.3, "h": 1.0})
-    props.append({"k": "cushion", "x": 10.0, "y": 12.0, "w": 1.3, "h": 1.0})
-    # 西墙的书架（用柜子代替，跨两格高）
-    props.append({"k": "block", "x": 2.4, "y": 12.4, "w": 1.4, "h": 2.2, "solid": True})
-    props.append({"k": "block", "x": 2.4, "y": 15.0, "w": 1.4, "h": 2.2, "solid": True})
-
-    # 贩卖机：东侧空档、贴东墙
-    props.append({"k": "vending", "x": 55.0, "y": 10.2, "w": 1.7, "h": 1.4, "solid": True})
-    # 收纳柜
-    props.append({"k": "block", "x": 52.0, "y": 12.0, "w": 1.4, "h": 1.9, "solid": True})
-    props.append({"k": "block", "x": 52.0, "y": 14.4, "w": 1.4, "h": 1.9, "solid": True})
-    # 绿植：墙角 / 过道边
-    for (gx, gy) in [(2.4, 10.2), (43.5, 17.8), (48.5, 10.4), (55.4, 17.2), (40, 17.8)]:
-        props.append({"k": "plant", "x": r2(gx), "y": r2(gy), "w": 1.2, "h": 1.0, "solid": True})
+    # ── 走廊：一条贯通东西的地毯 ──────────────────────────────────────
+    rugs.append({"x": r2(X0 + 1), "y": r2(CR_Y0 + 1.5),
+                 "w": r2(EAST_X - X0 - 2), "h": r2(CR_H - 3.0)})
 
     return {
         "id": "dorm_space",
         "name": "宿舍空间",
         "W": W, "H": H,
-        "spawn": {"x": DOOR_X0 + DOOR_W * 0.5, "y": H - T - 2.5},
-        "exit": {"x": DOOR_X0 + 0.5, "y": H - T - 1.5, "w": DOOR_W - 1, "h": 1.5},
+        # 出生点放在走廊上（西端出入口进来的位置附近）
+        "spawn": {"x": 6.0, "y": CR_Y0 + CR_H * 0.5},
+        "exit": {"x": 0.5, "y": ENTR_Y0, "w": 1.5, "h": ENTR_H},
         "pod_floors": pod_floors,
         "rugs": rugs,
         "walls": walls,
@@ -149,9 +172,11 @@ def ascii_plan(d):
     for w in d["walls"]:
         fill(w["x"], w["y"], w["w"], w["h"], "#")
     for p in d["props"]:
-        fill(p["x"], p["y"], p["w"], p["h"], {"desk": "D", "table": "t", "sofa": "S",
-                                              "vending": "V", "plant": "*", "block": "+",
-                                              "cushion": "o"}.get(p["k"], "?"))
+        fill(p["x"], p["y"], p["w"], p["h"], {
+            "desk": "D", "table": "t", "sofa": "S", "vending": "V",
+            "plant": "*", "block": "+", "cushion": "o", "bed": "B",
+            "door": "d", "board": "W",
+        }.get(p["k"], "?"))
     for s in d["seats"]:
         fill(s["x"], s["y"], s["w"], s["h"], "C")
     sp = d["spawn"]
@@ -163,10 +188,10 @@ def ascii_plan(d):
     print("   " + "".join(str(i % 10) for i in range(W)))
     for y in range(H):
         print("%2d " % y + "".join(grid[y]))
-    print("\n图例  # 墙/隔板   , 隔间地面   : 地毯   D 工位桌   C 椅子   S 沙发   "
-          "t 茶几   V 贩卖机   * 绿植   + 柜子   o 坐垫   = 门垫   @ 出生点")
-    print("\n尺寸 %d × %d 格 = %d × %d px；隔间 %d 个，座位 %d 个"
-          % (W, H, W * 8, H * 8, POD_N, len(d["seats"])))
+    print("\n图例  # 墙/隔板   , 房间地胶   : 走廊地毯   B 床   D 桌   C 椅子   + 衣柜   "
+          "* 绿植   d 门   = 出入口   @ 出生点")
+    print("\n尺寸 %d × %d 格 = %d × %d px；房间 %d 间，座位 %d 个"
+          % (W, H, W * 8, H * 8, N * 2, len(d["seats"])))
 
 
 def main():

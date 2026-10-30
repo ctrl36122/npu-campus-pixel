@@ -53,6 +53,8 @@ func _draw() -> void:
 			_chair_back(o, w, h)
 		"sofa":
 			_sofa(o, w, h)
+		"bed":
+			_bed(o, w, h)
 		"plant":
 			_plant(o, w, h)
 		"cushion":
@@ -415,6 +417,40 @@ func _sofa(o: Vector2, w: float, h: float) -> void:
 		draw_rect(Rect2(sx, o.y - 5.0, arm, h + 5.0), Color("5e4462"))
 		draw_rect(Rect2(sx, o.y - 5.0, arm, 1.0), Color("7d5d81"))
 		draw_rect(Rect2(sx + (0.0 if sx == o.x else arm - 1.0), o.y - 5.0, 1.0, h + 5.0), lo)
+
+
+# ---------------------------------------------------------------- 床
+
+## 单人床，俯视 + 微 2.5D：床架正面、床垫顶面、床头枕头、下半段盖被子。
+## 头在 rect 上方（北），脚在下方 —— 宿舍里床统一头朝墙摆。
+func _bed(o: Vector2, w: float, h: float) -> void:
+	_shadow(o, w, h, 1.5)
+	var rise := clampf(h * 0.12, 3.0, 6.0)     # 床架露出的正面高度
+	# 床架正面（靠镜头那条边）
+	draw_rect(Rect2(o.x, o.y + h - rise, w, rise), Color("4a3c30"))
+	draw_rect(Rect2(o.x, o.y + h - rise, w, 1.0), Color("33291f"))
+	# 床垫顶面（受光）
+	draw_rect(Rect2(o.x, o.y - rise, w, h), Color("d8d2c4"))
+	draw_rect(Rect2(o.x, o.y - rise, w, 1.0), Color("efe9dc"))
+	draw_rect(Rect2(o.x, o.y - rise, 1.0, h), Color("c8c1b3"))
+	draw_rect(Rect2(o.x + w - 1.0, o.y - rise, 1.0, h), Color("b4ad9f"))
+	var top := o.y - rise
+	# 被子：盖住下半段（脚端），头端留出枕头区
+	var pillow_h := clampf(h * 0.20, 5.0, 10.0)
+	var quilt_y := top + pillow_h + clampf(h * 0.06, 2.0, 4.0)
+	var quilt_h := (top + h) - quilt_y - 1.0
+	if quilt_h > 3.0:
+		draw_rect(Rect2(o.x + 1.0, quilt_y, w - 2.0, quilt_h), Color("6d86a6"))
+		draw_rect(Rect2(o.x + 1.0, quilt_y, w - 2.0, 1.0), Color("86a0c0"))
+		draw_rect(Rect2(o.x + 1.0, quilt_y + quilt_h * 0.5, w - 2.0, 1.0), Color(0, 0, 0, 0.10))
+		draw_rect(Rect2(o.x + 1.0, quilt_y + quilt_h - 1.0, w - 2.0, 1.0), Color(0, 0, 0, 0.16))
+	# 枕头（头端，靠上）
+	var pw := clampf(w * 0.72, 8.0, 22.0)
+	var px := o.x + (w - pw) * 0.5
+	draw_rect(Rect2(px, top + 2.0, pw, maxf(3.0, pillow_h - 1.0)), Color("f3efe6"))
+	draw_rect(Rect2(px, top + 2.0, pw, 1.0), Color("ffffff"))
+	draw_rect(Rect2(px, top + 2.0, 1.0, maxf(3.0, pillow_h - 1.0)), Color("e2ddd2"))
+	draw_rect(Rect2(px + pw - 1.0, top + 2.0, 1.0, maxf(3.0, pillow_h - 1.0)), Color("d5cfc2"))
 
 
 # ---------------------------------------------------------------- 绿植 / 坐垫

@@ -1363,11 +1363,16 @@ func enter_room(path: String) -> bool:
 	me.call("teleport_to", target)
 	me.set("_room_freeze", true)
 	_set_cam_limit(me, true)
-	# 调试时 XGD_ZOOM 优先，否则统一用房间视距（房间比校园开阔得多）
+	# 调试时 XGD_ZOOM 优先，否则按房间尺寸自适应：
+	# 小房间用 ROOM_ZOOM 填满屏幕；大房间（8 间宿舍这种）自动缩小到能一眼看全，
+	# 不然一次只看得到三分之二、得一直拖着找房间。
 	if OS.has_environment("XGD_ZOOM"):
 		me.set("_cam_zoom_target", clampf(OS.get_environment("XGD_ZOOM").to_float(), 0.55, 3.0))
 	else:
-		me.set("_cam_zoom_target", ROOM_ZOOM)
+		var vp: Vector2 = get_viewport().get_visible_rect().size
+		var rw: Vector2 = (room as Node2D).get("size_px") * (room as Node2D).global_scale
+		var fit: float = minf(vp.x / maxf(rw.x, 1.0), vp.y / maxf(rw.y, 1.0))
+		me.set("_cam_zoom_target", clampf(minf(ROOM_ZOOM, fit), 0.55, ROOM_ZOOM))
 	in_room = true
 
 	# 房间没有烘焙光照图，全屏夜幕会把它压成一片黑
