@@ -6,6 +6,12 @@
 assets/rooms/*.svg
 assets/rooms/*.svg.import
 
+# 调试截图（XGD_VERIFY 生成的）
+shot_verify.png
+shot_verify.png.import
+shot_room.png
+shot_room.png.import
+
 # ── 构建产物（可执行文件走 GitHub Releases，不进仓库）──
 /build/*
 # 例外：部署脚本与配置要进仓库（体积小，且是服务器部署的唯一出处）
