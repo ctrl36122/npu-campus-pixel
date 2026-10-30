@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>像素工大 · 下载</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 16px 64px;
+    background: #14181f; color: #e6e9ef;
+    font: 15px/1.7 "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  h1 {
+    font-size: 26px; letter-spacing: 2px; margin: 0 0 6px;
+    text-shadow: 3px 3px 0 #0a0d12;
+  }
+  .sub { color: #8c97a8; font-size: 13px; margin-bottom: 28px; }
+  .card {
+    background: #1c222c; border: 2px solid #2b3444; border-radius: 0;
+    padding: 16px 18px; margin-bottom: 14px;
+    box-shadow: 5px 5px 0 #0a0d12;
+  }
+  .row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .name { font-size: 17px; font-weight: 700; min-width: 96px; }
+  .meta { color: #8c97a8; font-size: 13px; flex: 1; min-width: 180px; }
+  a.btn {
+    display: inline-block; padding: 8px 18px; text-decoration: none;
+    color: #14181f; background: #ffb454; font-weight: 700; font-size: 14px;
+    border: 2px solid #b57b2e; box-shadow: 3px 3px 0 #0a0d12;
+  }
+  a.btn:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 #0a0d12; }
+  a.btn.ghost {
+    background: transparent; color: #ffb454; border-color: #5a4326;
+  }
+  pre {
+    background: #0e1218; border-left: 3px solid #ffb454; margin: 10px 0 4px;
+    padding: 10px 12px; overflow-x: auto; font-size: 13px;
+    font-family: ui-monospace, Menlo, Consolas, monospace; color: #cfe3ff;
+  }
+  .tip { color: #8c97a8; font-size: 13px; }
+  .tip b { color: #ffd08a; font-weight: 700; }
+  .note {
+    margin-top: 26px; padding-top: 16px; border-top: 1px solid #2b3444;
+    color: #77808f; font-size: 12.5px;
+  }
+  code { color: #ffd08a; font-family: ui-monospace, Menlo, Consolas, monospace; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>像素工大 · 长安校区</h1>
+  <div class="sub">v1.2.1 · 2026-10-30 · 西北工业大学长安校区像素地图</div>
+
+  <div class="card">
+    <div class="row">
+      <span class="name">Windows</span>
+      <span class="meta">XGD-Campus-win64.zip · 48.7 MB<br>解压后双击「像素工大.exe」，免安装</span>
+      <a class="btn" href="XGD-Campus-win64.zip">下载</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <span class="name">macOS</span>
+      <span class="meta">XGD-Campus-macos.zip · 70.2 MB<br>通用版（Apple 芯片 + Intel），macOS 11+</span>
+      <a class="btn" href="XGD-Campus-macos.zip">下载</a>
+    </div>
+    <div class="tip" style="margin-top:12px">
+      这个包<b>没有 Apple 开发者签名</b>，Apple 芯片上未签名的程序会被系统直接拦掉。
+      解压之后先在「终端」里跑一次（只跑一次），之后双击就能玩：
+    </div>
+    <pre>cd ~/Downloads
+xattr -cr 像素工大.app &amp;&amp; codesign --force --deep --sign - 像素工大.app</pre>
+    <div class="tip">放在别处就把第一行换成对应目录（<code>~/Desktop</code> 或 <code>~/Applications</code>）。包内还有一份「macOS 安装说明.txt」。</div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <span class="name">Android</span>
+      <span class="meta">XGD-Campus-android.zip · 38.0 MB<br>解压安装 .apk，需要允许「安装未知来源应用」</span>
+      <a class="btn" href="XGD-Campus-android.zip">下载</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <span class="name">网页版</span>
+      <span class="meta">已下线 · 不再提供浏览器版<br>请下载上面的客户端（同一台服务器，联机互通）</span>
+    </div>
+  </div>
+
+  <div class="note">
+    所有客户端连同一个公共服务器（<code><你的服务器IP></code>），
+    只有连同一台服务器、并且进同一层同一间宿舍的人才能互相看见。<br>
+    进宿舍楼按 <code>E</code>，认房间 / 写公告板 / 躺床也都是 <code>E</code>，
+    <code>T</code> 打开传送面板，<code>Tab</code> 改昵称与服务器地址。<br><br>
+    v1.2.1 修的是联机：宿舍里能看见别人了、聊天框真的同步了。
+    这些改动碰到联机协议，<b>客户端和服务端必须都是 v1.2.1</b>，旧客户端连新服务器会进不去。
+  </div>
+
+</div>
+</body>
+</html>

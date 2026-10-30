@@ -18,6 +18,7 @@ shot_room.png.import
 !/build/deploy/
 /build/deploy/*
 !/build/deploy/Caddyfile
+!/build/deploy/dl_index.html
 !/build/deploy/install.sh
 !/build/deploy/xgd.service
 !/build/deploy/README.md

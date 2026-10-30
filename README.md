@@ -4,7 +4,7 @@
 
 **把西北工业大学长安校区做成一张可以走进去的像素地图。**
 
-Godot 4 实现 · Windows / macOS / Android / 网页四端 · 支持多人在线同屏与群聊
+Godot 4 实现 · Windows / macOS / Android 三端 · 支持多人在线同屏与群聊
 
 <p>
 <img src="docs/screenshots/day.png" width="32%" alt="白天">
@@ -78,6 +78,10 @@ xattr -cr 像素工大.app && codesign --force --deep --sign - 像素工大.app
 
 **注意**：这次改到了联机协议，**服务端和新客户端要一起更新**；旧版客户端连新版服务器
 会提示版本不一致、进不去。公共服务器 `<你的服务器IP>` 已同步更新。
+
+**网页版下线** — 服务器不再托管浏览器版（省掉 wasm 与每个网页玩家的连接开销），
+现在 `http://<你的服务器IP>/` 会跳到 `/dl/` 下载页。恢复办法写在
+`build/deploy/Caddyfile` 的注释里。
 
 **新增 macOS 版** — 导出的是通用二进制（arm64 + x86_64），Apple 芯片和 Intel 都能跑，
 要求 macOS 11 以上（Intel 10.13 以上）。包内附「macOS 安装说明.txt」：因为这个包没有
@@ -251,11 +255,12 @@ sudo DOMAIN=game.example.com bash install.sh  # 有域名：自动签 HTTPS 证�
 它会装好 Caddy、建 `/opt/xgd/{server,web}`、注册 systemd 服务并自检。
 装完之后，客户端在设置里把「服务器地址」填成 `ws://你的IP/ws` 就能连。
 
-**3. 网页版**
+**3. 网页版（2026-10-30 起不再提供）**
 
-网页版是单机的（浏览器里没有 UDP，建不了 ENet 主机）。
-如果服务器上同时部署了网页包，浏览器打开地址就能直接玩，
-多人还需要走 `wss://`，细节见 [`build/deploy/README.md`](build/deploy/README.md)。
+网页版已经下线：浏览器里没有 UDP、建不了 ENet 主机，跑起来还要额外扛 wasm +
+每个网页玩家一条 WS，收益不值这些开销。`export_presets.example.cfg` 里的 Web 预设
+和 `build/deploy/Caddyfile` 注释里的 `:443` 段落都留着，将来想恢复照着加回来即可。
+现在服务器只做两件事：`ws://IP/ws`（游戏服务器）和 `/dl/`（安装包下载）。
 
 > 服务器地址的优先级：`assets/server.local.json`（本机私有，已被 git 忽略）
 > → 环境变量 `XGD_SERVER` → `assets/server.json`（仓库里的空模板）。

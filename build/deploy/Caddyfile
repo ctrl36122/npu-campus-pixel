@@ -1,44 +1,44 @@
 # 像素工大 · 长安校区
 #
-# 同一个世界，两种接入方式：
-#   网页版  https://你的服务器地址/         （自签证书，浏览器需点一次「继续前往」）
-#           └─ wss://你的服务器地址/ws
-#   exe 版  ws://你的服务器地址/ws          （明文 WS，不需要证书，填进设置里的「服务器地址」）
+# 2026-10-30：网页版下线（放弃 web 端）。这台机器现在只做两件事：
+#   ws://你的服务器地址/ws      游戏服务器（Windows / macOS / Android 客户端连这里）
+#   http://你的服务器地址/dl/   安装包下载（纯静态，不跑任何游戏逻辑）
+# 其余路径一律跳到下载页。
 #
-# 为什么网页版必须 https：Godot Web 强制要求 Secure Context。
-# 为什么证书是自签：大陆 ECS 上未备案域名走 80/443 会被按 Host 掐断（LE 验证被 reset）。
-# 以后有了备案域名，把 :443 换成 `你的域名 { ... }` 并删掉 tls 两行即可自动签证书。
-:443 {
-	tls /etc/caddy/xgd.crt /etc/caddy/xgd.key
+# 网页版的构建产物还留在 /opt/xgd/web（现在不再被 serve，不占带宽也不占连接）。
+# 将来要恢复网页版，把下面这段加回来（Godot Web 强制要求 Secure Context，
+# 所以必须是 https；证书自签是因为大陆 ECS 上未备案域名走 80/443 会被按 Host 掐断）：
+#
+#   :443 {
+#       tls /etc/caddy/xgd.crt /etc/caddy/xgd.key
+#       handle /ws* { reverse_proxy 127.0.0.1:9080 }
+#       handle { root * /opt/xgd/web
+#                file_server }
+#       header /index.wasm Cache-Control "no-cache"
+#       header /index.pck  Cache-Control "no-cache"
+#   }
 
-	encode gzip
-
+:80 {
+	# 游戏服务器（明文 WS，客户端设置里填 ws://IP/ws）
 	handle /ws* {
 		reverse_proxy 127.0.0.1:9080
 	}
 
-	handle {
+	# 安装包下载：/opt/xgd/web/dl/ 下的 zip 与下载页
+	handle /dl* {
 		root * /opt/xgd/web
 		file_server
 	}
 
-	header /index.wasm Cache-Control "public, max-age=31536000, immutable"
-	header /index.pck Cache-Control "public, max-age=31536000, immutable"
-	header /index.js Cache-Control "public, max-age=86400"
+	# 其它路径（含原来的网页版首页）→ 下载页
+	# 注意要写 `redir * /dl/ permanent`：只写 `redir /dl/ permanent` 时
+	# Caddy 会把 /dl/ 当成 inline path matcher，变成「Location: permanent」的怪响应
+	handle {
+		redir * /dl/ permanent
+	}
 
 	header {
 		-Server
 		X-Content-Type-Options nosniff
-	}
-}
-
-# 80 端口：/ws 走明文 WebSocket（给 exe 客户端用），其余跳 https（给浏览器用）
-:80 {
-	handle /ws* {
-		reverse_proxy 127.0.0.1:9080
-	}
-
-	handle {
-		redir https://{host}{uri} permanent
 	}
 }
