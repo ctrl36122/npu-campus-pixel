@@ -158,6 +158,10 @@ func _ready() -> void:
 	# 调试：模拟按一次 E，验证的是「按键 → 就近判定 → 进房间」整条链路
 	if OS.has_environment("XGD_TEST_E"):
 		_auto_press_e()
+	# 调试：进房间后往南走，验证「走到门口自动离开」
+	if OS.has_environment("XGD_TEST_DOOR"):
+		_auto_walk_out()
+	_guard_local_spawn()
 
 
 ## 生成校园 NPC。挂在 Objects 下是为了和建筑/树共用 y 排序（走到树后面会被遮住）。
@@ -1254,8 +1258,11 @@ const DOOR_CHECK_HZ := 8.0
 ## 1.9 让房间填满屏幕，人物约 34px 高，坐着/站着一眼能分清。
 const ROOM_ZOOM := 2.1
 const CAMPUS_ZOOM := 1.2
-## 离座位多近才能坐（像素，campus/Objects 局部空间 = 8px/格）
-const SEAT_RADIUS := 46.0
+## 离座位多近才能坐（像素，campus/Objects 局部空间 = 8px/格）。
+## 这个值必须**小于「椅子中心到隔间开口」的距离**（约 25px），否则站在隔间里
+## 任何位置按 E 都是「坐下」，走出去也一直在坐下 —— 表现就是「人被卡在宿舍空间里」。
+## 22px ≈ 2.75 格：贴着椅子能坐，退到隔间门口就是「离开」。
+const SEAT_RADIUS := 22.0
 
 var room: Node2D
 var in_room := false
@@ -1402,7 +1409,7 @@ func _auto_press_e() -> void:
 		var a: Node = _local_avatar()
 		if a != null:
 			var s: Dictionary = _seats_room[0]
-			a.call("teleport_to", (s["pos"] as Vector2) + Vector2(0.0, 26.0))
+			a.call("teleport_to", (s["pos"] as Vector2) + Vector2(0.0, 16.0))
 			print("[arena] 已站到座位旁：座位=", s["pos"], " 朝向=", s["face"])
 			await get_tree().create_timer(0.5).timeout
 			print("[dbg] 玩家现在=", (a as Node2D).position, " 距离=",
@@ -1437,6 +1444,37 @@ func _auto_press_e() -> void:
 		await get_tree().create_timer(0.3).timeout
 		print("[dbg] 按方向键后 sit_dir=", int(a3.get("sit_dir")),
 			" pos=", (a3 as Node2D).position)
+
+
+## 兜底：客户端连上了、但一直收不到有效的位置同步时（服务器版本和客户端不一致
+## 就会这样 —— RPC 校验和对不上，位置包全被丢弃），本地玩家会停在 (0,0)，
+## 也就是校园围墙外的角落，表现就是「进游戏人就卡在地图外面，动不了也没法玩」。
+## 这里把它挪回正常出生点，至少能单机玩下去，同时打一条警告方便排查。
+func _guard_local_spawn() -> void:
+	await get_tree().create_timer(2.5).timeout
+	if Net.is_server():
+		return
+	var me: Node = _local_avatar()
+	if me == null:
+		return
+	if (me as Node2D).position.length() < 1.0:
+		(me as Node2D).call("teleport_to", _spawn_cell() * TS)
+		push_warning("[arena] 位置同步异常（服务器与客户端版本不一致？）已挪回出生点")
+
+
+## 调试：进房间后一路往南走，应该踩到门垫就自动出去。
+func _auto_walk_out() -> void:
+	await get_tree().create_timer(2.5).timeout
+	if not in_room:
+		enter_room("res://assets/rooms/dorm_space.json")
+	await get_tree().create_timer(2.0).timeout
+	print("[dbg] 走之前 in_room=", in_room)
+	Input.action_press("move_down")
+	await get_tree().create_timer(3.0).timeout
+	Input.action_release("move_down")
+	await get_tree().create_timer(0.4).timeout
+	print("[dbg] 走到门口后 in_room=", in_room,
+		" pos=", (_local_avatar() as Node2D).position if _local_avatar() != null else Vector2.ZERO)
 
 
 ## 等玩家 spawn 出来再进房间（联机会话建立有延迟）
@@ -1561,6 +1599,17 @@ func _update_interact_hint(delta: float) -> void:
 		return
 
 	var pos: Vector2 = (me as Node2D).position
+
+	# 走到门口那块垫子上就直接出去。比「站在门边按 E」更符合直觉，
+	# 也彻底堵掉「站在隔间里按 E 一直坐下、以为被卡住」的死循环。
+	if in_room and room != null and int(me.get("sit_dir")) == 0:
+		var ex: Dictionary = room.get("data").get("exit", {})
+		if not ex.is_empty():
+			var ex_rect := Rect2(float(ex["x"]), float(ex["y"]),
+				float(ex["w"]), float(ex["h"]))
+			if ex_rect.has_point((pos - room.position) / TS):
+				leave_room()
+				return
 
 	if int(me.get("sit_dir")) != 0:
 		_near_seat = {}
