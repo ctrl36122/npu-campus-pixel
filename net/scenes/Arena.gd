@@ -1313,6 +1313,16 @@ var _notice_clock := 0.0
 ## 门口公告牌：[{index, side, x, y, w, h, panel, label}]，14 块，文字按 current_floor 刷新
 var _door_plates: Array = []
 var _door_plates_holder: Control
+## 门口公告面板（懒创建，跟楼层 UI 同一个 CanvasLayer）
+## _note_panel = 自己的（编辑），_note_view = 别人的（只读）
+var _note_panel: PanelContainer
+var _note_edit: TextEdit
+var _note_title: Label
+var _note_count: Label
+var _note_view: PanelContainer
+var _note_view_title: Label
+var _note_view_body: Label
+var _note_room_idx: int = -1
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -1327,6 +1337,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	if k.keycode == KEY_F and _try_claim_room():
 		get_viewport().set_input_as_handled()
 		return
+	if k.keycode == KEY_ESCAPE and _note_open():
+		_close_note_all()
+		get_viewport().set_input_as_handled()
+		return
 	if k.keycode == KEY_ESCAPE and _floor_open:
 		_close_floor_panel()
 		get_viewport().set_input_as_handled()
@@ -1339,7 +1353,10 @@ func _try_interact() -> bool:
 	var me: Node = _local_avatar()
 	if me == null:
 		return false
-	# 选层面板开着时，E 先关面板
+	# 面板开着时，E 先关面板（选层 / 公告查看）
+	if _note_open():
+		_close_note_all()
+		return true
 	if _floor_open:
 		_close_floor_panel()
 		return true
@@ -1355,6 +1372,12 @@ func _try_interact() -> bool:
 	if in_room and _near_elevator((me as Node2D).position):
 		_open_floor_panel()
 		return true
+	# 门口公告板：站在某间宿舍门口按 E —— 自己的房是编写，别人的房是查看
+	if in_room and not _note_open():
+		var rd: Dictionary = _nearest_room_door((me as Node2D).position)
+		if not rd.is_empty():
+			_open_note_board(int(rd["index"]))
+			return true
 	if in_room and _near_door((me as Node2D).position):
 		leave_room()
 		return true
@@ -1777,11 +1800,11 @@ func _update_interact_hint(delta: float) -> void:
 				var cur: Dictionary = Net.room_claims.get("%d:%d" % [current_floor, int(rd["index"])], {})
 				_door_hint.visible = true
 				if cur.is_empty():
-					_door_hint.text = "%d 号房 · 按 F 认领为本人的房间" % no
+					_door_hint.text = "%d 号房 · 空房 · 按 F 认领" % no
 				elif String(cur.get("uid", "")) == Net.local_uid:
-					_door_hint.text = "%d 号房（你的）· 按 F 撕下公告" % no
+					_door_hint.text = "%d 号房（你的）· F 撕公告 · E 编写门口公告" % no
 				else:
-					_door_hint.text = "%d 号房 · 「%s」的房间" % [no, String(cur.get("name", "?"))]
+					_door_hint.text = "%d 号房 ·「%s」的房间 · E 看门口公告" % [no, String(cur.get("name", "?"))]
 		return
 
 	var cell: Vector2 = pos / TS
@@ -2063,6 +2086,14 @@ func _ensure_floor_ui() -> void:
 	_floor_panel.visible = false
 	host.add_child(_floor_panel)
 
+	# 门口公告面板（要在换层黑场之前加，黑场才盖得住它）
+	_note_panel = _build_note_panel()
+	_note_panel.visible = false
+	host.add_child(_note_panel)
+	_note_view = _build_note_view()
+	_note_view.visible = false
+	host.add_child(_note_view)
+
 	# 换层黑场（加在最后 → 盖在最上层）
 	_floor_flash = ColorRect.new()
 	_floor_flash.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -2245,6 +2276,7 @@ func _build_door_plates() -> void:
 		lb.add_theme_constant_override("outline_size", 3)
 		pc.add_child(lb)
 		pc.visible = false
+		pc.z_index = -1
 		_door_plates_holder.add_child(pc)
 		_door_plates.append({
 			"index": int(d["index"]), "side": String(d["side"]),
@@ -2263,7 +2295,176 @@ func _clear_door_plates() -> void:
 	_door_plates.clear()
 
 
+# ── 门口公告板（自我介绍） ─────────────────────────────────────────────
+## 牌子上只写房名（有人住 / 空房），公告正文不外显：
+## 站到自己房门口按 E 是编写，站到别人房门口按 E 是打开一个只读面板看全文。
+## 这样走廊上不会挂满长文字，但想看的人一按就能看到。
+
+func _build_note_panel() -> PanelContainer:
+	var pc := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.07, 0.09, 0.14, 0.97)
+	sb.border_color = Color(0.95, 0.78, 0.38, 0.95)
+	sb.set_border_width_all(2)
+	sb.content_margin_left = 16
+	sb.content_margin_right = 16
+	sb.content_margin_top = 14
+	sb.content_margin_bottom = 14
+	pc.add_theme_stylebox_override("panel", sb)
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 9)
+	pc.add_child(vb)
+	_note_title = Label.new()
+	_note_title.add_theme_font_size_override("font_size", 17)
+	_note_title.add_theme_color_override("font_color", Color("#ffe9a8"))
+	_note_title.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
+	_note_title.add_theme_constant_override("outline_size", 4)
+	vb.add_child(_note_title)
+	var hint := Label.new()
+	hint.text = "写点自我介绍：叫什么、哪个学院、作息、想认识什么样的人…（最多 160 字）"
+	hint.add_theme_font_size_override("font_size", 12)
+	hint.add_theme_color_override("font_color", Color(0.62, 0.70, 0.80))
+	vb.add_child(hint)
+	_note_edit = TextEdit.new()
+	_note_edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+	_note_edit.custom_minimum_size = Vector2(460, 150)
+	_note_edit.add_theme_font_size_override("font_size", 15)
+	_note_edit.add_theme_color_override("font_color", Color("#e6effb"))
+	_note_edit.text_changed.connect(_update_note_count)
+	vb.add_child(_note_edit)
+	var hb := HBoxContainer.new()
+	hb.add_theme_constant_override("separation", 10)
+	vb.add_child(hb)
+	_note_count = Label.new()
+	_note_count.add_theme_font_size_override("font_size", 12)
+	_note_count.add_theme_color_override("font_color", Color(0.55, 0.62, 0.72))
+	hb.add_child(_note_count)
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hb.add_child(spacer)
+	for cfg: Array in [["保存", _save_note_board], ["擦掉", _clear_note_board], ["取消", _close_note_board]]:
+		var b := Button.new()
+		b.text = String(cfg[0])
+		b.custom_minimum_size = Vector2(84, 34)
+		b.focus_mode = Control.FOCUS_NONE
+		b.pressed.connect(cfg[1] as Callable)
+		hb.add_child(b)
+	return pc
+
+
+func _update_note_count() -> void:
+	if _note_count != null:
+		_note_count.text = "%d / 160 字" % _note_edit.text.length()
+
+
+## 只读面板：别人家的公告全文（可换行、按宽度自动折行）。
+func _build_note_view() -> PanelContainer:
+	var pc := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.06, 0.08, 0.13, 0.97)
+	sb.border_color = Color(0.55, 0.66, 0.80, 0.95)
+	sb.set_border_width_all(2)
+	sb.content_margin_left = 18
+	sb.content_margin_right = 18
+	sb.content_margin_top = 14
+	sb.content_margin_bottom = 14
+	pc.add_theme_stylebox_override("panel", sb)
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 10)
+	pc.add_child(vb)
+	_note_view_title = Label.new()
+	_note_view_title.add_theme_font_size_override("font_size", 17)
+	_note_view_title.add_theme_color_override("font_color", Color("#ffe9a8"))
+	_note_view_title.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
+	_note_view_title.add_theme_constant_override("outline_size", 4)
+	vb.add_child(_note_view_title)
+	_note_view_body = Label.new()
+	_note_view_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_note_view_body.custom_minimum_size = Vector2(420, 0)
+	_note_view_body.add_theme_font_size_override("font_size", 15)
+	_note_view_body.add_theme_color_override("font_color", Color("#dbe7f5"))
+	vb.add_child(_note_view_body)
+	var foot := Label.new()
+	foot.text = "按 E / Esc 关闭"
+	foot.add_theme_font_size_override("font_size", 12)
+	foot.add_theme_color_override("font_color", Color(0.55, 0.62, 0.72))
+	vb.add_child(foot)
+	return pc
+
+
+## 打开某间房的公告板：自己的可编辑，别人的只读，空房提示先认领。
+func _open_note_board(idx: int) -> void:
+	var cur: Dictionary = Net.room_claims.get("%d:%d" % [current_floor, idx], {})
+	if cur.is_empty():
+		_notice("%d 号房还没人认领 · 先按 F 认领，再来贴公告" % (idx + 1))
+		return
+	if String(cur.get("uid", "")) != Net.local_uid:
+		_note_view_title.text = "%d 号房 ·「%s」" % [idx + 1, String(cur.get("name", "?"))]
+		var note := String(cur.get("note", ""))
+		_note_view_body.text = note if not note.is_empty() else "这间房的房主还没写公告。"
+		_note_view_body.add_theme_color_override("font_color",
+			Color("#e6effb") if not note.is_empty() else Color(0.60, 0.66, 0.74))
+		_note_view.visible = true
+		_center_panel.call_deferred(_note_view)
+		return
+	_note_room_idx = idx
+	_note_title.text = "编写 %d 号房的门口公告" % (idx + 1)
+	_note_edit.text = String(cur.get("note", ""))
+	_update_note_count()
+	_note_panel.visible = true
+	_center_panel(_note_panel)
+	_note_edit.grab_focus()
+
+
+## 面板居中（内容尺寸要等一帧才稳定，所以打开时也允许 deferred 调）
+func _center_panel(pc: Control) -> void:
+	if pc == null or not is_instance_valid(pc):
+		return
+	var vs := get_viewport().get_visible_rect().size
+	var sz := pc.get_combined_minimum_size()
+	pc.position = (vs - sz) * 0.5
+
+
+func _save_note_board() -> void:
+	if _note_room_idx < 0:
+		return
+	var idx := _note_room_idx
+	var txt := _note_edit.text
+	_close_note_board()
+	Net.set_room_note(idx, txt)
+	_notice("门口公告已擦掉" if txt.strip_edges().is_empty() else "门口公告已更新")
+
+
+func _clear_note_board() -> void:
+	_note_edit.text = ""
+	_save_note_board()
+
+
+func _close_note_board() -> void:
+	if _note_panel != null:
+		_note_panel.visible = false
+	if _note_edit != null and _note_edit.is_inside_tree():
+		_note_edit.release_focus()
+	_note_room_idx = -1
+
+
+func _close_note_view() -> void:
+	if _note_view != null:
+		_note_view.visible = false
+
+
+## 两个公告面板任一个是开着的
+func _note_open() -> bool:
+	return (_note_panel != null and _note_panel.visible) or (_note_view != null and _note_view.visible)
+
+
+func _close_note_all() -> void:
+	_close_note_board()
+	_close_note_view()
+
+
 ## 按 current_floor 重算每块牌子的文字。认领是「楼层:房号」为键的，换层自然切换。
+## 被认领的牌子亮边暖字，还带房主写的公告一行；空房是淡灰的小号牌。
 func _refresh_door_plates() -> void:
 	_remember_my_home()
 	for item in _door_plates:
@@ -2274,13 +2475,15 @@ func _refresh_door_plates() -> void:
 		var idx: int = int(item["index"])
 		var cur: Dictionary = Net.room_claims.get("%d:%d" % [current_floor, idx], {})
 		if cur.is_empty():
-			lb.text = "%d号" % (idx + 1)
+			lb.text = "%d号 · 空房" % (idx + 1)
 			lb.add_theme_color_override("font_color", Color(0.74, 0.80, 0.88, 0.80))
 			pc.modulate = Color(0.72, 0.74, 0.78, 0.85)
+			(pc.get_theme_stylebox("panel") as StyleBoxFlat).border_color = Color(0.55, 0.62, 0.72, 0.85)
 		else:
 			lb.text = "「%s」的房间" % String(cur.get("name", "某人"))
 			lb.add_theme_color_override("font_color", Color("#ffe9a8"))
 			pc.modulate = Color(1, 1, 1, 1)
+			(pc.get_theme_stylebox("panel") as StyleBoxFlat).border_color = Color(0.95, 0.78, 0.38, 0.95)
 
 
 ## 每帧把牌子摆到门口：用 canvas_transform 把房门口的世界坐标换成屏幕坐标，

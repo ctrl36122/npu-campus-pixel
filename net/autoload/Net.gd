@@ -590,7 +590,8 @@ func floor_of(id: int) -> int:
 
 
 # --- 房间认领公告 -------------------------------------------------------
-## "floor:room" -> {"name": String, "uid": String}。服务端权威，客户端只发请求。
+## "floor:room" -> {"name": String, "uid": String, "note": String}。
+## 服务端权威，客户端只发请求；note 是房主写的门口公告（自我介绍），可缺省。
 signal room_claims_changed
 var room_claims: Dictionary = {}
 
@@ -659,6 +660,51 @@ func my_claim() -> String:
 @rpc("authority", "call_remote", "reliable", 0)
 func _sync_claims(snapshot: Dictionary) -> void:
 	room_claims = snapshot.duplicate(true)
+	room_claims_changed.emit()
+
+
+## 房主改写自家门口的公告（自我介绍）。只有认领人本人能写；空串 = 擦掉。
+## 公告跟着认领走：撕下公告（取消认领）时整条记录一并消失。
+func set_room_note(room_idx: int, note: String) -> void:
+	var txt: String = _clean_note(note)
+	if not has_session():
+		_apply_note(local_uid, room_idx, txt)
+		return
+	if is_server():
+		_apply_note(local_uid, room_idx, txt)
+		_sync_claims.rpc(room_claims)
+	else:
+		_request_note.rpc_id(1, room_idx, txt)
+
+
+@rpc("any_peer", "call_remote", "reliable", 0)
+func _request_note(r: int, note: String) -> void:
+	if not is_server():
+		return
+	var uid := str(peers.get(multiplayer.get_remote_sender_id(), {}).get("uid", ""))
+	_apply_note(uid, r, _clean_note(note))
+	_sync_claims.rpc(room_claims)
+
+
+## 公告正文清洗：多行保留换行（面板里本来就按多行展示），去掉首尾空白，
+## 长度上限 160 字 —— 一间宿舍的门板写得下一小段自我介绍就够。
+func _clean_note(note: String) -> String:
+	return note.replace("\r", "").replace("\u0000", "").strip_edges().left(160)
+
+
+## 服务端：把 note 写进该 uid 名下那间房的认领记录。没认领过房间的写不进去。
+func _apply_note(uid: String, r: int, note: String) -> void:
+	if uid.is_empty() or r < 0:
+		return
+	var key := claim_of_uid(uid)
+	if key.is_empty():
+		return
+	var cur: Dictionary = room_claims[key]
+	if note.is_empty():
+		cur.erase("note")
+	else:
+		cur["note"] = note
+	room_claims[key] = cur
 	room_claims_changed.emit()
 
 
