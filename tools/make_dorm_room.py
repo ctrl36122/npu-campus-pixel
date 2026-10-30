@@ -2,23 +2,23 @@
 # -*- coding: utf-8 -*-
 """生成「宿舍空间」内景（assets/rooms/dorm_space.json）。
 
-布局：中间一条横向走廊贯通东西，走廊两侧各 4 间、共 8 间带门的宿舍。
+布局：中间一条长横向走廊贯通东西，走廊两侧各 7 间、共 14 间带门的宿舍。
+走廊西端是出入口（回校园），东端是电梯（换楼层）。
 每间配床 + 书桌 + 椅子 + 衣柜 + 绿植；房间铺深色地胶，和走廊的木地板分开。
 
 俯视（格）：
-    ┌────────────────────────────────────────────┐  ← 北外墙
-    │ 房0 │ 房1 │ 房2 │ 房3 │                       ← 北排 4 间（门朝南、开向走廊）
-    ├──门─┼──门─┼──门─┼──门─┤                       ← 墙 A（2 格厚，每间一个 3 格门洞）
-    ╞═══════════ 走 廊（贯通东西，西端是出入口/出生点）═══════════╡
-    ├──门─┼──门─┼──门─┼──门─┤                       ← 墙 B
-    │ 房4 │ 房5 │ 房6 │ 房7 │                       ← 南排 4 间（门朝北、开向走廊）
-    └────────────────────────────────────────────┘  ← 南外墙
+    ┌──────────────────────────────────────────────────────┐  ← 北外墙
+    │ 房0 │ 房1 │ … │ 房6 │                                   ← 北排 7 间（门朝南、开向走廊）
+    ├──门─┼──门─┼ … ┼──门─┤                                   ← 墙 A（2 格厚，每间一个 3 格门洞）
+    ╞═════ 走廊（贯通东西；西端出入口，东端电梯）══════════════╡
+    ├──门─┼──门─┼ … ┼──门─┤                                   ← 墙 B
+    │ 房7 │ 房8 │ … │ 房13│                                   ← 南排 7 间（门朝北、开向走廊）
+    └──────────────────────────────────────────────────────┘  ← 南外墙
 
 尺度（别随手改，改了所有家具都会失调）：
   人物约 18px 高（2.25 格）、11px 宽（1.4 格），是唯一的标尺。
   房间净宽 12 格、净深 8 格，够摆下一张床 + 一张桌 + 衣柜。
-  门洞 3 格宽、正对房间中线；家具都摆在左右两侧，中央进门通道保持空着，
-  这样人一进门就站在房间中央，不会一进门就撞家具。
+  门洞 3 格宽、正对房间中线；家具都摆在左右两侧，中央进门通道保持空着。
 
 用法：
   python tools/make_dorm_room.py --ascii      # 打印俯视草图 + 写盘
@@ -33,7 +33,7 @@ import os
 T = 2                    # 外墙厚
 PART = 1                 # 房间之间竖向隔墙厚
 BAND = 2                 # 房间 ↔ 走廊之间那堵墙的厚度（2 格才放得下一个门）
-N = 4                    # 每侧房间数
+N = 7                    # 每侧房间数（共 14 间）
 ROOM_W = 12              # 房间净宽
 ROOM_D = 8               # 房间净深
 CR_H = 6                 # 走廊净高
@@ -54,11 +54,17 @@ S_Y0 = B_Y0 + BAND       # 南排房间内部起点（20）
 S_Y1 = S_Y0 + ROOM_D     # 28
 
 # ── 横向（x）版式 ──────────────────────────────────────────────────────
-ROOM_X = [X0 + i * (ROOM_W + PART) for i in range(N)]   # 2, 15, 28, 41
-EAST_X = ROOM_X[-1] + ROOM_W                            # 53
+ROOM_X = [X0 + i * (ROOM_W + PART) for i in range(N)]
+ROOM_END = ROOM_X[-1] + ROOM_W           # 最后一间房间右沿
 
-W = EAST_X + T           # 55
-H = S_Y1 + T             # 30
+W = ROOM_END + T                         # 94
+H = S_Y1 + T                             # 30
+
+# 电梯：走廊东端、贴着东墙
+ELEV_X0 = ROOM_END - 6.0                 # 电梯前室起点
+ELEV_W = 6.0
+ELEV_Y0 = CR_Y0                          # 12
+ELEV_H = CR_H                            # 6
 
 
 def r2(v):
@@ -66,12 +72,11 @@ def r2(v):
 
 
 def room_cx(i):
-    """第 i 间房间的中线 x（门洞以此居中）。"""
     return ROOM_X[i] + ROOM_W * 0.5
 
 
 def build():
-    walls, props, seats, pod_floors, rugs = [], [], [], [], []
+    walls, props, seats, pod_floors, rugs, room_doors = [], [], [], [], [], []
 
     # ── 外墙（西墙留出入口门洞） ────────────────────────────────────────
     walls.append({"x": 0, "y": 0, "w": W, "h": T})                       # 北
@@ -81,7 +86,7 @@ def build():
                   "h": (H - T) - (ENTR_Y0 + ENTR_H)})                    # 西（出入口下方）
     walls.append({"x": W - T, "y": T, "w": T, "h": H - T * 2})           # 东
 
-    # 西端出入口的门（洞外是虚空，不加门就是一块纯黑）
+    # 西端出入口的门
     props.append({"k": "door", "x": 0.1, "y": ENTR_Y0, "w": T - 0.2, "h": ENTR_H})
 
     # ── 房间与走廊之间的两堵横墙（每间留一个门洞） ──────────────────────
@@ -94,20 +99,23 @@ def build():
                 walls.append({"x": r2(cursor), "y": band_y,
                               "w": r2(gap0 - cursor), "h": BAND})
             cursor = gap1
-        if EAST_X - cursor > 0.01:
+        if ROOM_END - cursor > 0.01:
             walls.append({"x": r2(cursor), "y": band_y,
-                          "w": r2(EAST_X - cursor), "h": BAND})
+                          "w": r2(ROOM_END - cursor), "h": BAND})
 
-    # 每个门洞上的门（北排门朝南、南排门朝北，画法一样，都是关门）
+    # 每个门洞上的门 + 记录门的位置（给门牌/认领判定用）
     for i in range(N):
-        props.append({"k": "door", "x": r2(room_cx(i) - DW * 0.5), "y": A_Y0,
-                      "w": DW, "h": BAND})
-        props.append({"k": "door", "x": r2(room_cx(i) - DW * 0.5), "y": B_Y0,
-                      "w": DW, "h": BAND})
+        dx = room_cx(i) - DW * 0.5
+        props.append({"k": "door", "x": r2(dx), "y": A_Y0, "w": DW, "h": BAND})
+        props.append({"k": "door", "x": r2(dx), "y": B_Y0, "w": DW, "h": BAND})
+        room_doors.append({"index": i, "side": "n", "x": r2(dx), "y": A_Y0,
+                           "w": DW, "h": BAND})
+        room_doors.append({"index": N + i, "side": "s", "x": r2(dx), "y": B_Y0,
+                           "w": DW, "h": BAND})
 
-    # ── 房间之间的竖向隔墙（贯穿整个房间深度，与横墙接齐） ──────────────
+    # ── 房间之间的竖向隔墙 ──────────────────────────────────────────────
     for i in range(N - 1):
-        px = ROOM_X[i] + ROOM_W                       # 14, 27, 40
+        px = ROOM_X[i] + ROOM_W
         walls.append({"x": px, "y": N_Y0, "w": PART, "h": (A_Y0 + BAND) - N_Y0})
         walls.append({"x": px, "y": B_Y0, "w": PART, "h": S_Y1 - B_Y0})
 
@@ -116,37 +124,42 @@ def build():
     for i in range(N):
         rx = ROOM_X[i]
         for ry in (N_Y0, S_Y0):
-            # 深色地胶，把房间和走廊的木地板分开
             pod_floors.append({"x": rx, "y": ry, "w": ROOM_W, "h": ROOM_D})
-
-            # 床：贴左墙、头朝上墙
             props.append({"k": "bed", "x": r2(rx + 0.4), "y": r2(ry + 0.6),
                           "w": bed_w, "h": bed_h, "solid": True})
-            # 衣柜：左下角
             props.append({"k": "block", "x": r2(rx + 0.5), "y": r2(ry + 5.0),
                           "w": 1.6, "h": 2.4, "solid": True})
-            # 书桌：贴右墙
             props.append({"k": "desk", "x": r2(rx + 7.6), "y": r2(ry + 0.6),
                           "w": 3.4, "h": 2.0, "solid": True})
-            # 椅子：桌子正前方
             seats.append({"id": "room%d_%s" % (i, "n" if ry == N_Y0 else "s"),
                           "x": r2(rx + 8.3), "y": r2(ry + 2.7),
                           "w": 2.0, "h": 1.5, "face": "up"})
-            # 绿植：右下角，房间别太素
             props.append({"k": "plant", "x": r2(rx + 10.1), "y": r2(ry + 5.6),
                           "w": 1.2, "h": 1.0, "solid": True})
 
-    # ── 走廊：一条贯通东西的地毯 ──────────────────────────────────────
+    # ── 走廊：一条贯通东西的地毯（到电梯前室为止） ────────────────────
     rugs.append({"x": r2(X0 + 1), "y": r2(CR_Y0 + 1.5),
-                 "w": r2(EAST_X - X0 - 2), "h": r2(CR_H - 3.0)})
+                 "w": r2(ELEV_X0 - 1 - X0 - 1), "h": r2(CR_H - 3.0)})
+
+    # ── 电梯：东端前室 + 东墙前的电梯门 ────────────────────────────────
+    # 电梯门画在东墙前（不压墙，免得和 wall 抢 y 排序闪烁），朝西开向走廊。
+    props.append({"k": "elevator", "x": r2(W - T - 2.0), "y": r2(ELEV_Y0 + 0.5),
+                  "w": 2.0, "h": r2(ELEV_H - 1.0)})
+    # 电梯前室的地面与标识（用一块地胶区分）
+    pod_floors.append({"x": r2(ELEV_X0), "y": r2(ELEV_Y0),
+                       "w": r2(ELEV_W), "h": r2(ELEV_H)})
 
     return {
         "id": "dorm_space",
         "name": "宿舍空间",
         "W": W, "H": H,
-        # 出生点放在走廊上（西端出入口进来的位置附近）
+        # 出生点放在走廊西端（进楼的位置附近）
         "spawn": {"x": 6.0, "y": CR_Y0 + CR_H * 0.5},
         "exit": {"x": 0.5, "y": ENTR_Y0, "w": 1.5, "h": ENTR_H},
+        # 电梯前室（站进来按 E 换层）
+        "elevator": {"x": r2(ELEV_X0), "y": r2(ELEV_Y0),
+                     "w": r2(ELEV_W), "h": r2(ELEV_H)},
+        "room_doors": room_doors,
         "pod_floors": pod_floors,
         "rugs": rugs,
         "walls": walls,
@@ -175,7 +188,7 @@ def ascii_plan(d):
         fill(p["x"], p["y"], p["w"], p["h"], {
             "desk": "D", "table": "t", "sofa": "S", "vending": "V",
             "plant": "*", "block": "+", "cushion": "o", "bed": "B",
-            "door": "d", "board": "W",
+            "door": "d", "elevator": "E", "board": "W",
         }.get(p["k"], "?"))
     for s in d["seats"]:
         fill(s["x"], s["y"], s["w"], s["h"], "C")
@@ -189,7 +202,7 @@ def ascii_plan(d):
     for y in range(H):
         print("%2d " % y + "".join(grid[y]))
     print("\n图例  # 墙/隔板   , 房间地胶   : 走廊地毯   B 床   D 桌   C 椅子   + 衣柜   "
-          "* 绿植   d 门   = 出入口   @ 出生点")
+          "* 绿植   d 门   E 电梯   = 出入口   @ 出生点")
     print("\n尺寸 %d × %d 格 = %d × %d px；房间 %d 间，座位 %d 个"
           % (W, H, W * 8, H * 8, N * 2, len(d["seats"])))
 

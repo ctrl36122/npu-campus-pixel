@@ -151,6 +151,9 @@ func _ready() -> void:
 	_collect_campus_seats()
 	_build_door_hint()
 	Net.seat_changed.connect(_on_seat_changed)
+	# 别人的认领公告一到（或自己认领成功）立刻刷新门牌；名单变化会影响「谁跟你同层」
+	Net.room_claims_changed.connect(_refresh_door_plates)
+	Net.roster_changed.connect(_update_floor_visibility)
 
 	# 调试：启动即进房间（正常玩法走到宿舍旁按 E）
 	if OS.has_environment("XGD_ROOM"):
@@ -785,6 +788,9 @@ func _process(delta: float) -> void:
 	_update_daynight()
 	_update_interact_hint(delta)
 	_place_hint_above_player()
+	_update_floor_visibility()
+	_update_notice(delta)
+	_place_door_plates()
 
 
 ## 有人被楼盖住 → 在楼身上挖一个「透视窗」（只透玩家周围一小块，楼体其余实心），
@@ -1287,6 +1293,23 @@ var _seats_campus: Array = []
 var _seats_room: Array = []
 var _near_seat: Dictionary = {}
 
+# ── 多层宿舍 ────────────────────────────────────────────────────────────
+## 楼层数。每层布局完全相同，只用一个房间实例 + 每玩家的楼层号来复用第 1 层的设计。
+const FLOOR_COUNT := 5
+## 本地玩家当前楼层（1 起）。异层玩家互相隐藏（见 _update_floor_visibility）。
+var current_floor: int = 1
+## 楼层 UI（指示 + 电梯选层面板 + 换层黑场）
+var _floor_layer: CanvasLayer
+var _floor_label: Label
+var _floor_panel: PanelContainer
+var _floor_flash: ColorRect
+var _floor_open := false
+var _notice_label: Label
+var _notice_clock := 0.0
+## 门口公告牌：[{index, side, x, y, w, h, panel, label}]，14 块，文字按 current_floor 刷新
+var _door_plates: Array = []
+var _door_plates_holder: Control
+
 
 func _unhandled_input(event: InputEvent) -> void:
 	if Net.is_dedicated or not (event is InputEventKey):
@@ -1296,20 +1319,34 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if k.keycode == KEY_E and _try_interact():
 		get_viewport().set_input_as_handled()
+		return
+	if k.keycode == KEY_F and _try_claim_room():
+		get_viewport().set_input_as_handled()
+		return
+	if k.keycode == KEY_ESCAPE and _floor_open:
+		_close_floor_panel()
+		get_viewport().set_input_as_handled()
 
 
 ## E 键只有一个入口，按「最近、最明确」的顺序依次试。
 ## 顺序不是随便定的：坐着时 E 必须是起身（不然坐在椅子上没法离座就走出房间了），
-## 站在椅子边 E 是坐下，站在房间里别处 E 才是离开。
+## 站在椅子边 E 是坐下，站在电梯里 E 是选楼层，站到房间门口 E 才是离开。
 func _try_interact() -> bool:
 	var me: Node = _local_avatar()
 	if me == null:
 		return false
+	# 选层面板开着时，E 先关面板
+	if _floor_open:
+		_close_floor_panel()
+		return true
 	if int(me.get("sit_dir")) != 0:
 		Net.sit_down(0, Vector2.ZERO)
 		return true
 	if not _near_seat.is_empty():
 		Net.sit_down(_face_code(String(_near_seat["face"])), _near_seat["pos"])
+		return true
+	if in_room and _near_elevator((me as Node2D).position):
+		_open_floor_panel()
 		return true
 	if in_room and _near_door((me as Node2D).position):
 		leave_room()
@@ -1363,16 +1400,16 @@ func enter_room(path: String) -> bool:
 	me.call("teleport_to", target)
 	me.set("_room_freeze", true)
 	_set_cam_limit(me, true)
-	# 调试时 XGD_ZOOM 优先，否则按房间尺寸自适应：
-	# 小房间用 ROOM_ZOOM 填满屏幕；大房间（8 间宿舍这种）自动缩小到能一眼看全，
-	# 不然一次只看得到三分之二、得一直拖着找房间。
+	# 视距只按「竖向」适配：让南北两排房间刚好一屏看全（镜头高度固定），
+	# 横向靠拉长的走廊去滚动 —— 走起来才有沉浸感。
+	# 不按宽度缩，否则 14 间这种长条楼层会被人为缩成一条、走廊的"长"也就白拉了。
 	if OS.has_environment("XGD_ZOOM"):
 		me.set("_cam_zoom_target", clampf(OS.get_environment("XGD_ZOOM").to_float(), 0.55, 3.0))
 	else:
 		var vp: Vector2 = get_viewport().get_visible_rect().size
 		var rw: Vector2 = (room as Node2D).get("size_px") * (room as Node2D).global_scale
-		var fit: float = minf(vp.x / maxf(rw.x, 1.0), vp.y / maxf(rw.y, 1.0))
-		me.set("_cam_zoom_target", clampf(minf(ROOM_ZOOM, fit), 0.55, ROOM_ZOOM))
+		var fit_h: float = vp.y / maxf(rw.y, 1.0) * 0.94
+		me.set("_cam_zoom_target", clampf(minf(ROOM_ZOOM, fit_h), 0.55, ROOM_ZOOM))
 	in_room = true
 
 	# 房间没有烘焙光照图，全屏夜幕会把它压成一片黑
@@ -1383,6 +1420,12 @@ func enter_room(path: String) -> bool:
 	if _door_hint != null:
 		_door_hint.visible = true
 	_door_clock = 0.0
+	# 每次进楼都从 1 层开始；建好门牌、显示楼层指示
+	current_floor = 1
+	Net.set_my_floor(1)
+	_build_door_plates()
+	_update_floor_label()
+	_update_floor_visibility()
 	room_changed.emit(true)
 	return true
 
@@ -1409,6 +1452,14 @@ func leave_room() -> void:
 	if _door_hint != null:
 		_door_hint.visible = false
 	_door_clock = 0.0
+	# 离开整栋楼：收起楼层面板/指示、清掉门牌、楼层归 1
+	_close_floor_panel()
+	_clear_door_plates()
+	current_floor = 1
+	Net.set_my_floor(1)
+	if _floor_label != null:
+		_floor_label.visible = false
+	_update_floor_visibility()
 	room_changed.emit(false)
 
 
@@ -1689,11 +1740,29 @@ func _update_interact_hint(delta: float) -> void:
 	# 免得「想坐下却走出房间」）
 	if in_room:
 		_near_dorm = ""
-		if _near_door(pos):
+		if _floor_open:
+			_door_hint.visible = true
+			_door_hint.text = "按 E / Esc 关掉电梯面板"
+		elif _near_elevator(pos):
+			_door_hint.visible = true
+			_door_hint.text = "按 E 乘电梯去其他楼层"
+		elif _near_door(pos):
 			_door_hint.visible = true
 			_door_hint.text = "按 E 离开「%s」" % _room_title
 		else:
-			_door_hint.visible = false
+			var rd := _nearest_room_door(pos)
+			if rd.is_empty():
+				_door_hint.visible = false
+			else:
+				var no: int = int(rd["index"]) + 1
+				var cur: Dictionary = Net.room_claims.get("%d:%d" % [current_floor, int(rd["index"])], {})
+				_door_hint.visible = true
+				if cur.is_empty():
+					_door_hint.text = "%d 号房 · 按 F 认领为本人的房间" % no
+				elif String(cur.get("uid", "")) == Net.local_uid:
+					_door_hint.text = "%d 号房（你的）· 按 F 撕下公告" % no
+				else:
+					_door_hint.text = "%d 号房 · 「%s」的房间" % [no, String(cur.get("name", "?"))]
 		return
 
 	var cell: Vector2 = pos / TS
@@ -1805,8 +1874,376 @@ func _face_name(dir: int) -> String:
 	return "down"
 
 
+
 func _local_avatar() -> Node:
 	for c in players.get_children():
 		if c != null and c.get("is_local_player") == true:
 			return c
 	return null
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  多层宿舍楼：电梯换层 + 门口公告
+#
+#  核心做法：**只实例化一个楼层**。每层布局完全一样（同一份 dorm_space.json），
+#  所以「换层」不搬任何几何，只改每个玩家身上的楼层号 ——
+#  省内存（5 层也只有一份房间节点），也保证多层布局天然一致。
+#  楼层号随 roster 同步（Net.peers[id]["floor"]），
+#  「同层的人才互相看得见」用 visible 过滤；认领公告是服务端权威字典，广播全量快照。
+# ══════════════════════════════════════════════════════════════════════════
+
+## 站在多近才算「门口」（格）：15 间的门间距 13 格，3.2 只会命中正对着的那间
+const CLAIM_RADIUS := 3.2
+## 电梯呼叫范围（格）：电梯本体 6×6，外扩 1 格就可以站在门口按 E
+const ELEV_PAD := 1.0
+## 公告牌离门洞的偏移（格）：往下/往上让开半格，别压在门框上
+const PLATE_OFF := 0.6
+
+
+## 楼层 UI 是懒创建的：进党楼才有，校园里不占任何节点。
+func _ensure_floor_ui() -> void:
+	if _floor_layer != null and is_instance_valid(_floor_layer):
+		return
+	_floor_layer = CanvasLayer.new()
+	_floor_layer.name = "FloorUI"
+	_floor_layer.layer = 6
+	add_child(_floor_layer)
+
+	var host := Control.new()
+	host.name = "Host"
+	host.set_anchors_preset(Control.PRESET_FULL_RECT)
+	host.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_floor_layer.add_child(host)
+	_door_plates_holder = host
+
+	# 楼层指示（左上角）
+	_floor_label = Label.new()
+	_floor_label.position = Vector2(12, 10)
+	_floor_label.add_theme_font_size_override("font_size", 18)
+	_floor_label.add_theme_color_override("font_color", Color("#e8f2ff"))
+	_floor_label.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
+	_floor_label.add_theme_constant_override("outline_size", 4)
+	_floor_label.visible = false
+	host.add_child(_floor_label)
+
+	# 底部提示条（认领成功 / 已被别人占了）
+	_notice_label = Label.new()
+	_notice_label.add_theme_font_size_override("font_size", 17)
+	_notice_label.add_theme_color_override("font_color", Color("#ffe9a8"))
+	_notice_label.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
+	_notice_label.add_theme_constant_override("outline_size", 4)
+	_notice_label.visible = false
+	host.add_child(_notice_label)
+
+	# 选层面板
+	_floor_panel = _build_floor_panel()
+	_floor_panel.visible = false
+	host.add_child(_floor_panel)
+
+	# 换层黑场（加在最后 → 盖在最上层）
+	_floor_flash = ColorRect.new()
+	_floor_flash.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_floor_flash.color = Color(0.02, 0.03, 0.05, 1.0)
+	_floor_flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_floor_flash.visible = false
+	host.add_child(_floor_flash)
+
+
+func _build_floor_panel() -> PanelContainer:
+	var pc := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.07, 0.09, 0.14, 0.96)
+	sb.border_color = Color(0.62, 0.70, 0.82, 0.95)
+	sb.set_border_width_all(2)
+	sb.content_margin_left = 16
+	sb.content_margin_right = 16
+	sb.content_margin_top = 14
+	sb.content_margin_bottom = 14
+	pc.add_theme_stylebox_override("panel", sb)
+
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 10)
+	pc.add_child(vb)
+
+	var title := Label.new()
+	title.text = "电梯 · 选择楼层"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 20)
+	title.add_theme_color_override("font_color", Color("#dfeaff"))
+	title.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
+	title.add_theme_constant_override("outline_size", 4)
+	vb.add_child(title)
+
+	var g := GridContainer.new()
+	g.columns = 5
+	g.add_theme_constant_override("h_separation", 8)
+	g.add_theme_constant_override("v_separation", 8)
+	vb.add_child(g)
+	for i in FLOOR_COUNT:
+		var b := Button.new()
+		b.text = "%d 层" % (i + 1)
+		b.custom_minimum_size = Vector2(88, 42)
+		b.focus_mode = Control.FOCUS_NONE
+		b.add_theme_font_size_override("font_size", 17)
+		b.add_theme_color_override("font_color", Color("#e8f4ff"))
+		b.pressed.connect(_on_floor_picked.bind(i + 1))
+		g.add_child(b)
+	return pc
+
+
+func _layout_floor_panel() -> void:
+	var vs := get_viewport().get_visible_rect().size
+	var sz := _floor_panel.get_combined_minimum_size()
+	_floor_panel.position = Vector2((vs.x - sz.x) * 0.5, (vs.y - sz.y) * 0.5)
+
+
+func _open_floor_panel() -> void:
+	if _floor_open:
+		return
+	_ensure_floor_ui()
+	_layout_floor_panel()
+	_floor_panel.visible = true
+	_floor_open = true
+
+
+func _close_floor_panel() -> void:
+	_floor_open = false
+	if _floor_panel != null and is_instance_valid(_floor_panel):
+		_floor_panel.visible = false
+
+
+func _on_floor_picked(n: int) -> void:
+	_go_floor(n)
+
+
+## 换层的全部事情：改楼层号（广播给别人）+ 站到新楼层的电梯口 + 刷新门牌 + 黑场淡入。
+## 注意：楼层不影响玩家坐标 —— 每层布局相同，同一个 x/y 在每层都是同一个位置。
+func _go_floor(n: int) -> void:
+	var want: int = clampi(n, 1, FLOOR_COUNT)
+	_close_floor_panel()
+	if want == current_floor:
+		return
+	current_floor = want
+	Net.set_my_floor(want)
+	var me: Node = _local_avatar()
+	if me != null:
+		me.call("teleport_to", _elevator_step_out())
+	_refresh_door_plates()
+	_update_floor_label()
+	_update_floor_visibility()
+	_fade_flash()
+
+
+## 从轿厢里退出到走廊的那一点：电梯西边 2 格、走廊中线，落地就在电梯门口而不会贴在门上。
+func _elevator_step_out() -> Vector2:
+	if room == null or not is_instance_valid(room):
+		return Vector2.ZERO
+	var el: Dictionary = room.get("data").get("elevator", {})
+	if el.is_empty():
+		return room.position + room.get("spawn_px")
+	var cell := Vector2(float(el["x"]) - 2.0, float(el["y"]) + float(el["h"]) * 0.5)
+	return room.position + cell * TS
+
+
+func _fade_flash() -> void:
+	_ensure_floor_ui()
+	_floor_flash.visible = true
+	_floor_flash.modulate = Color(1, 1, 1, 1)
+	var tw := create_tween()
+	tw.tween_property(_floor_flash, "modulate:a", 0.0, 0.45)
+	tw.tween_callback(func() -> void:
+		if _floor_flash != null and is_instance_valid(_floor_flash):
+			_floor_flash.visible = false)
+
+
+func _update_floor_label() -> void:
+	if not in_room:
+		if _floor_label != null and is_instance_valid(_floor_label):
+			_floor_label.visible = false
+		return
+	_ensure_floor_ui()
+	_floor_label.visible = true
+	_floor_label.text = "宿舍楼 · %d / %d 层" % [current_floor, FLOOR_COUNT]
+
+
+## 是否站在电梯前（房间局部坐标，格）
+func _near_elevator(pos: Vector2) -> bool:
+	if room == null or not is_instance_valid(room):
+		return false
+	var el: Dictionary = room.get("data").get("elevator", {})
+	if el.is_empty():
+		return false
+	var r := Rect2(float(el["x"]), float(el["y"]), float(el["w"]), float(el["h"]))
+	return r.grow(ELEV_PAD).has_point((pos - room.position) / TS)
+
+
+## 离玩家最近的那扇宿舍门（CLAIM_RADIUS 内），没有就返回空字典
+func _nearest_room_door(pos: Vector2) -> Dictionary:
+	var best: Dictionary = {}
+	if room == null or not is_instance_valid(room):
+		return best
+	var lp: Vector2 = (pos - room.position) / TS
+	var best_d := CLAIM_RADIUS
+	for item in room.get("data").get("room_doors", []):
+		var d: Dictionary = item
+		var dist: float = lp.distance_to(Vector2(
+			float(d["x"]) + float(d["w"]) * 0.5,
+			float(d["y"]) + float(d["h"]) * 0.5))
+		if dist < best_d:
+			best_d = dist
+			best = d
+	return best
+
+
+# ── 门口公告 ─────────────────────────────────────────────────────────────
+## 每间宿舍门口一块牌子（世界坐标锚定，跟着相机走）。
+## 没被认领时显示淡色房号；被认领后显示「某某的房间」亮字。
+func _build_door_plates() -> void:
+	_clear_door_plates()
+	if room == null or not is_instance_valid(room):
+		return
+	_ensure_floor_ui()
+	for item in room.get("data").get("room_doors", []):
+		var d: Dictionary = item
+		var pc := PanelContainer.new()
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = Color(0.05, 0.07, 0.11, 0.88)
+		sb.border_color = Color(0.55, 0.62, 0.72, 0.85)
+		sb.set_border_width_all(2)
+		sb.content_margin_left = 6
+		sb.content_margin_right = 6
+		sb.content_margin_top = 2
+		sb.content_margin_bottom = 2
+		pc.add_theme_stylebox_override("panel", sb)
+		var lb := Label.new()
+		lb.add_theme_font_size_override("font_size", 13)
+		lb.add_theme_color_override("font_color", Color("#cfe2f5"))
+		lb.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
+		lb.add_theme_constant_override("outline_size", 3)
+		pc.add_child(lb)
+		pc.visible = false
+		_door_plates_holder.add_child(pc)
+		_door_plates.append({
+			"index": int(d["index"]), "side": String(d["side"]),
+			"x": float(d["x"]), "y": float(d["y"]),
+			"w": float(d["w"]), "h": float(d["h"]),
+			"panel": pc, "label": lb,
+		})
+	_refresh_door_plates()
+
+
+func _clear_door_plates() -> void:
+	for item in _door_plates:
+		var pc: PanelContainer = item["panel"]
+		if is_instance_valid(pc):
+			pc.queue_free()
+	_door_plates.clear()
+
+
+## 按 current_floor 重算每块牌子的文字。认领是「楼层:房号」为键的，换层自然切换。
+func _refresh_door_plates() -> void:
+	for item in _door_plates:
+		var pc: PanelContainer = item["panel"]
+		var lb: Label = item["label"]
+		if not is_instance_valid(pc) or not is_instance_valid(lb):
+			continue
+		var idx: int = int(item["index"])
+		var cur: Dictionary = Net.room_claims.get("%d:%d" % [current_floor, idx], {})
+		if cur.is_empty():
+			lb.text = "%d号" % (idx + 1)
+			lb.add_theme_color_override("font_color", Color(0.74, 0.80, 0.88, 0.80))
+			pc.modulate = Color(0.72, 0.74, 0.78, 0.85)
+		else:
+			lb.text = "「%s」的房间" % String(cur.get("name", "某人"))
+			lb.add_theme_color_override("font_color", Color("#ffe9a8"))
+			pc.modulate = Color(1, 1, 1, 1)
+
+
+## 每帧把牌子摆到门口：用 canvas_transform 把房门口的世界坐标换成屏幕坐标，
+## 跟门提示条是同一套换算，所以牌子会牢牢钉在门上（相机怎么走都不飘）。
+func _place_door_plates() -> void:
+	if _door_plates_holder == null or not is_instance_valid(_door_plates_holder):
+		return
+	var show: bool = in_room and room != null and is_instance_valid(room)
+	if not show:
+		for item in _door_plates:
+			var pc2: PanelContainer = item["panel"]
+			if is_instance_valid(pc2):
+				pc2.visible = false
+		return
+	var ct := get_viewport().get_canvas_transform()
+	var vs := get_viewport().get_visible_rect().size
+	var view := Rect2(Vector2(-140.0, -80.0), vs + Vector2(280.0, 160.0))
+	for item in _door_plates:
+		var pc: PanelContainer = item["panel"]
+		if not is_instance_valid(pc):
+			continue
+		var side: String = String(item["side"])
+		var ax: float = float(item["x"]) + float(item["w"]) * 0.5
+		# 北排的门开在南墙（走廊在下）→ 牌子往下挂；南排反过来往上挂
+		var ay: float = float(item["y"]) + (float(item["h"]) + PLATE_OFF if side == "n" else -PLATE_OFF)
+		var world: Vector2 = room.to_global(Vector2(ax * TS, ay * TS))
+		var sp: Vector2 = ct * world
+		var sz: Vector2 = pc.get_combined_minimum_size()
+		pc.position = sp - Vector2(sz.x * 0.5, sz.y * 0.5)
+		pc.visible = view.has_point(sp)
+
+
+func _notice(text: String) -> void:
+	_ensure_floor_ui()
+	_notice_label.text = text
+	_notice_clock = 2.4
+	_notice_label.visible = true
+	var vs := get_viewport().get_visible_rect().size
+	var sz := _notice_label.get_combined_minimum_size()
+	_notice_label.position = Vector2((vs.x - sz.x) * 0.5, vs.y - sz.y - 64.0)
+
+
+func _update_notice(delta: float) -> void:
+	if _notice_clock <= 0.0:
+		return
+	_notice_clock -= delta
+	if _notice_clock <= 0.0:
+		_notice_label.visible = false
+
+
+## F 认领身边的人还在门前的房间（再按一次撕下自己的公告）。
+func _try_claim_room() -> bool:
+	if not in_room or _floor_open:
+		return false
+	var me: Node = _local_avatar()
+	if me == null:
+		return false
+	var d := _nearest_room_door((me as Node2D).position)
+	if d.is_empty():
+		return false
+	var idx: int = int(d["index"])
+	var cur: Dictionary = Net.room_claims.get("%d:%d" % [current_floor, idx], {})
+	var no: int = idx + 1
+	if cur.is_empty():
+		Net.claim_room(current_floor, idx, Net.local_name)
+		_notice("已在 %d 层 %d 号房门口贴上公告：这是「%s」的房间" % [current_floor, no, Net.local_name])
+		return true
+	if String(cur.get("uid", "")) == Net.local_uid and Net.local_uid != "":
+		Net.claim_room(current_floor, idx, "")      # 空名字 = 撕下来
+		_notice("已撕下 %d 层 %d 号房的公告" % [current_floor, no])
+		return true
+	_notice("%d 层 %d 号房已经是「%s」的了" % [current_floor, no, String(cur.get("name", "?"))])
+	return false
+
+
+## 不同楼层的人互相看不见：只有 1 份几何，"你在 3 层、他在 1 层"就是靠这里区分的。
+## 出了楼所有人恢复可见。
+func _update_floor_visibility() -> void:
+	if players == null or not is_instance_valid(players):
+		return
+	for c in players.get_children():
+		if c == null or not is_instance_valid(c):
+			continue
+		if bool(c.get("is_local_player")):
+			c.visible = true
+			continue
+		if not in_room:
+			c.visible = true
+			continue
+		c.visible = Net.floor_of(int(c.get("owner_peer_id"))) == current_floor

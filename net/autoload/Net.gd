@@ -122,7 +122,7 @@ func host_game(port: int = DEFAULT_PORT, max_players: int = MAX_PLAYERS, use_upn
 		multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
 		_offline = true
 		session_id = "%s-%s" % [Time.get_unix_time_from_system(), randi()]
-		peers[1] = {"name": local_name, "uid": local_uid, "hero": local_hero, "ready": false}
+		peers[1] = {"name": local_name, "uid": local_uid, "hero": local_hero, "ready": false, "floor": 1}
 		_registered = true
 		roster_changed.emit()
 		print("[net] 单机会话（web / XGD_OFFLINE）")
@@ -149,7 +149,7 @@ func host_game(port: int = DEFAULT_PORT, max_players: int = MAX_PLAYERS, use_upn
 		_ws = true
 		session_id = "%s-%s" % [Time.get_unix_time_from_system(), randi()]
 		if not is_dedicated:
-			peers[1] = {"name": local_name, "uid": local_uid, "hero": local_hero, "ready": false}
+			peers[1] = {"name": local_name, "uid": local_uid, "hero": local_hero, "ready": false, "floor": 1}
 		_registered = true
 		roster_changed.emit()
 		print("[net] hosting WebSocket :%d（上限 %d 人）" % [_ws_port, max_players])
@@ -166,7 +166,7 @@ func host_game(port: int = DEFAULT_PORT, max_players: int = MAX_PLAYERS, use_upn
 	multiplayer.multiplayer_peer = peer
 	session_id = "%s-%s" % [Time.get_unix_time_from_system(), randi()]
 	if not is_dedicated:
-		peers[1] = {"name": local_name, "uid": local_uid, "hero": local_hero, "ready": false}
+		peers[1] = {"name": local_name, "uid": local_uid, "hero": local_hero, "ready": false, "floor": 1}
 	_registered = true
 	roster_changed.emit()
 	print("[net] hosting UDP %d, authority %d" % [port, my_id()])
@@ -324,9 +324,10 @@ func _register(display_name: String, uid: String, hero: String = "adam") -> void
 	var safe_name: String = display_name.strip_edges().left(24)
 	if safe_name.is_empty():
 		safe_name = "Player"
-	peers[sender] = {"name": safe_name, "uid": safe_uid, "hero": hero, "ready": false}
+	peers[sender] = {"name": safe_name, "uid": safe_uid, "hero": hero, "ready": false, "floor": 1}
 	_publish_roster()
 	_send_history_to(sender)          # 新来的人先看到刚才在聊什么
+	_sync_claims.rpc_id(sender, room_claims)   # 以及现有的房间认领公告
 
 
 func _publish_roster() -> void:
@@ -554,6 +555,88 @@ func _show_seat(dir: int, pos: Vector2) -> void:
 	var sender: int = multiplayer.get_remote_sender_id()
 	if peers.has(sender):
 		seat_changed.emit(sender, clampi(dir, 0, 4), pos)
+
+
+# --- 楼层 ---------------------------------------------------------------
+## 每层宿舍布局完全相同，所以「换层」不搬几何，只改每个玩家所在的楼层号。
+## 楼层号挂在 roster 里（peers[id]["floor"]）随名单一起同步：同层的人才互相可见，
+## 异层的人互相隐藏 —— 既省内存（只实例化一份房间），联机也不会穿帮。
+## 本机自己的楼层变化用 set_my_floor() 请求，服务端裁定后广播。
+func set_my_floor(n: int) -> void:
+	var f: int = clampi(n, 1, 99)
+	if is_server():
+		_apply_floor(1, f)
+	elif has_session():
+		_request_floor.rpc_id(1, f)
+
+
+@rpc("any_peer", "call_remote", "reliable", 0)
+func _request_floor(n: int) -> void:
+	if is_server():
+		_apply_floor(multiplayer.get_remote_sender_id(), n)
+
+
+func _apply_floor(id: int, n: int) -> void:
+	if not is_server() or not peers.has(id):
+		return
+	peers[id]["floor"] = clampi(n, 1, 99)
+	_publish_roster()
+
+
+## 某个玩家现在在第几层（1 起）。没登记就按 1 层。
+func floor_of(id: int) -> int:
+	return int(peers.get(id, {}).get("floor", 1))
+
+
+# --- 房间认领公告 -------------------------------------------------------
+## "floor:room" -> {"name": String, "uid": String}。服务端权威，客户端只发请求。
+signal room_claims_changed
+var room_claims: Dictionary = {}
+
+
+## 认领 / 取消某间房（name 为空 = 取消）。服务端校验后广播全量快照。
+func claim_room(floor_n: int, room_idx: int, display_name: String) -> void:
+	var nm: String = display_name.strip_edges().left(24)
+	if not has_session():
+		_apply_claim(0, floor_n, room_idx, nm)
+		return
+	if is_server():
+		_apply_claim(1, floor_n, room_idx, nm)
+		_sync_claims.rpc(room_claims)
+	else:
+		_request_claim.rpc_id(1, floor_n, room_idx, nm)
+
+
+@rpc("any_peer", "call_remote", "reliable", 0)
+func _request_claim(n: int, r: int, nm: String) -> void:
+	if not is_server():
+		return
+	_apply_claim(multiplayer.get_remote_sender_id(), n, r, nm.strip_edges().left(24))
+	_sync_claims.rpc(room_claims)
+
+
+## 服务端：写入认领。已被别人的 uid 认领的房不抢；name 为空则取消。
+func _apply_claim(peer_id: int, n: int, r: int, nm: String) -> void:
+	if n < 1 or r < 0:
+		return
+	var key := "%d:%d" % [n, r]
+	var uid := local_uid if peer_id <= 1 else str(peers.get(peer_id, {}).get("uid", ""))
+	if uid.is_empty():
+		return
+	var cur: Dictionary = room_claims.get(key, {})
+	if not cur.is_empty() and String(cur.get("uid", "")) != uid:
+		return                         # 是别人的房间，不允许覆盖
+	if nm.is_empty():
+		room_claims.erase(key)
+	else:
+		room_claims[key] = {"name": nm, "uid": uid}
+	room_claims_changed.emit()
+
+
+@rpc("authority", "call_remote", "reliable", 0)
+func _sync_claims(snapshot: Dictionary) -> void:
+	room_claims = snapshot.duplicate(true)
+	room_claims_changed.emit()
 
 
 # --- Ready-up lobby -------------------------------------------------------

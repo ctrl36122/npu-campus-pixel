@@ -61,6 +61,8 @@ func _draw() -> void:
 			_cushion(o, w, h)
 		"door":
 			_door(o, w, h)
+		"elevator":
+			_elevator(o, w, h)
 		"deco":
 			_crate(o, w, h, Color("4a5b46"), Color("36452f"))   # 绿植箱 / 空调
 		"block":
@@ -379,6 +381,31 @@ func _door(o: Vector2, w: float, h: float) -> void:
 		Color(1, 1, 1, 0.10), 1.0)
 	draw_line(Vector2(o.x + w * 0.5 + 3.0, o.y + h - 3.0), Vector2(o.x + w * 0.5 + gw * 0.9, o.y + 3.0),
 		Color(1, 1, 1, 0.10), 1.0)
+
+
+# ---------------------------------------------------------------- 电梯门
+
+## 电梯门：两扇合上的金属滑门 + 顶部一枚绿色楼层指示灯。
+## 「名义上的电梯」—— 只是走廊尽头的交互点，按 E 弹楼层选择。
+func _elevator(o: Vector2, w: float, h: float) -> void:
+	# 门框（比门体略大一圈）
+	draw_rect(Rect2(o.x - 1.0, o.y - 1.0, w + 2.0, h + 2.0), Color("2a3038"))
+	draw_rect(Rect2(o.x - 1.0, o.y - 1.0, w + 2.0, 1.0), Color("3f4853"))
+	# 两扇门
+	var half := w * 0.5
+	for k in range(2):
+		var dx := o.x + float(k) * half
+		draw_rect(Rect2(dx + 0.5, o.y + 1.0, half - 1.0, h - 2.0), Color("6a7684"))
+		draw_rect(Rect2(dx + 1.5, o.y + 2.0, half - 3.0, h - 4.0), Color("828e9c"))
+		# 金属高光竖条
+		draw_rect(Rect2(dx + half * 0.5 - 0.75, o.y + 2.0, 1.5, h - 4.0), Color("a2aeba"))
+	# 中缝
+	draw_rect(Rect2(o.x + half - 0.5, o.y + 1.0, 1.0, h - 2.0), Color("1d232a"))
+	# 顶部楼层指示灯（绿色小屏）
+	var lw := minf(14.0, w * 0.5)
+	draw_rect(Rect2(o.x + (w - lw) * 0.5, o.y - 5.0, lw, 4.0), Color("141a20"))
+	draw_rect(Rect2(o.x + (w - lw) * 0.5 + 2.0, o.y - 4.0, lw - 4.0, 1.5),
+		Color(0.35, 0.92, 0.52, 1.0))
 
 
 # ---------------------------------------------------------------- 沙发
