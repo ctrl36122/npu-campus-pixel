@@ -93,6 +93,10 @@ var _occl_a: float = 1.0
 ## 否则服务器每帧把人拉回校园，而相机 limit 卡在房间内 → 你被困在房间边界外、看不到自己。
 var _room_freeze := false
 var _stand_req_at := 0.0
+## 连续多少个 tick「按着方向键却一步没挪」才触发脱困（8 × 33ms ≈ 0.27s）。
+## 正常撞墙会被切向滑动救掉，不会走到这一步；只有卡进碰撞体里才需要蹭出去。
+const STUCK_TICKS := 8
+var _stuck_ticks := 0
 
 
 ## 被楼挡住 → 精灵调淡（名牌保持不透明，方便找人）
@@ -179,6 +183,11 @@ func stand_up() -> void:
 	if sprite != null:
 		sprite.rotation = 0.0
 	_set_collision(true)
+	# 躺着时碰撞是关掉的，人正好停在床的碰撞体里面；恢复碰撞后如果直接把
+	# 控制权交回去，人就是「嵌在床里」的状态 —— move_and_collide 从重叠出发
+	# 往哪个方向都推不动，玩家会觉得一起来就卡死、只能重开。
+	# 所以起身时先找一个能站人的空位挪过去。
+	_step_out()
 	_update_visual()
 
 
@@ -405,7 +414,19 @@ func _apply_movement(command: Dictionary) -> void:
 		speed *= 1.55
 	velocity = direction * speed
 	var before := position
-	move_and_collide(velocity * NetTick.DELTA)
+	# move_and_collide 撞上东西就停、不沿墙滑：宿舍家具密，斜着蹭到床/桌子/门框
+	# 就会直接顶死，玩家按着方向键却一步不动 —— 手感上就是「卡在原地」。
+	# 这里手动做一次切向滑动（用碰撞返回的 remainder 投影到墙面），
+	# 仍然是固定步长的纯数学运算，服务端/客户端各自跑结果一致。
+	var motion: Vector2 = velocity * NetTick.DELTA
+	var hit := move_and_collide(motion)
+	if hit != null:
+		var n: Vector2 = hit.get_normal()
+		var rem: Vector2 = hit.get_remainder()
+		if n.length() > 0.01 and rem.length() > 0.01:
+			var slide: Vector2 = rem.slide(n)
+			if slide.length() > 0.01:
+				move_and_collide(slide)
 	var moved := position - before
 	# 物理位置已经前移，视觉位置留在原处（_render_lag 抵消掉这一步），
 	# 再由 _process 平滑追上去 —— 30Hz 的阶跃就变成了连续移动。
@@ -417,8 +438,65 @@ func _apply_movement(command: Dictionary) -> void:
 		# （宿舍里家具密，走几步就贴上去、动画却一直循环，看着就像卡死了）。
 		# 仍保持 _face_dir，所以角色会面朝挡住他的那面墙、站定，而不是诡异地空走。
 		_moving = moved.length() > 0.5
+		# 还动不了：如果人其实嵌在家具/墙里（碰撞体互相重叠），
+		# 任何方向的 move_and_collide 都推不动，就会永久定住。攒几个 tick 后挪出去。
+		# 注意必须真查重叠：单纯「顶着墙走不动」是物理上正常的，
+		# 那种情况去推人只会让人在墙边来回抖，比站着不动还难受。
+		if not _moving:
+			if _overlaps():
+				_stuck_ticks += 1
+				if _stuck_ticks >= STUCK_TICKS:
+					_stuck_ticks = 0
+					_step_out()
+			else:
+				_stuck_ticks = 0
+		else:
+			_stuck_ticks = 0
 	else:
 		_moving = false
+		_stuck_ticks = 0
+
+
+## 人物碰撞体是否正和房间/建筑的实体重叠（被挤进家具里了）。
+func _overlaps() -> bool:
+	return not _free_at(global_position)
+
+
+## 把碰撞体整体摆到 world_pos 时是否为空。
+## 用物理空间查询而不是 test_move：人已经嵌在碰撞体里时，
+## test_move 从重叠状态出发永远返回「撞」，判断不出哪边是空地。
+func _free_at(world_pos: Vector2) -> bool:
+	var cs := get_node_or_null("CollisionShape2D") as CollisionShape2D
+	if cs == null or cs.shape == null:
+		return true
+	var off: Vector2 = cs.global_position - global_position
+	var t: Transform2D = cs.global_transform
+	t.origin = world_pos + off
+	var q := PhysicsShapeQueryParameters2D.new()
+	q.shape = cs.shape
+	q.transform = t
+	q.collision_mask = collision_mask
+	q.exclude = [get_rid()]
+	return get_world_2d().direct_space_state.intersect_shape(q, 1).is_empty()
+
+
+## 从碰撞体里挪出来：由近到远环形找第一个能站人的点。
+## 起床（碰撞从关闭恢复）后必须调一次 —— 躺着的位置就在床上，
+## 不挪出来人物会直接卡死在床里，按什么方向都走不动。
+func _step_out() -> bool:
+	if _free_at(global_position):
+		return false                                  # 本来就没嵌进去
+	var dirs: Array[Vector2] = [
+		Vector2.DOWN, Vector2.UP, Vector2.LEFT, Vector2.RIGHT,
+		Vector2(1, 1), Vector2(-1, 1), Vector2(1, -1), Vector2(-1, -1),
+	]
+	for r in [6.0, 12.0, 20.0, 30.0, 44.0, 60.0]:
+		for d in dirs:
+			var p: Vector2 = global_position + (d as Vector2).normalized() * r
+			if _free_at(p):
+				global_position = p
+				return true
+	return false
 
 
 func _process(delta: float) -> void:
