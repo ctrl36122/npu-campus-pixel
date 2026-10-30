@@ -1194,6 +1194,10 @@ func clear_run() -> void:
 func request_teleport(world_pos: Vector2) -> void:
 	if not Net.has_session():
 		return
+	if in_room:
+		# 在房间内不允许从地图传到校园：会落到房间相机边界外、画面卡死。
+		# 房间内全屏地图本就是「房间视图（不传送）」，这里再兜一层底。
+		return
 	if Net.is_server():
 		call_deferred("_do_teleport", Net.my_id(), world_pos)
 	else:

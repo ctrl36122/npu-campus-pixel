@@ -871,7 +871,17 @@ func _open_map() -> void:
 		_touch_pad.call("set_buttons_hidden_for", "map", true)
 		if _touch_pad.has_method("set_touch_grabbed_for"):
 			_touch_pad.call("set_touch_grabbed_for", "map", true)
-	if _map.has_method("reset_view"):
+	# 打开时按「当前是否在内景」校准全屏地图是房间视图还是校园视图，
+	# 不依赖进/出房信号是否及时触发——否则会出现「在房间里点开地图却是校园图、
+	# 点一下还把人传到校园、相机卡在房间边界外直接卡死」的情况。
+	if _arena != null and is_instance_valid(_arena) and bool(_arena.get("in_room")):
+		var rm: Node = _arena.get("room")
+		if rm != null and is_instance_valid(rm):
+			_map.call("set_room", rm)          # 内部已 reset_view
+		else:
+			_map.call("reset_view")
+	else:
+		_map.call("clear_room")                # 内部已 reset_view（仅房间模式时）
 		_map.call("reset_view")
 	_set_local_blocked(true)
 
