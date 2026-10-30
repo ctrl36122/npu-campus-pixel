@@ -154,6 +154,9 @@ func _ready() -> void:
 	# 别人的认领公告一到（或自己认领成功）立刻刷新门牌；名单变化会影响「谁跟你同层」
 	Net.room_claims_changed.connect(_refresh_door_plates)
 	Net.roster_changed.connect(_update_floor_visibility)
+	# 先把本地存档里的「我的房间 + 公告」灌进 Net：没连上服务器也能显示，
+	# 连上了就用它把服务端丢掉的那份补回来。
+	_restore_my_room()
 
 	# 调试：启动即进房间（正常玩法走到宿舍旁按 E）
 	if OS.has_environment("XGD_ROOM"):
@@ -1889,8 +1892,9 @@ func _collect_room_seats() -> void:
 	# 每张床也是一个「座位」（kind=bed），躺在床上是躺姿而不是坐姿
 	for b in room.get("data").get("beds", []):
 		var cx: float = float(b["x"]) + float(b["w"]) * 0.5
-		# 躺/坐落点比床心再往下一点：人物是从脚底往上画的，落在床上才不会整张脸怼到床头
-		var cy: float = float(b["y"]) + float(b["h"]) * 0.72
+		# 落点取床垫正中：躺姿是把身体绕中心转 90°（见 PlayerAvatar._apply_sit_anim），
+		# 中心对准床垫中心，人才是「躺在床面上」而不是「站在床上、脚踩着床尾」。
+		var cy: float = float(b["y"]) + float(b["h"]) * 0.5
 		_seats_room.append({
 			"pos": room.position + Vector2(cx, cy) * TS,
 			"face": "up",
@@ -1979,6 +1983,14 @@ func _auto_spawn_home() -> void:
 		return
 	var floor_n: int = int(parts[0])
 	var idx: int = int(parts[1])
+	# 本地存档里有房 → 顺手再向服务端贴一次（幂等；房被别人占了服务端会驳回）
+	Net.claim_room(floor_n, idx, Net.local_name)
+	# 服务端那份没有公告（重启 / 旧版服务端）→ 用本地存档里的正文补回去
+	var cur: Dictionary = Net.room_claims.get("%d:%d" % [floor_n, idx], {})
+	if String(cur.get("note", "")).is_empty():
+		var saved_note := _load_my_room_note()
+		if not saved_note.is_empty():
+			Net.set_room_note(idx, saved_note)
 	if not enter_room(DORM_PATH, floor_n):
 		return
 	var bed: Vector2 = _bed_of(idx)
@@ -2010,15 +2022,41 @@ func _load_my_room() -> Vector2i:
 	return Vector2i(f, r)
 
 
-func _save_my_room(floor_n: int, idx: int) -> void:
+## 存档里的门口公告正文（没写过就是空串）
+func _load_my_room_note() -> String:
 	var cfg := ConfigFile.new()
+	if cfg.load(MY_ROOM_CFG) != OK:
+		return ""
+	return String(cfg.get_value("room", "note", ""))
+
+
+## 记下「我的房间」：楼层、房号、房名、门口公告正文。
+## 服务端只把认领存在内存里，重启/换服就没了；本地这一份保证退出重进还认自己的房，
+## 公告也就跟着留了下来。
+func _save_my_room(floor_n: int, idx: int, note: String = "") -> void:
+	if floor_n < 1 or idx < 0:
+		return
+	var cfg := ConfigFile.new()
+	cfg.load(MY_ROOM_CFG)                       # 合并写：别把没改的字段抹掉
 	cfg.set_value("room", "floor", floor_n)
 	cfg.set_value("room", "index", idx)
+	cfg.set_value("room", "name", Net.local_name)
+	cfg.set_value("room", "note", note)
 	cfg.save(MY_ROOM_CFG)
+	Net.set_cached_room(floor_n, idx, Net.local_name, note)
+
+
+## 开局把存档里那间房灌进 Net：还没连上服务器时，门牌和公告就该显示自己的
+func _restore_my_room() -> void:
+	var saved := _load_my_room()
+	if saved.x < 1:
+		return
+	Net.set_cached_room(saved.x, saved.y, Net.local_name, _load_my_room_note())
 
 
 func _clear_my_room() -> void:
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(MY_ROOM_CFG))
+	Net.my_room_cache = {}
 
 
 func _local_avatar() -> Node:
@@ -2432,6 +2470,9 @@ func _save_note_board() -> void:
 	var txt := _note_edit.text
 	_close_note_board()
 	Net.set_room_note(idx, txt)
+	# 同步落本地存档：服务端只把认领/公告存在内存里，重启就没了，
+	# 而旧版服务端连请求都收不到 —— 不存本地就是「退出之后公告没保存」。
+	_save_my_room(current_floor, idx, txt.strip_edges().left(160))
 	_notice("门口公告已擦掉" if txt.strip_edges().is_empty() else "门口公告已更新")
 
 
@@ -2544,7 +2585,14 @@ func _remember_my_home() -> void:
 	var parts := claim.split(":")
 	if parts.size() < 2:
 		return
-	_save_my_room(int(parts[0]), int(parts[1]))
+	_save_my_room_keep_note(int(parts[0]), int(parts[1]))
+
+
+## 写存档但保留已有的公告正文（同一间房才保留，换房就该是空白的）
+func _save_my_room_keep_note(floor_n: int, idx: int) -> void:
+	var saved := _load_my_room()
+	var note := _load_my_room_note() if saved == Vector2i(floor_n, idx) else ""
+	_save_my_room(floor_n, idx, note)
 
 
 func _try_claim_room() -> bool:
@@ -2568,7 +2616,7 @@ func _try_claim_room() -> bool:
 		if Net.local_uid.is_empty() or String(now.get("uid", "")) != Net.local_uid:
 			_notice("没能认领 %d 层 %d 号房（服务器没接受请求，可能是服务端版本较旧）" % [current_floor, no])
 			return false
-		_save_my_room(current_floor, idx)          # 记下来：下次上线直接从这间房的床上出生
+		_save_my_room_keep_note(current_floor, idx)   # 记下来：下次上线直接从这间房的床上出生
 		_notice("已在 %d 层 %d 号房门口贴上公告：这是「%s」的房间" % [current_floor, no, Net.local_name])
 		return true
 	if String(cur.get("uid", "")) == Net.local_uid and Net.local_uid != "":

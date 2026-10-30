@@ -614,6 +614,10 @@ func floor_of(id: int) -> int:
 ## 服务端权威，客户端只发请求；note 是房主写的门口公告（自我介绍），可缺省。
 signal room_claims_changed
 var room_claims: Dictionary = {}
+## 本机自己那间房的本地镜像（含公告正文）：{"floor", "index", "name", "note"}。
+## 用途是「退出重进还在」——服务端只把认领存在内存里，重启就没了；旧版服务端
+## 更是直接丢掉认领请求。本地存一份，进游戏先贴回去，服务端认下来之后以它为准。
+var my_room_cache: Dictionary = {}
 
 
 ## 认领 / 取消某间房（name 为空 = 取消）。
@@ -662,6 +666,8 @@ func _write_claim(uid: String, n: int, r: int, nm: String) -> bool:
 		if cur.is_empty():
 			return false
 		room_claims.erase(key)
+		if uid == local_uid:
+			my_room_cache = {}
 	else:
 		# 退掉同一 uid 名下的其它房间（「每个人只能同时占有一个房间」）
 		for k in room_claims.keys():
@@ -670,6 +676,12 @@ func _write_claim(uid: String, n: int, r: int, nm: String) -> bool:
 			if String(Dictionary(room_claims[k]).get("uid", "")) == uid:
 				room_claims.erase(k)
 		room_claims[key] = {"name": nm, "uid": uid}
+		if uid == local_uid:
+			# 记进本地镜像（公告正文跟着走），退出重进还能贴回来
+			my_room_cache = {
+				"floor": n, "index": r, "name": nm,
+				"note": String(my_room_cache.get("note", "")),
+			}
 	room_claims_changed.emit()
 	return true
 
@@ -692,6 +704,44 @@ func my_claim() -> String:
 @rpc("authority", "call_remote", "reliable", 0)
 func _sync_claims(snapshot: Dictionary) -> void:
 	room_claims = snapshot.duplicate(true)
+	_restore_cached_claim()
+	room_claims_changed.emit()
+
+
+## 用本地镜像兜底：服务端快照里没有「我的房间」时把它补回去。
+## 旧版服务端根本不认认领请求，每收到一次快照就会把本地刚贴的公告冲掉 ——
+## 补回来之后，牌子/公告正文至少在本机是对的。房间被别人占了则以服务端为准。
+func _restore_cached_claim() -> void:
+	if my_room_cache.is_empty() or local_uid.is_empty():
+		return
+	var key := "%d:%d" % [int(my_room_cache.get("floor", 0)), int(my_room_cache.get("index", -1))]
+	var cur: Dictionary = room_claims.get(key, {})
+	var owner := String(cur.get("uid", ""))
+	if not owner.is_empty() and owner != local_uid:
+		my_room_cache = {}                 # 被别人占了：本地这份作废
+		return
+	if cur.is_empty():
+		room_claims[key] = {"name": String(my_room_cache.get("name", local_name)), "uid": local_uid}
+	var note := String(my_room_cache.get("note", ""))
+	if not note.is_empty():
+		room_claims[key]["note"] = note
+
+
+## 启动时把本地存档里那间房灌进 Net（还没连上服务器也能显示自己的牌子/公告）
+## ⚠️ 只在内容真的变了才走一遍恢复+广播：调用链是
+## _save_my_room → set_cached_room → room_claims_changed → _refresh_door_plates
+## → _remember_my_home → _save_my_room …，不挡住就是无限递归（踩过栈溢出）。
+func set_cached_room(floor_n: int, idx: int, name: String, note: String) -> void:
+	if floor_n < 1 or idx < 0:
+		return
+	var clean := _clean_note(note)
+	var same: bool = int(my_room_cache.get("floor", 0)) == floor_n \
+		and int(my_room_cache.get("index", -1)) == idx \
+		and String(my_room_cache.get("note", "")) == clean
+	my_room_cache = {"floor": floor_n, "index": idx, "name": name, "note": clean}
+	if same:
+		return
+	_restore_cached_claim()
 	room_claims_changed.emit()
 
 
@@ -739,6 +789,8 @@ func _apply_note(uid: String, r: int, note: String) -> void:
 	else:
 		cur["note"] = note
 	room_claims[key] = cur
+	if uid == local_uid and not my_room_cache.is_empty():
+		my_room_cache["note"] = note        # 本地镜像同步更新，退出重进还能读回来
 	room_claims_changed.emit()
 
 

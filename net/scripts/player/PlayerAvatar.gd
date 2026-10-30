@@ -37,6 +37,9 @@ const COLORS: Array[Color] = [Color("5b8cff"), Color("ff9f43"), Color("2ed573"),
 
 ## sit_dir 的 1..4 对应的朝向名（顺序和图集的 *_sit 动画一致）
 const SIT_DIRS: Array[String] = ["down", "left", "right", "up"]
+## 精灵锚点：帧高 48、居中，offset 上移半帧 → 脚底正好落在节点原点。
+## 躺下时改成 (0,0)，让身体绕自己中心转 90°，压在床垫中间。
+const SPRITE_OFFSET := Vector2(0, -24)
 
 var owner_peer_id: int = 0
 var is_local_player: bool = false
@@ -198,9 +201,10 @@ func stand_up() -> void:
 	if sit_dir == 0:
 		return
 	sit_dir = 0
-	# 躺姿把整个 sprite 转过来了，起身必须转回去
+	# 躺姿把整个精灵转过来了，起身必须转回去（锚点也要还原，否则人会往上跳半帧）
 	if sprite != null:
 		sprite.rotation = 0.0
+		sprite.offset = SPRITE_OFFSET
 	_set_collision(true)
 	# 躺着时碰撞是关掉的，人正好停在床的碰撞体里面；恢复碰撞后如果直接把
 	# 控制权交回去，人就是「嵌在床里」的状态 —— move_and_collide 从重叠出发
@@ -244,13 +248,21 @@ func _set_collision(on: bool) -> void:
 
 
 ## 坐/躺都是单帧静止帧，切换时才 play，免得每帧重置。
-## 躺着没有专门画的姿势图（也不想为一个姿势补全套图），就用现成的坐姿帧把人
-## 摆在床上 —— 之前试过把站立帧整体旋转 90°，看着像一根棍子横在床上，很怪。
+## 躺着时把整个精灵转 90°，锚点挪到身体中心，人就「横」在床垫上；
+## 之前只是把坐姿帧竖着摆在床面上，看着像是站在床上，很怪。
 func _apply_sit_anim() -> void:
 	if sprite == null:
 		return
-	sprite.rotation = 0.0
-	var i: int = sit_dir - LIE_BASE if sit_dir >= LIE_BASE else sit_dir - 1
+	var lying: bool = sit_dir >= LIE_BASE
+	sprite.rotation = -PI * 0.5 if lying else 0.0
+	# 站立/坐姿的锚点在脚下（帧高 48，居中后 offset 上移半帧）；
+	# 躺下时把锚点归零，让身体绕自己中心横过来，正好压在床垫中间。
+	sprite.offset = Vector2.ZERO if lying else SPRITE_OFFSET
+	# 躺下时人整个陷在床的轮廓里，按 y 排序会被床垫整个盖住 ——
+	# 抬一层 z 序，让躺着的人画在家具上面（起身/坐椅子都还原）。
+	if visual != null:
+		visual.z_index = 1 if lying else 0
+	var i: int = sit_dir - LIE_BASE if lying else sit_dir - 1
 	var anim := StringName(SIT_DIRS[clampi(i, 0, SIT_DIRS.size() - 1)] + "_sit")
 	if sprite.animation != anim:
 		sprite.animation = anim
