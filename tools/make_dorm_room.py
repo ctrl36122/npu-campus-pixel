@@ -76,7 +76,7 @@ def room_cx(i):
 
 
 def build():
-    walls, props, seats, pod_floors, rugs, room_doors = [], [], [], [], [], []
+    walls, props, seats, pod_floors, rugs, room_doors, beds = [], [], [], [], [], [], []
 
     # ── 外墙（西墙留出入口门洞） ────────────────────────────────────────
     walls.append({"x": 0, "y": 0, "w": W, "h": T})                       # 北
@@ -125,8 +125,12 @@ def build():
         rx = ROOM_X[i]
         for ry in (N_Y0, S_Y0):
             pod_floors.append({"x": rx, "y": ry, "w": ROOM_W, "h": ROOM_D})
-            props.append({"k": "bed", "x": r2(rx + 0.4), "y": r2(ry + 0.6),
+            bx, by = r2(rx + 0.4), r2(ry + 0.6)
+            props.append({"k": "bed", "x": bx, "y": by,
                           "w": bed_w, "h": bed_h, "solid": True})
+            # 床位：认领了宿舍的人就是从这间房的这张床上出生的
+            beds.append({"index": i if ry == N_Y0 else N + i,
+                         "x": bx, "y": by, "w": bed_w, "h": bed_h})
             props.append({"k": "block", "x": r2(rx + 0.5), "y": r2(ry + 5.0),
                           "w": 1.6, "h": 2.4, "solid": True})
             props.append({"k": "desk", "x": r2(rx + 7.6), "y": r2(ry + 0.6),
@@ -160,6 +164,8 @@ def build():
         "elevator": {"x": r2(ELEV_X0), "y": r2(ELEV_Y0),
                      "w": r2(ELEV_W), "h": r2(ELEV_H)},
         "room_doors": room_doors,
+        # 每间房的床（index 与 room_doors 一致）：认领后从这张床出生 / 躺着
+        "beds": beds,
         "pod_floors": pod_floors,
         "rugs": rugs,
         "walls": walls,

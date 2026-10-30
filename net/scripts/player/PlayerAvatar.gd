@@ -168,12 +168,32 @@ func sit_at(pos: Vector2, dir_name: String) -> void:
 	_apply_sit_anim()
 
 
+## 躺着：sit_dir 5..8 表示躺下（5 + SIT_DIRS 的朝向下标），沿用同一个整型好走属性同步。
+const LIE_BASE := 5
+
 func stand_up() -> void:
 	if sit_dir == 0:
 		return
 	sit_dir = 0
+	# 躺姿把整个 sprite 转过来了，起身必须转回去
+	if sprite != null:
+		sprite.rotation = 0.0
 	_set_collision(true)
 	_update_visual()
+
+
+## 躺到床上。pos 是床上的落点（人物中心），dir_name 是躺的方向。
+func lay_at(pos: Vector2, dir_name: String) -> void:
+	var i := SIT_DIRS.find(dir_name)
+	sit_dir = LIE_BASE + (i if i >= 0 else 0)
+	teleport_to(pos)
+	_set_collision(false)
+	_apply_sit_anim()
+
+
+## 是否在躺着（含，本地/远端都读这个判断）
+func is_lying() -> bool:
+	return sit_dir >= LIE_BASE
 
 
 ## 坐下后按方向键 → 起身。本地立刻生效，同时告诉服务端（座位状态它说了算）。
@@ -193,11 +213,15 @@ func _set_collision(on: bool) -> void:
 		cs.set_deferred("disabled", not on)
 
 
-## 坐姿是单帧动画（loop=0），切换时才 play，免得每帧重置
+## 坐/躺都是单帧静止帧，切换时才 play，免得每帧重置。
+## 躺着没有专门画的姿势图（也不想为一个姿势补全套图），就用现成的坐姿帧把人
+## 摆在床上 —— 之前试过把站立帧整体旋转 90°，看着像一根棍子横在床上，很怪。
 func _apply_sit_anim() -> void:
 	if sprite == null:
 		return
-	var anim := StringName(SIT_DIRS[clampi(sit_dir - 1, 0, SIT_DIRS.size() - 1)] + "_sit")
+	sprite.rotation = 0.0
+	var i: int = sit_dir - LIE_BASE if sit_dir >= LIE_BASE else sit_dir - 1
+	var anim := StringName(SIT_DIRS[clampi(i, 0, SIT_DIRS.size() - 1)] + "_sit")
 	if sprite.animation != anim:
 		sprite.animation = anim
 		sprite.play()

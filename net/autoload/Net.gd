@@ -520,8 +520,9 @@ var _seat_gate: Dictionary = {}
 ## 坐下 / 起身。座位状态由**服务端裁定**，客户端只发请求：
 ## 联机时位置是服务端模拟的，客户端先自己挪过去会在下一个 tick 被拉回原地，
 ## 表现就是「坐下的一瞬间闪回站着」。
+## dir：1..4 = 坐下（面朝 down/left/right/up），5..8 = 躺下，0 = 起身。
 func sit_down(dir: int, pos: Vector2) -> void:
-	var d: int = clampi(dir, 0, 4)
+	var d: int = clampi(dir, 0, 8)
 	if not has_session():
 		seat_changed.emit(0, d, pos)          # 单机：自己说了算
 		return
@@ -615,7 +616,8 @@ func _request_claim(n: int, r: int, nm: String) -> void:
 	_sync_claims.rpc(room_claims)
 
 
-## 服务端：写入认领。已被别人的 uid 认领的房不抢；name 为空则取消。
+## 服务端：写入认领。**一个人同时只能有一间**：认领新房间会自动退掉他之前的房间。
+## 已被别人的 uid 认领的房不抢；name 为空则取消。
 func _apply_claim(peer_id: int, n: int, r: int, nm: String) -> void:
 	if n < 1 or r < 0:
 		return
@@ -629,8 +631,29 @@ func _apply_claim(peer_id: int, n: int, r: int, nm: String) -> void:
 	if nm.is_empty():
 		room_claims.erase(key)
 	else:
+		# 退掉同一 uid 名下的其它房间（「每个人只能同时占有一个房间」）
+		for k in room_claims.keys():
+			if String(k) == key:
+				continue
+			if String(Dictionary(room_claims[k]).get("uid", "")) == uid:
+				room_claims.erase(k)
 		room_claims[key] = {"name": nm, "uid": uid}
 	room_claims_changed.emit()
+
+
+## 某个 uid 现在认领的是哪间房，返回 "楼层:房号"；没有就返回 ""。
+func claim_of_uid(uid: String) -> String:
+	if uid.is_empty():
+		return ""
+	for k in room_claims.keys():
+		if String(Dictionary(room_claims[k]).get("uid", "")) == uid:
+			return String(k)
+	return ""
+
+
+## 本机认领的房间 "楼层:房号"（没认领则空），用来决定「这次从哪儿出生」
+func my_claim() -> String:
+	return claim_of_uid(local_uid)
 
 
 @rpc("authority", "call_remote", "reliable", 0)

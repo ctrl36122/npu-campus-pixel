@@ -166,6 +166,8 @@ func _ready() -> void:
 	if OS.has_environment("XGD_TEST_DOOR"):
 		_auto_walk_out()
 	_guard_local_spawn()
+	if not (OS.has_environment("XGD_NOHOME")):
+		_auto_spawn_home()
 
 
 ## 生成校园 NPC。挂在 Objects 下是为了和建筑/树共用 y 排序（走到树后面会被遮住）。
@@ -1275,6 +1277,8 @@ const CAMPUS_ZOOM := 1.2
 ## 任何位置按 E 都是「坐下」，走出去也一直在坐下 —— 表现就是「人被卡在宿舍空间里」。
 ## 22px ≈ 2.75 格：贴着椅子能坐，退到隔间门口就是「离开」。
 const SEAT_RADIUS := 22.0
+## 座位码 ≥ 这个值表示「躺着」（5..8），和 PlayerAvatar.LIE_BASE 一致
+const LIE_SEAT_CODE := 5
 
 var room: Node2D
 var in_room := false
@@ -1343,7 +1347,10 @@ func _try_interact() -> bool:
 		Net.sit_down(0, Vector2.ZERO)
 		return true
 	if not _near_seat.is_empty():
-		Net.sit_down(_face_code(String(_near_seat["face"])), _near_seat["pos"])
+		var face_code := _face_code(String(_near_seat["face"]))
+		# 床 = 躺下（座位码 +5 表示躺着），椅子 = 坐下
+		Net.sit_down(LIE_SEAT_CODE + face_code if String(_near_seat["kind"]) == "bed" else face_code,
+			_near_seat["pos"])
 		return true
 	if in_room and _near_elevator((me as Node2D).position):
 		_open_floor_panel()
@@ -1368,7 +1375,8 @@ func _face_code(face: String) -> int:
 
 
 ## 把一个房间挂到校园的 Objects 下并把人送进去。成功返回 true。
-func enter_room(path: String) -> bool:
+## floor_n：进门直接落在第几层（自家所在层用它，普通进楼走默认 1 层）。
+func enter_room(path: String, floor_n: int = 1) -> bool:
 	if in_room or campus == null:
 		return false
 	var objs: Node2D = campus.get_node_or_null("Objects")
@@ -1420,9 +1428,9 @@ func enter_room(path: String) -> bool:
 	if _door_hint != null:
 		_door_hint.visible = true
 	_door_clock = 0.0
-	# 每次进楼都从 1 层开始；建好门牌、显示楼层指示
-	current_floor = 1
-	Net.set_my_floor(1)
+	# 每次进楼默认从 1 层开始（但自家在那层就直接落到自家那层）；建好门牌、显示楼层指示
+	current_floor = clampi(floor_n, 1, FLOOR_COUNT)
+	Net.set_my_floor(current_floor)
 	_build_door_plates()
 	_update_floor_label()
 	_update_floor_visibility()
@@ -1725,7 +1733,7 @@ func _update_interact_hint(delta: float) -> void:
 		_near_seat = {}
 		_near_dorm = ""
 		_door_hint.visible = true
-		_door_hint.text = "按 E 站起来"
+		_door_hint.text = "按 E %s" % ("起床" if bool(me.call("is_lying")) else "站起来")
 		return
 
 	var seat := _nearest_seat(pos)
@@ -1733,7 +1741,10 @@ func _update_interact_hint(delta: float) -> void:
 	if not seat.is_empty():
 		_near_dorm = ""
 		_door_hint.visible = true
-		_door_hint.text = "按 E 坐下"
+		if String(seat["kind"]) == "bed":
+			_door_hint.text = "按 E 躺到床上"
+		else:
+			_door_hint.text = "按 E 坐下"
 		return
 
 	# 房间里：只有站到门口才提示离开（房间中间按 E 不做任何事，
@@ -1844,7 +1855,35 @@ func _collect_room_seats() -> void:
 			"face": String(s["face"]),
 			"kind": "chair",
 		})
-	print("[arena] 房间椅子可坐 %d 把" % _seats_room.size())
+	# 每张床也是一个「座位」（kind=bed），躺在床上是躺姿而不是坐姿
+	for b in room.get("data").get("beds", []):
+		var cx: float = float(b["x"]) + float(b["w"]) * 0.5
+		# 躺/坐落点比床心再往下一点：人物是从脚底往上画的，落在床上才不会整张脸怼到床头
+		var cy: float = float(b["y"]) + float(b["h"]) * 0.72
+		_seats_room.append({
+			"pos": room.position + Vector2(cx, cy) * TS,
+			"face": "up",
+			"kind": "bed",
+			"index": int(b["index"]),
+		})
+	print("[arena] 房间椅子可坐 %d 把、床 %d 张" % [_seats_room.size() - _count_beds(), _count_beds()])
+
+
+func _count_beds() -> int:
+	var n := 0
+	for item in _seats_room:
+		if String(Dictionary(item).get("kind", "")) == "bed":
+			n += 1
+	return n
+
+
+## 某号房的床中心在哪（Objects 空间坐标）；没有这张床就返回零向量
+func _bed_of(index: int) -> Vector2:
+	for item in _seats_room:
+		var s: Dictionary = item
+		if String(s.get("kind", "")) == "bed" and int(s.get("index", -1)) == index:
+			return s["pos"]
+	return Vector2.ZERO
 
 
 ## 座位状态变了（本地自己按的，或别人坐下了）。
@@ -1858,6 +1897,8 @@ func _on_seat_changed(id: int, dir: int, pos: Vector2) -> void:
 			continue
 		if dir == 0:
 			c.call("stand_up")
+		elif dir >= LIE_SEAT_CODE:
+			c.call("lay_at", pos, _face_name(dir - LIE_SEAT_CODE))
 		else:
 			c.call("sit_at", pos, _face_name(dir))
 		return
@@ -1873,6 +1914,80 @@ func _face_name(dir: int) -> String:
 			return "up"
 	return "down"
 
+
+
+# ── 「回家的宿舍」：认领过房间的人，一上线直接出生在自己床上了 ─────────
+const MY_ROOM_CFG := "user://my_room.cfg"
+const DORM_PATH := "res://assets/rooms/dorm_space.json"
+
+## 进游戏时决定是否直接落到自己房间里。没认领过 → 老规矩从校园出生。
+func _auto_spawn_home() -> void:
+	if Net.is_dedicated:
+		return
+	var me: Node = await _wait_local_avatar(15.0)
+	if me == null:
+		return
+	await get_tree().create_timer(0.8).timeout      # 等服务端把认领快照发下来
+
+	var claim: String = Net.my_claim()
+	if claim.is_empty():
+		# 服务端还没记住（或自己单机）—— 本地存档里若记过「我的房间」，重新认领一次。
+		# 房间要是被别人占着，服务端的 uid 校验会直接驳回，不会抢别人的。
+		var saved := _load_my_room()
+		if saved.x < 1:
+			return
+		Net.claim_room(saved.x, saved.y, Net.local_name)
+		await get_tree().create_timer(0.5).timeout
+		claim = Net.my_claim()
+		if claim.is_empty():
+			_clear_my_room()                        # 已经被别人占了，别再惦记
+			return
+
+	var parts := claim.split(":")
+	if parts.size() < 2:
+		return
+	var floor_n: int = int(parts[0])
+	var idx: int = int(parts[1])
+	if not enter_room(DORM_PATH, floor_n):
+		return
+	var bed: Vector2 = _bed_of(idx)
+	if bed == Vector2.ZERO:
+		return
+	# 每次上线都睡在自己的床上（站嫌疑人身上出生会卡住，躺着是物理关闭的状态，稳）
+	me.call("teleport_to", bed)
+	Net.sit_down(LIE_SEAT_CODE + _face_code("up"), bed)
+	print("[arena] 回到了自己的宿舍：%d 层 %d 号房" % [floor_n, idx + 1])
+
+
+func _wait_local_avatar(timeout: float) -> Node:
+	var left := timeout
+	while left > 0.0:
+		var me := _local_avatar()
+		if me != null:
+			return me
+		await get_tree().create_timer(0.3).timeout
+		left -= 0.3
+	return null
+
+
+func _load_my_room() -> Vector2i:
+	var cfg := ConfigFile.new()
+	if cfg.load(MY_ROOM_CFG) != OK:
+		return Vector2i(-1, -1)
+	var f: int = int(cfg.get_value("room", "floor", 0))
+	var r: int = int(cfg.get_value("room", "index", -1))
+	return Vector2i(f, r)
+
+
+func _save_my_room(floor_n: int, idx: int) -> void:
+	var cfg := ConfigFile.new()
+	cfg.set_value("room", "floor", floor_n)
+	cfg.set_value("room", "index", idx)
+	cfg.save(MY_ROOM_CFG)
+
+
+func _clear_my_room() -> void:
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(MY_ROOM_CFG))
 
 
 func _local_avatar() -> Node:
@@ -2142,6 +2257,7 @@ func _clear_door_plates() -> void:
 
 ## 按 current_floor 重算每块牌子的文字。认领是「楼层:房号」为键的，换层自然切换。
 func _refresh_door_plates() -> void:
+	_remember_my_home()
 	for item in _door_plates:
 		var pc: PanelContainer = item["panel"]
 		var lb: Label = item["label"]
@@ -2208,6 +2324,18 @@ func _update_notice(delta: float) -> void:
 
 
 ## F 认领身边的人还在门前的房间（再按一次撕下自己的公告）。
+## 服务端快照里有自己的名字 → 记到本地存档（下次上线据此直接回宿舍）。
+## 只在「快照里有我」时才写，避免服务端的认领还没同步过来就把存档清了。
+func _remember_my_home() -> void:
+	var claim: String = Net.my_claim()
+	if claim.is_empty():
+		return
+	var parts := claim.split(":")
+	if parts.size() < 2:
+		return
+	_save_my_room(int(parts[0]), int(parts[1]))
+
+
 func _try_claim_room() -> bool:
 	if not in_room or _floor_open:
 		return false
@@ -2222,11 +2350,13 @@ func _try_claim_room() -> bool:
 	var no: int = idx + 1
 	if cur.is_empty():
 		Net.claim_room(current_floor, idx, Net.local_name)
+		_save_my_room(current_floor, idx)          # 记下来：下次上线直接从这间房的床上出生
 		_notice("已在 %d 层 %d 号房门口贴上公告：这是「%s」的房间" % [current_floor, no, Net.local_name])
 		return true
 	if String(cur.get("uid", "")) == Net.local_uid and Net.local_uid != "":
 		Net.claim_room(current_floor, idx, "")      # 空名字 = 撕下来
-		_notice("已撕下 %d 层 %d 号房的公告" % [current_floor, no])
+		_clear_my_room()
+		_notice("已撕下 %d 层 %d 号房的公告，下次上线从校园出生" % [current_floor, no])
 		return true
 	_notice("%d 层 %d 号房已经是「%s」的了" % [current_floor, no, String(cur.get("name", "?"))])
 	return false
