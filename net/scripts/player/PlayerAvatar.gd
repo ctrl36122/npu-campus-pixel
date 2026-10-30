@@ -178,8 +178,7 @@ func set_room_state(inside: bool, floor_n: int, pos: Vector2) -> void:
 	room_floor = clampi(floor_n, 1, 99) if inside else 0
 	teleport_to(pos)
 	if Net.is_server():
-		server_position = pos
-		server_state = {"seq": processed_seq, "position": pos}
+		_publish_pose(pos)
 	elif Net.has_session():
 		Net.send_to(1, self, &"_room_state", [room_inside, room_floor, pos])
 
@@ -195,6 +194,26 @@ func _room_state(inside: bool, floor_n: int, pos: Vector2) -> void:
 	room_floor = clampi(floor_n, 1, 99) if inside else 0
 	teleport_to(pos)
 	sit_dir = 0
+	# 进/出房这次传送本身也要让远端看到：teleport_to 写的 seq 是 processed_seq
+	# （和上一份校园快照相同值），远端判「seq 没变」会跳过 —— 这里再发布一份新序号。
+	if Net.is_server():
+		_publish_pose(pos)
+
+
+## 房间内的姿态发布序号。校园里 server_state.seq 用 processed_seq（服务端每模拟
+## 一条命令就 +1），房间内服务端不模拟命令、processed_seq 永远不动 —— 远端靠
+## 「seq 变了」才把新位置喂给 RemoteSmoother，序号不动 = 远端永远冻在进房位置，
+## 这就是「校园里同步、宿舍里别人看你不动」的真凶。
+## 用负向递增（-1, -2, …）和校园的正数 seq 永不相撞：出房后 seq 回到
+## processed_seq，值必然不同，远端一定能看到出房传送。
+var _pose_seq: int = 0
+
+
+## 服务端发布一份房间内姿态：序号自增，保证远端每次都当「新快照」收。
+func _publish_pose(pos: Vector2) -> void:
+	_pose_seq -= 1
+	server_position = pos
+	server_state = {"seq": _pose_seq, "position": pos}
 
 
 ## 客户端 -> 服务端：房间内每 tick 的位置 / 姿势。
@@ -209,8 +228,7 @@ func _push_room_pose(pos: Vector2, dir: int) -> void:
 	if not room_inside:
 		return                      # 没登记进房就不接受，防止乱传坐标
 	position = pos
-	server_position = pos
-	server_state = {"seq": processed_seq, "position": pos}
+	_publish_pose(pos)
 	sit_dir = clampi(dir, 0, 8)
 
 
@@ -425,8 +443,7 @@ func _on_tick(tick: int) -> void:
 			# 位置仍然要给别人看：房间内不跑服务端模拟，但每 tick 把坐标推给服务端，
 			# 服务端写进自己的 avatar 再随同步器广播（同房间的人才看得见你走动）。
 			if Net.is_server():
-				server_position = position
-				server_state = {"seq": processed_seq, "position": position}
+				_publish_pose(position)
 			elif Net.has_session():
 				Net.send_to(1, self, &"_push_room_pose", [position, sit_dir])
 		elif buffer.entries.size() < InputBufferScript.CAPACITY:
