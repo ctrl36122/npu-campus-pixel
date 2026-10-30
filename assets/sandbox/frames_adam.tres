@@ -194,6 +194,22 @@ region = Rect2(1088, 0, 32, 48)
 atlas = ExtResource("1_ma1ra")
 region = Rect2(1120, 0, 32, 48)
 
+[sub_resource type="AtlasTexture" id="AtlasTexture_sit_down"]
+atlas = ExtResource("1_ma1ra")
+region = Rect2(1536, 0, 32, 48)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_sit_left"]
+atlas = ExtResource("1_ma1ra")
+region = Rect2(1568, 0, 32, 48)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_sit_right"]
+atlas = ExtResource("1_ma1ra")
+region = Rect2(1600, 0, 32, 48)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_sit_up"]
+atlas = ExtResource("1_ma1ra")
+region = Rect2(1632, 0, 32, 48)
+
 [resource]
 animations = [{
 "frames": [{
@@ -379,4 +395,36 @@ animations = [{
 "loop": 1,
 "name": &"up_walk",
 "speed": 10.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_sit_down")
+}],
+"loop": 0,
+"name": &"down_sit",
+"speed": 1.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_sit_left")
+}],
+"loop": 0,
+"name": &"left_sit",
+"speed": 1.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_sit_right")
+}],
+"loop": 0,
+"name": &"right_sit",
+"speed": 1.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_sit_up")
+}],
+"loop": 0,
+"name": &"up_sit",
+"speed": 1.0
 }]

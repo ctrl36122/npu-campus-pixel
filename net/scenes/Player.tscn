@@ -37,6 +37,9 @@ properties/4/replication_mode = 1
 properties/5/path = NodePath(".:hero_id")
 properties/5/spawn = true
 properties/5/replication_mode = 1
+properties/6/path = NodePath(".:sit_dir")
+properties/6/spawn = true
+properties/6/replication_mode = 1
 
 [node name="Player" type="CharacterBody2D" groups=["players"]
 scale = Vector2(0.22, 0.22)]

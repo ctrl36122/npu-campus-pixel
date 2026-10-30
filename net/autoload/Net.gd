@@ -507,6 +507,55 @@ func _show_emote(index: int) -> void:
 		emote_received.emit(sender, clampi(index, 0, 3))
 
 
+# --- 坐椅子 ---------------------------------------------------------------
+
+## id, 坐姿方向（0 = 站起来），座位世界坐标
+signal seat_changed(id: int, dir: int, pos: Vector2)
+
+## 上次坐下/起身的时间戳（秒），兼作防刷：0.25s 内只认一次
+var _seat_gate: Dictionary = {}
+
+
+## 坐下 / 起身。座位状态由**服务端裁定**，客户端只发请求：
+## 联机时位置是服务端模拟的，客户端先自己挪过去会在下一个 tick 被拉回原地，
+## 表现就是「坐下的一瞬间闪回站着」。
+func sit_down(dir: int, pos: Vector2) -> void:
+	var d: int = clampi(dir, 0, 4)
+	if not has_session():
+		seat_changed.emit(0, d, pos)          # 单机：自己说了算
+		return
+	if is_server():
+		_apply_seat(1, d, pos)
+		broadcast(self, &"_show_seat", [d, pos])
+	else:
+		_request_seat.rpc_id(1, d, pos)
+
+
+@rpc("any_peer", "call_remote", "reliable", 0)
+func _request_seat(dir: int, pos: Vector2) -> void:
+	if not is_server():
+		return
+	_apply_seat(multiplayer.get_remote_sender_id(), clampi(dir, 0, 4), pos)
+
+
+## 服务端：改这个玩家的座位状态并推给所有人
+func _apply_seat(id: int, dir: int, pos: Vector2) -> void:
+	if not peers.has(id):
+		return
+	var now := float(Time.get_ticks_msec()) / 1000.0
+	if now - float(_seat_gate.get(id, -9.0)) < 0.25:
+		return
+	_seat_gate[id] = now
+	seat_changed.emit(id, dir, pos)
+
+
+@rpc("any_peer", "call_remote", "reliable", 0)
+func _show_seat(dir: int, pos: Vector2) -> void:
+	var sender: int = multiplayer.get_remote_sender_id()
+	if peers.has(sender):
+		seat_changed.emit(sender, clampi(dir, 0, 4), pos)
+
+
 # --- Ready-up lobby -------------------------------------------------------
 
 func set_ready(value: bool) -> void:

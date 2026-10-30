@@ -44,7 +44,49 @@ func load_room(path: String) -> bool:
 		return false
 	data = parsed
 	_build()
+	_build_seats()
 	return true
+
+
+## 座位点（房间局部坐标，8px/格 空间）。
+## 每把椅子朝哪坐：找离它最近的一张桌子，对着桌子坐 —— 人坐下自然面向桌面。
+## 朝向用主轴判断（桌子更偏南北就朝上/下），斜着放的椅子也不会出现怪角度。
+var seats: Array = []
+
+
+func _build_seats() -> void:
+	seats.clear()
+	var desks: Array = []
+	for item in data.get("props", []):
+		var p: Dictionary = item
+		var k := String(p.get("k", ""))
+		if k != "desk" and k != "table":
+			continue
+		desks.append(Vector2(
+			(float(p["x"]) + float(p["w"]) * 0.5) * TS,
+			(float(p["y"]) + float(p["h"]) * 0.5) * TS))
+
+	for item in data.get("seats", []):
+		var s: Dictionary = item
+		var cx := (float(s["x"]) + float(s["w"]) * 0.5) * TS
+		# 脚底落在坐面前沿上方一点：前沿条（12px）正好盖住小腿，
+		# 上半身完整露出来，椅子主体则在人身后 —— 三者叠起来才是「坐着」。
+		var cy := (float(s["y"]) + float(s["h"])) * TS - 6.0
+		var face := "down"
+		var best := INF
+		var target := Vector2.ZERO
+		for d in desks:
+			var dist: float = Vector2(cx, cy).distance_squared_to(d)
+			if dist < best:
+				best = dist
+				target = d
+		if best < INF:
+			var v: Vector2 = target - Vector2(cx, cy)
+			if absf(v.y) >= absf(v.x):
+				face = "up" if v.y < 0.0 else "down"
+			else:
+				face = "left" if v.x < 0.0 else "right"
+		seats.append({"pos": Vector2(cx, cy), "face": face})
 
 
 ## 玩家应该挂到哪个节点下
@@ -71,6 +113,11 @@ func _build() -> void:
 	floor_spr.z_index = -100
 	add_child(floor_spr)
 
+	# 房间根节点自己也要开 y-sort：Godot 4 的 y-sort 是「一趟扁平排序」，
+	# 但这要求从 campus/Objects 到家具的每一层容器都开启，中间断一层，
+	# 整间房间就会被当成一个整体按 Room.position 参与排序 ——
+	# 表现就是「玩家永远画在所有家具上面」，坐椅子时人浮在椅子前面。
+	y_sort_enabled = true
 	objects = Node2D.new()
 	objects.name = "Objects"
 	objects.y_sort_enabled = true
@@ -92,7 +139,18 @@ func _build() -> void:
 			_add_solid(p)
 
 	for item in data.get("seats", []):
-		_add_prop("chair", item)
+		var s: Dictionary = item
+		# 椅子 = 主体（z=-1，永远在人身后）+ 坐面前沿（z=+1，永远在人身前）。
+		# 只有一个节点时，不管 y 怎么调都只有两种结果：人被整把椅子吞掉，
+		# 或者人整个浮在椅子前面 —— 因为 y-sort 是整块比较，不会只挡腿。
+		_add_prop("chair", s, -1)
+		var front_px := 12.0
+		_add_prop("chair_front", {
+			"x": float(s["x"]),
+			"y": float(s["y"]) + float(s["h"]) - front_px / TS,
+			"w": float(s["w"]),
+			"h": front_px / TS,
+		}, 1)
 
 	minimap_tex = _bake_minimap()
 	_setup_glow()
@@ -102,13 +160,13 @@ func _build() -> void:
 	spawn_px = Vector2(float(sp.get("x", 0.0)), float(sp.get("y", 0.0))) * TS
 
 
-func _add_prop(kind: String, r: Dictionary) -> void:
+func _add_prop(kind: String, r: Dictionary, z: int = 0) -> void:
 	if objects == null:
 		return
 	var n := RoomProp.new()
 	n.name = "%s_%d" % [kind, objects.get_child_count()]
 	objects.add_child(n)
-	n.call("setup", kind, Rect2(float(r["x"]), float(r["y"]), float(r["w"]), float(r["h"])))
+	n.call("setup", kind, Rect2(float(r["x"]), float(r["y"]), float(r["w"]), float(r["h"])), z)
 
 
 ## 一个左上角 + 尺寸的矩形碰撞

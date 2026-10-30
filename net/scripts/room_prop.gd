@@ -20,10 +20,13 @@ var kind: String = "table"
 var cell := Rect2()
 
 
-func setup(k: String, r: Rect2) -> void:
+func setup(k: String, r: Rect2, z: int = 0) -> void:
 	kind = k
 	cell = r
 	position = Vector2(r.get_center().x * TS, r.end.y * TS)
+	# z_index 在 y-sort 容器里优先于 y 比较。椅子靠它把「主体」压到所有人下面、
+	# 「坐面前沿」抬到所有人上面 —— 一个节点没法同时做到这两件事。
+	z_index = z
 	queue_redraw()
 
 
@@ -46,6 +49,8 @@ func _draw() -> void:
 			_pit(o, w, h)
 		"chair":
 			_chair(o, w, h)
+		"chair_front":
+			_chair_front(o, w, h)
 		"deco":
 			_crate(o, w, h, Color("4a5b46"), Color("36452f"))   # 绿植箱 / 空调
 		"block":
@@ -252,6 +257,18 @@ func _pit(o: Vector2, w: float, h: float) -> void:
 ##
 ## 三件套：靠背（深色、比坐面高）、坐面（亮木色、中间压暗表示软垫）、
 ## 一圈轮廓线。只画一个方块的话，远看跟木箱没区别。
+## 坐面的**前沿薄条**（只有 12px 高），z_index 抬到人之上，专门用来盖住坐着的人的腿。
+## 椅子主体是另一个节点（z_index 压到人之下），所以「身后有椅背、身前有坐沿」
+## 才能同时成立 —— 单个节点要么整个人被吞、要么人整个浮在椅子前。
+func _chair_front(o: Vector2, w: float, h: float) -> void:
+	draw_rect(Rect2(o.x, o.y, w, h), Color("b07a45"))
+	draw_rect(Rect2(o.x, o.y, w, 1.0), Color("c98d52"))     # 前沿高光
+	draw_rect(Rect2(o.x, o.y, 1.0, h), Color("a06c3c"))
+	draw_rect(Rect2(o.x + w - 1.0, o.y, 1.0, h), Color("83552c"))
+	draw_rect(Rect2(o.x, o.y + h - 1.0, w, 1.0), Color("7a4f26"))
+	draw_rect(Rect2(o.x + 2.0, o.y + 2.0, w - 4.0, h - 3.0), Color(0, 0, 0, 0.10))
+
+
 func _chair(o: Vector2, w: float, h: float) -> void:
 	var seat := minf(w, h * 0.5)
 	var sx := o.x + (w - seat) * 0.5

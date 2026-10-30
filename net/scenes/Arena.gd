@@ -148,7 +148,9 @@ func _ready() -> void:
 	queue_redraw()
 
 	_collect_dorms()
+	_collect_campus_seats()
 	_build_door_hint()
+	Net.seat_changed.connect(_on_seat_changed)
 
 	# 调试：启动即进房间（正常玩法走到宿舍旁按 E）
 	if OS.has_environment("XGD_ROOM"):
@@ -776,7 +778,7 @@ func _update_daynight() -> void:
 func _process(delta: float) -> void:
 	_update_xray(delta)
 	_update_daynight()
-	_update_door_hint(delta)
+	_update_interact_hint(delta)
 
 
 ## 有人被楼盖住 → 在楼身上挖一个「透视窗」（只透玩家周围一小块，楼体其余实心），
@@ -1247,9 +1249,13 @@ const ROOM_ORIGIN := Vector2(0, -1500)      # 格：校园北界（y=0）之外
 const DOOR_RADIUS := 8.0
 ## 门口检测跑得多勤（不必每帧扫 20 栋楼）
 const DOOR_CHECK_HZ := 8.0
-## 房间比校园开阔得多（一个机位就顶几个人宽），校园那档视距进去只能看到一小块
-const ROOM_ZOOM := 0.85
+## 室内视距。房间只有 910×754 px，比视口（1280/zoom）还小 ——
+## 用校园那档 1.2 进去，整间房缩在屏幕中间、四周露黑，人也只有几个像素。
+## 1.9 让房间填满屏幕，人物约 34px 高，坐着/站着一眼能分清。
+const ROOM_ZOOM := 1.9
 const CAMPUS_ZOOM := 1.2
+## 离座位多近才能坐（像素，campus/Objects 局部空间 = 8px/格）
+const SEAT_RADIUS := 46.0
 
 var room: Node2D
 var in_room := false
@@ -1261,8 +1267,12 @@ var _cam_limit := {}
 var _dorms: Array = []
 var _near_dorm := ""
 var _room_title := ""
-var _door_hint: Label
+var _door_hint: Button          # 提示兼交互按钮（手机上点它就是按 E）
 var _door_clock := 0.0
+## 座位：[{pos: Vector2(campus 局部坐标), face: String, kind: String}]
+var _seats_campus: Array = []
+var _seats_room: Array = []
+var _near_seat: Dictionary = {}
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -1271,13 +1281,40 @@ func _unhandled_input(event: InputEvent) -> void:
 	var k := event as InputEventKey
 	if not k.pressed or k.echo:
 		return
-	if k.keycode == KEY_E:
-		if in_room:
-			leave_room()
-			get_viewport().set_input_as_handled()
-		elif _near_dorm != "":
-			enter_room("res://assets/rooms/game_lounge.json")
-			get_viewport().set_input_as_handled()
+	if k.keycode == KEY_E and _try_interact():
+		get_viewport().set_input_as_handled()
+
+
+## E 键只有一个入口，按「最近、最明确」的顺序依次试。
+## 顺序不是随便定的：坐着时 E 必须是起身（不然坐在椅子上没法离座就走出房间了），
+## 站在椅子边 E 是坐下，站在房间里别处 E 才是离开。
+func _try_interact() -> bool:
+	var me: Node = _local_avatar()
+	if me == null:
+		return false
+	if int(me.get("sit_dir")) != 0:
+		Net.sit_down(0, Vector2.ZERO)
+		return true
+	if not _near_seat.is_empty():
+		Net.sit_down(_face_code(String(_near_seat["face"])), _near_seat["pos"])
+		return true
+	if in_room:
+		leave_room()
+		return true
+	if _near_dorm != "":
+		enter_room("res://assets/rooms/game_lounge.json")
+		return true
+	return false
+
+
+## 朝向名 → sit_dir 的编号（1..4，和 SIT_DIRS 一致）
+func _face_code(face: String) -> int:
+	match face:
+		"down": return 1
+		"left": return 2
+		"right": return 3
+		"up": return 4
+	return 1
 
 
 ## 把一个房间挂到校园的 Objects 下并把人送进去。成功返回 true。
@@ -1312,12 +1349,17 @@ func enter_room(path: String) -> bool:
 	var target: Vector2 = room.position + sp
 	me.call("teleport_to", target)
 	_set_cam_limit(me, true)
-	me.set("_cam_zoom_target", ROOM_ZOOM)
+	# 调试时 XGD_ZOOM 优先，否则统一用房间视距（房间比校园开阔得多）
+	if OS.has_environment("XGD_ZOOM"):
+		me.set("_cam_zoom_target", clampf(OS.get_environment("XGD_ZOOM").to_float(), 0.55, 3.0))
+	else:
+		me.set("_cam_zoom_target", ROOM_ZOOM)
 	in_room = true
 
 	# 房间没有烘焙光照图，全屏夜幕会把它压成一片黑
 	if _night_dark != null:
 		_night_dark.visible = false
+	_collect_room_seats()
 	_room_title = String(room.get("data").get("name", "房间"))
 	if _door_hint != null:
 		_door_hint.visible = true
@@ -1330,9 +1372,14 @@ func leave_room() -> void:
 	if not in_room:
 		return
 	in_room = false
+	# 房间会被隐藏，人还坐在椅子上就悬空了 —— 出门前先站起来
+	var me: Node = _local_avatar()
+	if me != null and int(me.get("sit_dir")) != 0:
+		Net.sit_down(0, Vector2.ZERO)
+	_seats_room.clear()
+	_near_seat = {}
 	if _night_dark != null:
 		_night_dark.visible = true
-	var me: Node = _local_avatar()
 	if me != null:
 		me.call("teleport_to", _return_cell * TS)
 		_set_cam_limit(me, false)
@@ -1350,6 +1397,17 @@ func leave_room() -> void:
 func _auto_press_e() -> void:
 	var times: int = maxi(1, OS.get_environment("XGD_TEST_E").to_int())
 	await get_tree().create_timer(3.0).timeout
+	# 调试：先站到第一把椅子旁边，方便验证「按 E 坐下」这条链路
+	if OS.has_environment("XGD_TEST_SEAT") and not _seats_room.is_empty():
+		var a: Node = _local_avatar()
+		if a != null:
+			var s: Dictionary = _seats_room[0]
+			a.call("teleport_to", (s["pos"] as Vector2) + Vector2(0.0, 26.0))
+			print("[arena] 已站到座位旁：座位=", s["pos"], " 朝向=", s["face"])
+			await get_tree().create_timer(0.5).timeout
+			print("[dbg] 玩家现在=", (a as Node2D).position, " 距离=",
+				(a as Node2D).position.distance_to(s["pos"]), " _near_seat=", _near_seat,
+				" in_room=", in_room, " seats_room=", _seats_room.size())
 	for i in range(times):
 		var down := InputEventKey.new()
 		down.keycode = KEY_E
@@ -1363,7 +1421,22 @@ func _auto_press_e() -> void:
 		up.pressed = false
 		Input.parse_input_event(up)
 		await get_tree().create_timer(1.6).timeout
-		print("[arena] 第 %d 次注入 E 之后 in_room=%s" % [i + 1, in_room])
+		var a2: Node = _local_avatar()
+		print("[arena] 第 %d 次 E 之后 in_room=%s sit_dir=%d pos=%s" % [
+			i + 1, in_room, int(a2.get("sit_dir")) if a2 != null else -1,
+			(a2 as Node2D).position if a2 != null else Vector2.ZERO])
+
+	# 调试：坐下之后按住方向键，应该自己站起来
+	if OS.has_environment("XGD_TEST_WALK"):
+		await get_tree().create_timer(1.2).timeout
+		var a3: Node = _local_avatar()
+		print("[dbg] 按键前 sit_dir=", int(a3.get("sit_dir")))
+		Input.action_press("move_up")
+		await get_tree().create_timer(0.9).timeout
+		Input.action_release("move_up")
+		await get_tree().create_timer(0.3).timeout
+		print("[dbg] 按方向键后 sit_dir=", int(a3.get("sit_dir")),
+			" pos=", (a3 as Node2D).position)
 
 
 ## 等玩家 spawn 出来再进房间（联机会话建立有延迟）
@@ -1427,26 +1500,39 @@ func _build_door_hint() -> void:
 	layer.layer = 5
 	add_child(layer)
 
-	_door_hint = Label.new()
+	# 做成按钮而不是纯文字：手机上根本没有 E 键，点这行字就是「按 E」。
+	# flat + 空样式，看起来还是一行字，但能接点击。
+	_door_hint = Button.new()
+	_door_hint.flat = true
+	_door_hint.focus_mode = Control.FOCUS_NONE
+	_door_hint.mouse_filter = Control.MOUSE_FILTER_STOP
+	for st in ["normal", "hover", "pressed", "focus", "disabled"]:
+		var empty := StyleBoxEmpty.new()
+		_door_hint.add_theme_stylebox_override(st, empty)
+	_door_hint.pressed.connect(_on_hint_pressed)
 	_door_hint.visible = false
-	_door_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_door_hint.alignment = HORIZONTAL_ALIGNMENT_CENTER   # Button 叫 alignment，不是 Label 的 horizontal_alignment
 	_door_hint.add_theme_font_size_override("font_size", 20)
 	_door_hint.add_theme_color_override("font_color", Color("#eaf3fb"))
 	_door_hint.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
 	# 20px 的字配 6px 描边，笔画会被糊成一坨（「离」几乎认不出），4px 刚好压住背景又不吃笔画
 	_door_hint.add_theme_constant_override("outline_size", 4)
-	_door_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_door_hint.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+	# 放上方居中：底部中央正好落在手机摇杆的判定区（左下 55%×下方 62%），
+	# 点提示会顺带把角色推走两步。上部中间在竖屏和横屏下都是空的。
+	_door_hint.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
 	_door_hint.offset_left = -340.0
 	_door_hint.offset_right = 340.0
-	_door_hint.offset_top = -196.0
-	_door_hint.offset_bottom = -156.0
+	_door_hint.offset_top = 62.0
+	_door_hint.offset_bottom = 102.0
 	layer.add_child(_door_hint)
 
 
 ## 每隔一小段时间看一次：人在哪栋宿舍旁 / 是否已经在房间里。
 ## 不每帧扫是有原因的 —— 20 栋楼 × 每帧，在一台老机器上就是白烧的 CPU。
-func _update_door_hint(delta: float) -> void:
+## 每隔一小段时间看一次：坐着 / 旁边有椅子 / 在房间里 / 站在哪栋宿舍旁。
+## 不每帧扫是有原因的 —— 20 栋楼 + 39 个座位 × 每帧，在一台老机器上就是白烧的 CPU。
+## 提示和 E 键的优先级必须一致，否则会出现「提示说能坐、按了却走了」。
+func _update_interact_hint(delta: float) -> void:
 	if _door_hint == null:
 		return
 	_door_clock -= delta
@@ -1454,18 +1540,37 @@ func _update_door_hint(delta: float) -> void:
 		return
 	_door_clock = 1.0 / DOOR_CHECK_HZ
 
+	var me: Node = _local_avatar()
+	if me == null:
+		_near_dorm = ""
+		_near_seat = {}
+		_door_hint.visible = false
+		return
+
+	var pos: Vector2 = (me as Node2D).position
+
+	if int(me.get("sit_dir")) != 0:
+		_near_seat = {}
+		_near_dorm = ""
+		_door_hint.visible = true
+		_door_hint.text = "按 E 站起来"
+		return
+
+	var seat := _nearest_seat(pos)
+	_near_seat = seat
+	if not seat.is_empty():
+		_near_dorm = ""
+		_door_hint.visible = true
+		_door_hint.text = "按 E 坐下"
+		return
+
 	if in_room:
+		_near_dorm = ""
 		_door_hint.visible = true
 		_door_hint.text = "按 E 离开「%s」" % _room_title
 		return
 
-	var me: Node = _local_avatar()
-	if me == null:
-		_near_dorm = ""
-		_door_hint.visible = false
-		return
-
-	var cell: Vector2 = (me as Node2D).position / TS
+	var cell: Vector2 = pos / TS
 	var hit := ""
 	for d in _dorms:
 		var r: Rect2 = d["rect"]
@@ -1476,6 +1581,88 @@ func _update_door_hint(delta: float) -> void:
 	_door_hint.visible = hit != ""
 	if hit != "":
 		_door_hint.text = "%s · 按 E 进入「宿舍空间」" % hit
+
+
+## 点提示文字 = 按 E。手机上唯一的交互入口。
+func _on_hint_pressed() -> void:
+	_try_interact()
+
+
+func _nearest_seat(pos: Vector2) -> Dictionary:
+	var best: Dictionary = {}
+	var best_d := SEAT_RADIUS
+	var list: Array = _seats_room if in_room else _seats_campus
+	for item in list:
+		var s: Dictionary = item
+		var d: float = pos.distance_to(s["pos"])
+		if d < best_d:
+			best_d = d
+			best = s
+	return best
+
+
+## 校园里的长椅。world.tscn 里它们是 Objects 下的 StaticBody2D，名字带「长椅」，
+## position 是椅子左下角：碰撞占 x 0..16、y -8..0，所以坐面中心在 +8,-4 一带。
+## 脚底放得比坐面略低一点，人物才会「陷进」椅子里而不是浮在上面。
+func _collect_campus_seats() -> void:
+	_seats_campus.clear()
+	if campus == null:
+		return
+	var objs: Node2D = campus.get_node_or_null("Objects")
+	if objs == null:
+		return
+	for c in objs.get_children():
+		if not (c is Node2D) or not String(c.name).contains("长椅"):
+			continue
+		_seats_campus.append({
+			"pos": (c as Node2D).position + Vector2(8.0, -1.0),
+			"face": "down",
+			"kind": "bench",
+		})
+	print("[arena] 校园长椅可坐 %d 处" % _seats_campus.size())
+
+
+## 房间里的椅子：Room 已经算好每把朝哪儿（对着最近的桌子），
+## 这里只要把房间局部坐标搬到 Objects 空间。
+func _collect_room_seats() -> void:
+	_seats_room.clear()
+	if room == null or not is_instance_valid(room):
+		return
+	for item in room.get("seats"):
+		var s: Dictionary = item
+		_seats_room.append({
+			"pos": (room as Node2D).position + (s["pos"] as Vector2),
+			"face": String(s["face"]),
+			"kind": "chair",
+		})
+	print("[arena] 房间椅子可坐 %d 把" % _seats_room.size())
+
+
+## 座位状态变了（本地自己按的，或别人坐下了）。
+## 按 owner_peer_id 找到对应玩家再改姿势 —— 远端玩家的位置由服务端同步，
+## 这里的 teleport 只是让坐下的那一帧就到位，不用等下一次位置包。
+func _on_seat_changed(id: int, dir: int, pos: Vector2) -> void:
+	for c in players.get_children():
+		if c == null or not is_instance_valid(c):
+			continue
+		if int(c.get("owner_peer_id")) != id:
+			continue
+		if dir == 0:
+			c.call("stand_up")
+		else:
+			c.call("sit_at", pos, _face_name(dir))
+		return
+
+
+func _face_name(dir: int) -> String:
+	match dir:
+		2:
+			return "left"
+		3:
+			return "right"
+		4:
+			return "up"
+	return "down"
 
 
 func _local_avatar() -> Node:

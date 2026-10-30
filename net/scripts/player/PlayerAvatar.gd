@@ -35,6 +35,9 @@ const ZOOM_STEP: float = 1.14
 ## window agrees on who is who.
 const COLORS: Array[Color] = [Color("5b8cff"), Color("ff9f43"), Color("2ed573"), Color("ff6b9d")]
 
+## sit_dir 的 1..4 对应的朝向名（顺序和图集的 *_sit 动画一致）
+const SIT_DIRS: Array[String] = ["down", "left", "right", "up"]
+
 var owner_peer_id: int = 0
 var is_local_player: bool = false
 @export var round_id: int = 0
@@ -43,6 +46,12 @@ var is_local_player: bool = false
 @export var server_state: Dictionary = {}
 ## 角色外观 id（adam/ash/lucy/nancy），由服务器按注册时上报的值下发
 @export var hero_id: String = "adam"
+
+## 坐姿：0 = 站着，1..4 = 坐着并面朝 SIT_DIRS 里对应方向。
+## 用整数而不是字符串，是因为要过 MultiplayerSynchronizer 的属性同步。
+## 坐着期间禁止移动（本地预测与服务端模拟走同一个判断），否则会出现
+## 「人一动不动但位置在椅子周围飘」。
+@export var sit_dir: int = 0
 
 const HeroDB := preload("res://scripts/sandbox/hero_db.gd")
 ## 下面三个用 preload 而不是全局类名：无头导入时 global_script_class_cache 可能为空
@@ -80,6 +89,7 @@ var _render_lag: Vector2 = Vector2.ZERO
 var _occluded: bool = false
 ## 当前不透明度，向目标平滑逼近（走过楼边不该「啪」一下变透）
 var _occl_a: float = 1.0
+var _stand_req_at := 0.0
 
 
 ## 被楼挡住 → 精灵调淡（名牌保持不透明，方便找人）
@@ -141,6 +151,55 @@ func teleport_to(pos: Vector2) -> void:
 	_render_lag = Vector2.ZERO
 
 
+## 坐到椅子上。pos 是座位点（人物脚底），dir_name 取 down/left/right/up。
+## 会先 teleport 吸附过去，再切坐姿动画。
+##
+## ⚠️ 必须同时关掉碰撞体：椅子本身是实心的（world/room 里都有 StaticBody2D），
+## 人一坐到椅子上就和它重叠，物理会把人推开 —— 表现是「刚坐下就被弹到旁边」。
+## 站起来时再打开，走路照样会被椅子挡住。
+func sit_at(pos: Vector2, dir_name: String) -> void:
+	var i := SIT_DIRS.find(dir_name)
+	sit_dir = (i if i >= 0 else 0) + 1
+	teleport_to(pos)
+	_set_collision(false)
+	_apply_sit_anim()
+
+
+func stand_up() -> void:
+	if sit_dir == 0:
+		return
+	sit_dir = 0
+	_set_collision(true)
+	_update_visual()
+
+
+## 坐下后按方向键 → 起身。本地立刻生效，同时告诉服务端（座位状态它说了算）。
+## 400ms 节流：起身要等广播回来，期间每一帧都会走到这里，不挡就会刷 RPC。
+func _request_stand() -> void:
+	var now := float(Time.get_ticks_msec())
+	if now - _stand_req_at < 400.0:
+		return
+	_stand_req_at = now
+	stand_up()
+	Net.sit_down(0, Vector2.ZERO)
+
+
+func _set_collision(on: bool) -> void:
+	var cs := get_node_or_null("CollisionShape2D")
+	if cs != null:
+		cs.set_deferred("disabled", not on)
+
+
+## 坐姿是单帧动画（loop=0），切换时才 play，免得每帧重置
+func _apply_sit_anim() -> void:
+	if sprite == null:
+		return
+	var anim := StringName(SIT_DIRS[clampi(sit_dir - 1, 0, SIT_DIRS.size() - 1)] + "_sit")
+	if sprite.animation != anim:
+		sprite.animation = anim
+		sprite.play()
+
+
 ## 按 hero_id 换角色贴图（服务器下发的值变了才重新加载）
 func _apply_hero() -> void:
 	if _applied_hero == hero_id or sprite == null:
@@ -164,6 +223,10 @@ func _update_visual() -> void:
 	_last_pos = position
 	_apply_hero()
 	if sprite == null:
+		return
+	# 坐着时无论输入如何都用坐姿帧
+	if sit_dir != 0:
+		_apply_sit_anim()
 		return
 	var dir_name := "down"
 	if _face_dir != Vector2.ZERO:
@@ -300,6 +363,16 @@ func _simulate(command: Dictionary) -> void:
 ## client would be corrected every tick.
 func _apply_movement(command: Dictionary) -> void:
 	var direction: Vector2 = Vector2(float(command.get("x", 0.0)), float(command.get("y", 0.0))).limit_length()
+	# 坐着就不动。本地预测和服务端模拟都走这个函数，一处判断两边一致，
+	# 否则会出现「自己看着没动、别人看着在椅子上蹭」。
+	if sit_dir != 0:
+		# 按方向键 = 想走，那就站起来。不然玩家坐下后按 WASD 毫无反应，
+		# 十个里有九个会以为卡死了。本地先起，手感不用等一个 RTT。
+		if direction.length() > 0.1 and is_local_player:
+			_request_stand()
+		velocity = Vector2.ZERO
+		_moving = false
+		return
 	var speed: float = SPEED
 	if bool(command.get("sprint", false)):
 		speed *= 1.55
