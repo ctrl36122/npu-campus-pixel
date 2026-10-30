@@ -618,6 +618,9 @@ var room_claims: Dictionary = {}
 ## 用途是「退出重进还在」——服务端只把认领存在内存里，重启就没了；旧版服务端
 ## 更是直接丢掉认领请求。本地存一份，进游戏先贴回去，服务端认下来之后以它为准。
 var my_room_cache: Dictionary = {}
+## 刚主动退掉的房间 "楼层:房号"。服务器快照里可能还留着它（旧版服务端不认退房请求），
+## 记下来别再把那间当成「我的房间」，否则退房后又会被存档写回去。
+var void_claim: String = ""
 
 
 ## 认领 / 取消某间房（name 为空 = 取消）。
@@ -668,6 +671,7 @@ func _write_claim(uid: String, n: int, r: int, nm: String) -> bool:
 		room_claims.erase(key)
 		if uid == local_uid:
 			my_room_cache = {}
+			void_claim = key              # 别让服务器的旧快照把它当成我的房
 	else:
 		# 退掉同一 uid 名下的其它房间（「每个人只能同时占有一个房间」）
 		for k in room_claims.keys():
@@ -682,6 +686,7 @@ func _write_claim(uid: String, n: int, r: int, nm: String) -> bool:
 				"floor": n, "index": r, "name": nm,
 				"note": String(my_room_cache.get("note", "")),
 			}
+			void_claim = ""
 	room_claims_changed.emit()
 	return true
 
@@ -696,8 +701,18 @@ func claim_of_uid(uid: String) -> String:
 	return ""
 
 
-## 本机认领的房间 "楼层:房号"（没认领则空），用来决定「这次从哪儿出生」
+## 本机认领的房间 "楼层:房号"（没认领则空），用来决定「这次从哪儿出生」。
+## 本地镜像里那间优先：旧版服务端不认认领请求，它的快照里可能还留着我以前的房间，
+## 按插入顺序取第一个匹配 uid 的 key 会取到旧房 —— 存档和出生点就退回上一间了。
 func my_claim() -> String:
+	if not my_room_cache.is_empty():
+		var k := "%d:%d" % [int(my_room_cache.get("floor", 0)), int(my_room_cache.get("index", -1))]
+		if String(Dictionary(room_claims.get(k, {})).get("uid", "")) == local_uid:
+			return k
+	if not void_claim.is_empty():
+		if String(Dictionary(room_claims.get(void_claim, {})).get("uid", "")) == local_uid:
+			return ""            # 我刚退掉、服务器还没清掉：就当没认领
+		void_claim = ""          # 服务器那边已经没了，标记作废
 	return claim_of_uid(local_uid)
 
 
@@ -712,6 +727,9 @@ func _sync_claims(snapshot: Dictionary) -> void:
 ## 旧版服务端根本不认认领请求，每收到一次快照就会把本地刚贴的公告冲掉 ——
 ## 补回来之后，牌子/公告正文至少在本机是对的。房间被别人占了则以服务端为准。
 func _restore_cached_claim() -> void:
+	# 主动退掉的房不该再从服务器旧快照里冒出来（门牌上会挂着我的名字）
+	if not void_claim.is_empty() and String(Dictionary(room_claims.get(void_claim, {})).get("uid", "")) == local_uid:
+		room_claims.erase(void_claim)
 	if my_room_cache.is_empty() or local_uid.is_empty():
 		return
 	var key := "%d:%d" % [int(my_room_cache.get("floor", 0)), int(my_room_cache.get("index", -1))]
@@ -725,6 +743,13 @@ func _restore_cached_claim() -> void:
 	var note := String(my_room_cache.get("note", ""))
 	if not note.is_empty():
 		room_claims[key]["note"] = note
+	# 一人一间：服务器的旧快照里可能还留着我以前占的房间（旧版服务端不认新请求），
+	# 不清掉的话门牌上会同时挂着我两个名字，my_claim 也可能取到旧的那间。
+	for k in room_claims.keys():
+		if String(k) == key:
+			continue
+		if String(Dictionary(room_claims[k]).get("uid", "")) == local_uid:
+			room_claims.erase(k)
 
 
 ## 启动时把本地存档里那间房灌进 Net（还没连上服务器也能显示自己的牌子/公告）

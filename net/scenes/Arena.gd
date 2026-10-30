@@ -168,6 +168,7 @@ func _ready() -> void:
 	# 调试：进房间后往南走，验证「走到门口自动离开」
 	if OS.has_environment("XGD_TEST_DOOR"):
 		_auto_walk_out()
+
 	_guard_local_spawn()
 	if not (OS.has_environment("XGD_NOHOME")):
 		_auto_spawn_home()
@@ -796,6 +797,7 @@ func _process(delta: float) -> void:
 	_update_floor_visibility()
 	_update_notice(delta)
 	_place_door_plates()
+	_process_vk_reposition()
 
 
 ## 有人被楼盖住 → 在楼身上挖一个「透视窗」（只透玩家周围一小块，楼体其余实心），
@@ -1326,6 +1328,8 @@ var _note_view: PanelContainer
 var _note_view_title: Label
 var _note_view_body: Label
 var _note_room_idx: int = -1
+## 上一次量到的软键盘高度（只在手机上非 0），用来在键盘弹出时重新摆面板
+var _vk_last: float = 0.0
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -1375,11 +1379,16 @@ func _try_interact() -> bool:
 	if in_room and _near_elevator((me as Node2D).position):
 		_open_floor_panel()
 		return true
-	# 门口公告板：站在某间宿舍门口按 E —— 自己的房是编写，别人的房是查看
+	# 门口公告板：站在某间宿舍门口按 E —— 空房是认领，自己的房是编写，别人的房是查看。
+	# 手机上没有 F 键（提示条本身就是按钮），所以认领必须也能从 E 走通。
 	if in_room and not _note_open():
 		var rd: Dictionary = _nearest_room_door((me as Node2D).position)
 		if not rd.is_empty():
-			_open_note_board(int(rd["index"]))
+			var idx0: int = int(rd["index"])
+			if (Net.room_claims.get("%d:%d" % [current_floor, idx0], {}) as Dictionary).is_empty():
+				_try_claim_room()
+				return true
+			_open_note_board(idx0)
 			return true
 	if in_room and _near_door((me as Node2D).position):
 		leave_room()
@@ -1785,7 +1794,10 @@ func _update_interact_hint(delta: float) -> void:
 	# 免得「想坐下却走出房间」）
 	if in_room:
 		_near_dorm = ""
-		if _floor_open:
+		if _note_open():
+			_door_hint.visible = true
+			_door_hint.text = "点这里 / 按 E 关掉公告"
+		elif _floor_open:
 			_door_hint.visible = true
 			_door_hint.text = "按 E / Esc 关掉电梯面板"
 		elif _near_elevator(pos):
@@ -1803,9 +1815,9 @@ func _update_interact_hint(delta: float) -> void:
 				var cur: Dictionary = Net.room_claims.get("%d:%d" % [current_floor, int(rd["index"])], {})
 				_door_hint.visible = true
 				if cur.is_empty():
-					_door_hint.text = "%d 号房 · 空房 · 按 F 认领" % no
+					_door_hint.text = "%d 号房 · 空房 · 按 E 认领" % no
 				elif String(cur.get("uid", "")) == Net.local_uid:
-					_door_hint.text = "%d 号房（你的）· F 撕公告 · E 编写门口公告" % no
+					_door_hint.text = "%d 号房（你的）· E 写公告 · F 撕下名牌" % no
 				else:
 					_door_hint.text = "%d 号房 ·「%s」的房间 · E 看门口公告" % [no, String(cur.get("name", "?"))]
 		return
@@ -2383,11 +2395,37 @@ func _build_note_panel() -> PanelContainer:
 	for cfg: Array in [["保存", _save_note_board], ["擦掉", _clear_note_board], ["取消", _close_note_board]]:
 		var b := Button.new()
 		b.text = String(cfg[0])
-		b.custom_minimum_size = Vector2(84, 34)
+		b.custom_minimum_size = Vector2(96, 46)      # 手机上 34px 高的按钮太难点
 		b.focus_mode = Control.FOCUS_NONE
+		b.add_theme_font_size_override("font_size", 16)
 		b.pressed.connect(cfg[1] as Callable)
 		hb.add_child(b)
+	# 退房（= 撕下名牌）。桌面上按 F 就行，但手机没有 F 键，必须给个能点的入口，
+	# 否则手机上认了房就再也退不掉。
+	var bye := Button.new()
+	bye.text = "退房"
+	bye.custom_minimum_size = Vector2(96, 46)
+	bye.focus_mode = Control.FOCUS_NONE
+	bye.add_theme_font_size_override("font_size", 16)
+	bye.add_theme_color_override("font_color", Color("#ff9a84"))
+	bye.pressed.connect(_leave_my_room)
+	hb.add_child(bye)
 	return pc
+
+
+## 退房：撕下自己门口的名牌，存档一起清掉（下次上线回校园出生）。
+func _leave_my_room() -> void:
+	if _note_room_idx < 0:
+		return
+	var idx: int = _note_room_idx
+	_close_note_board()
+	Net.claim_room(current_floor, idx, "")          # 空名字 = 撕下来
+	var key := "%d:%d" % [current_floor, idx]
+	if Net.room_claims.has(key):
+		_notice("没能退掉 %d 层 %d 号房（服务器没接受请求）" % [current_floor, idx + 1])
+		return
+	_clear_my_room()
+	_notice("已撕下 %d 层 %d 号房的名牌，下次上线从校园出生" % [current_floor, idx + 1])
 
 
 func _update_note_count() -> void:
@@ -2422,11 +2460,22 @@ func _build_note_view() -> PanelContainer:
 	_note_view_body.add_theme_font_size_override("font_size", 15)
 	_note_view_body.add_theme_color_override("font_color", Color("#dbe7f5"))
 	vb.add_child(_note_view_body)
+	var foot_row := HBoxContainer.new()
+	vb.add_child(foot_row)
 	var foot := Label.new()
 	foot.text = "按 E / Esc 关闭"
 	foot.add_theme_font_size_override("font_size", 12)
 	foot.add_theme_color_override("font_color", Color(0.55, 0.62, 0.72))
-	vb.add_child(foot)
+	foot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	foot_row.add_child(foot)
+	# 手机上没有 E/Esc 键：给一个能点的关闭按钮
+	var close_btn := Button.new()
+	close_btn.text = "关闭"
+	close_btn.custom_minimum_size = Vector2(96, 44)
+	close_btn.focus_mode = Control.FOCUS_NONE
+	close_btn.add_theme_font_size_override("font_size", 16)
+	close_btn.pressed.connect(_close_note_view)
+	foot_row.add_child(close_btn)
 	return pc
 
 
@@ -2434,7 +2483,7 @@ func _build_note_view() -> PanelContainer:
 func _open_note_board(idx: int) -> void:
 	var cur: Dictionary = Net.room_claims.get("%d:%d" % [current_floor, idx], {})
 	if cur.is_empty():
-		_notice("%d 号房还没人认领 · 先按 F 认领，再来贴公告" % (idx + 1))
+		_notice("%d 号房还没人认领 · 先按 E 认领，再来写公告" % (idx + 1))
 		return
 	if String(cur.get("uid", "")) != Net.local_uid:
 		_note_view_title.text = "%d 号房 ·「%s」" % [idx + 1, String(cur.get("name", "?"))]
@@ -2452,6 +2501,9 @@ func _open_note_board(idx: int) -> void:
 	_note_panel.visible = true
 	_center_panel(_note_panel)
 	_note_edit.grab_focus()
+	# 手机点进来就弹软键盘，不用再点一下输入框
+	if OS.has_feature("mobile"):
+		DisplayServer.virtual_keyboard_show("")
 
 
 ## 面板居中（内容尺寸要等一帧才稳定，所以打开时也允许 deferred 调）
@@ -2460,7 +2512,34 @@ func _center_panel(pc: Control) -> void:
 		return
 	var vs := get_viewport().get_visible_rect().size
 	var sz := pc.get_combined_minimum_size()
-	pc.position = (vs - sz) * 0.5
+	# 手机弹软键盘时会盖掉下半屏：面板往上让，否则正在打的输入框被键盘压住
+	var area_h: float = maxf(vs.y - _vk_inset(), sz.y + 16.0)
+	pc.position = Vector2((vs.x - sz.x) * 0.5, maxf(8.0, (area_h - sz.y) * 0.5))
+
+
+## 软键盘挡住的高度（逻辑像素），没弹出来就是 0。
+## 只有移动端有软键盘，桌面调这个 API 会刷警告 —— 先挡掉。
+func _vk_inset() -> float:
+	if not OS.has_feature("mobile"):
+		return 0.0
+	var h := DisplayServer.virtual_keyboard_get_height()
+	if h <= 0:
+		return 0.0
+	var win_y := float(DisplayServer.window_get_size().y)
+	if win_y <= 0.0:
+		return 0.0
+	return h * (get_viewport().get_visible_rect().size.y / win_y)
+
+
+## 软键盘收起/弹出时把公告面板重新摆一次（键盘高度是异步变的）
+func _process_vk_reposition() -> void:
+	if _note_panel == null or not _note_panel.visible:
+		return
+	var vk := _vk_inset()
+	if absf(vk - _vk_last) < 1.0:
+		return
+	_vk_last = vk
+	_center_panel(_note_panel)
 
 
 func _save_note_board() -> void:
@@ -2486,7 +2565,10 @@ func _close_note_board() -> void:
 		_note_panel.visible = false
 	if _note_edit != null and _note_edit.is_inside_tree():
 		_note_edit.release_focus()
+	if OS.has_feature("mobile"):
+		DisplayServer.virtual_keyboard_hide()
 	_note_room_idx = -1
+	_vk_last = 0.0
 
 
 func _close_note_view() -> void:
