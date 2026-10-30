@@ -68,25 +68,44 @@ func _build_seats() -> void:
 
 	for item in data.get("seats", []):
 		var s: Dictionary = item
-		var cx := (float(s["x"]) + float(s["w"]) * 0.5) * TS
-		# 脚底落在坐面前沿上方一点：前沿条（12px）正好盖住小腿，
-		# 上半身完整露出来，椅子主体则在人身后 —— 三者叠起来才是「坐着」。
-		var cy := (float(s["y"]) + float(s["h"])) * TS - 6.0
-		var face := "down"
-		var best := INF
-		var target := Vector2.ZERO
-		for d in desks:
-			var dist: float = Vector2(cx, cy).distance_squared_to(d)
-			if dist < best:
-				best = dist
-				target = d
-		if best < INF:
-			var v: Vector2 = target - Vector2(cx, cy)
-			if absf(v.y) >= absf(v.x):
-				face = "up" if v.y < 0.0 else "down"
-			else:
-				face = "left" if v.x < 0.0 else "right"
-		seats.append({"pos": Vector2(cx, cy), "face": face})
+		var sr := Rect2(float(s["x"]), float(s["y"]), float(s["w"]), float(s["h"]))
+		var cx := (sr.position.x + sr.size.x * 0.5) * TS
+
+		# 朝向：数据里写了就用，没写就「对着最近的一张桌子」
+		var face := String(s.get("face", ""))
+		if face == "":
+			face = "down"
+			var best := INF
+			var target := Vector2(cx, (sr.position.y + sr.size.y) * TS)
+			for d in desks:
+				var dist: float = Vector2(cx, (sr.position.y + sr.size.y) * TS).distance_squared_to(d)
+				if dist < best:
+					best = dist
+					target = d
+			if best < INF:
+				var v: Vector2 = target - Vector2(cx, (sr.position.y + sr.size.y) * TS)
+				if absf(v.y) >= absf(v.x):
+					face = "up" if v.y < 0.0 else "down"
+				else:
+					face = "left" if v.x < 0.0 else "right"
+
+		# 坐垫与椅脚永远压在人身后
+		_add_prop("chair_seat", s, -1)
+		# 椅背：面朝镜头坐（down）时立在北沿、压到人后面；
+		# 背对镜头坐（up/left/right）时立在近侧，抬到人前面挡住臀腿，只露头和肩。
+		var back := _chair_back_rect(sr, face)
+		_add_prop("chair_back", back, -3 if face == "down" else 2)
+
+		# 座位点 = 坐下后脚底的位置。
+		#   背对镜头：落在坐垫前沿，身体往上长，正好被椅背挡住下半截
+		#   面朝镜头：比坐面稍低，人「陷进」椅子里
+		var pos := Vector2(cx, sr.position.y * TS + sr.size.y * TS * 0.5)
+		match face:
+			"down":
+				pos = Vector2(cx, sr.end.y * TS - 6.0)
+			"left", "right":
+				pos = Vector2(cx, sr.position.y * TS + 6.0)
+		seats.append({"pos": pos, "face": face})
 
 
 ## 玩家应该挂到哪个节点下
@@ -138,26 +157,30 @@ func _build() -> void:
 		if bool(p.get("solid", false)):
 			_add_solid(p)
 
-	for item in data.get("seats", []):
-		var s: Dictionary = item
-		# 椅子 = 主体（z=-1，永远在人身后）+ 坐面前沿（z=+1，永远在人身前）。
-		# 只有一个节点时，不管 y 怎么调都只有两种结果：人被整把椅子吞掉，
-		# 或者人整个浮在椅子前面 —— 因为 y-sort 是整块比较，不会只挡腿。
-		_add_prop("chair", s, -1)
-		var front_px := 12.0
-		_add_prop("chair_front", {
-			"x": float(s["x"]),
-			"y": float(s["y"]) + float(s["h"]) - front_px / TS,
-			"w": float(s["w"]),
-			"h": front_px / TS,
-		}, 1)
-
+	# 椅子由 _build_seats() 统一生成（要按朝向摆椅背），这里不重复建
 	minimap_tex = _bake_minimap()
 	_setup_glow()
 	_add_bounds()
 
 	var sp: Dictionary = data.get("spawn", {})
 	spawn_px = Vector2(float(sp.get("x", 0.0)), float(sp.get("y", 0.0))) * TS
+
+
+## 椅背在椅子占地的哪一侧。单位是「格」，因为 _add_prop 吃格坐标。
+## 厚度/宽度取 14×11 px（1.75×1.375 格）—— 人宽 12px，椅背略宽一点刚好兜住。
+func _chair_back_rect(sr: Rect2, face: String) -> Dictionary:
+	var bw := 1.625
+	var bh := 1.375
+	var cx := sr.position.x + sr.size.x * 0.5
+	match face:
+		"down":
+			return {"x": cx - bw * 0.5, "y": sr.position.y, "w": bw, "h": bh}
+		"left":
+			return {"x": sr.end.x - 0.55, "y": sr.position.y, "w": 0.55, "h": sr.size.y}
+		"right":
+			return {"x": sr.position.x, "y": sr.position.y, "w": 0.55, "h": sr.size.y}
+		_:
+			return {"x": cx - bw * 0.5, "y": sr.end.y - bh, "w": bw, "h": bh}
 
 
 func _add_prop(kind: String, r: Dictionary, z: int = 0) -> void:
@@ -216,14 +239,14 @@ func _setup_glow() -> void:
 				# 屏幕中心：桌面靠后那一带
 				spots.append({
 					"pos": Vector2(cx, float(p["y"]) * TS + 5.0),
-					"r": 54.0,
-					"color": Color(0.48, 0.86, 1.0, 0.95),
+					"r": 30.0,
+					"color": Color(0.42, 0.80, 1.0, 0.30),
 				})
 			"vending":
 				spots.append({
 					"pos": Vector2(cx, (float(p["y"]) + float(p["h"]) * 0.35) * TS),
-					"r": 34.0,
-					"color": Color(0.82, 0.55, 1.0, 0.34),
+					"r": 24.0,
+					"color": Color(0.82, 0.55, 1.0, 0.18),
 				})
 			"board":
 				spots.append({
@@ -268,30 +291,30 @@ func _bake_floor() -> Image:
 	y = 0
 	var row := 0
 	while y < h:
-		img.fill_rect(Rect2i(0, y, w, 1), Color(0, 0, 0, 0.24))
-		img.fill_rect(Rect2i(0, y + 1, w, 1), Color(1, 1, 1, 0.028))
+		_blend(img, Rect2i(0, y, w, 1), Color(0, 0, 0, 0.24))
+		_blend(img, Rect2i(0, y + 1, w, 1), Color(1, 1, 1, 0.028))
 		var vx := 48 if row % 2 == 1 else 0
 		while vx < w:
-			img.fill_rect(Rect2i(vx, y, 1, 12), Color(0, 0, 0, 0.22))
+			_blend(img, Rect2i(vx, y, 1, 12), Color(0, 0, 0, 0.22))
 			vx += 96
 		y += 12
 		row += 1
 
-	# ── 工位区地毯：把五个机位圈成一块区域，房间才不会显得空 ──
-	var desk_box := Rect2()
-	for item in data.get("props", []):
-		var p: Dictionary = item
-		if String(p.get("k", "")) != "desk":
-			continue
-		var r := Rect2(float(p["x"]), float(p["y"]), float(p["w"]), float(p["h"]))
-		desk_box = r if desk_box.size == Vector2.ZERO else desk_box.merge(r)
-	if desk_box.size != Vector2.ZERO:
-		var pad := 6.0          # 留够空间把椅子也圈进来
+	# ── 隔间地面：每个小隔间铺一块深色地胶 ──
+	# 这是「小隔间」读得出来的关键之一：光靠三面隔板，俯视看还是一大片木地板。
+	for item in data.get("pod_floors", []):
+		var pf: Dictionary = item
+		_paint_pod_floor(img, Rect2(
+			float(pf["x"]) * TS, float(pf["y"]) * TS,
+			float(pf["w"]) * TS, float(pf["h"]) * TS
+		))
+
+	# ── 休息区地毯 ──
+	for item in data.get("rugs", []):
+		var rg: Dictionary = item
 		_paint_rug(img, Rect2(
-			(desk_box.position.x - pad) * TS,
-			(desk_box.position.y - pad) * TS,
-			(desk_box.size.x + pad * 2.0) * TS,
-			(desk_box.size.y + pad * 2.0) * TS
+			float(rg["x"]) * TS, float(rg["y"]) * TS,
+			float(rg["w"]) * TS, float(rg["h"]) * TS
 		))
 
 	# ── 边缘压暗：让地板嵌在暗处，而不是一块浮空的板 ──
@@ -299,10 +322,10 @@ func _bake_floor() -> Image:
 	for i in range(edge):
 		var t := 1.0 - float(i) / float(edge)
 		var a := 0.62 * t * t
-		img.fill_rect(Rect2i(0, i, w, 1), Color(0, 0, 0, a))
-		img.fill_rect(Rect2i(0, h - 1 - i, w, 1), Color(0, 0, 0, a))
-		img.fill_rect(Rect2i(i, 0, 1, h), Color(0, 0, 0, a))
-		img.fill_rect(Rect2i(w - 1 - i, 0, 1, h), Color(0, 0, 0, a))
+		_blend(img, Rect2i(0, i, w, 1), Color(0, 0, 0, a))
+		_blend(img, Rect2i(0, h - 1 - i, w, 1), Color(0, 0, 0, a))
+		_blend(img, Rect2i(i, 0, 1, h), Color(0, 0, 0, a))
+		_blend(img, Rect2i(w - 1 - i, 0, 1, h), Color(0, 0, 0, a))
 
 	# ── 出入口地垫 ──
 	var e: Dictionary = data.get("exit", {})
@@ -319,7 +342,7 @@ func _bake_floor() -> Image:
 		# 垫子里的斜纹
 		for i in range(1, 6):
 			var ly := ey + int(float(eh) * float(i) / 6.0)
-			img.fill_rect(Rect2i(ex + 3, ly, ew - 6, 1), Color(1, 1, 1, 0.05))
+			_blend(img, Rect2i(ex + 3, ly, ew - 6, 1), Color(1, 1, 1, 0.05))
 
 	return img
 
@@ -340,26 +363,29 @@ func _bake_minimap() -> Texture2D:
 
 	var k := px                # 格 → 小地图像素（data 里全是格坐标，直接乘 4）
 	var COL := {
-		"wall": Color("74839b"),
+		"wall": Color("8b9bb3"),
 		"table": Color("9a7a52"),
 		"desk": Color("5d93cc"),
 		"board": Color("eef4fa"),
 		"vending": Color("a463b4"),
 		"block": Color("866c4a"),
 		"deco": Color("5e7a58"),
+		"plant": Color("6b9a63"),
+		"sofa": Color("8b6a90"),
+		"cushion": Color("6b5a80"),
 		"pit": Color("232830"),
 	}
 
-	# 工位区地毯先铺一层，跟大地图对得上
-	var desk_box := Rect2()
-	for item in data.get("props", []):
-		var p: Dictionary = item
-		if String(p.get("k", "")) != "desk":
-			continue
-		var r := Rect2(float(p["x"]), float(p["y"]), float(p["w"]), float(p["h"]))
-		desk_box = r if desk_box.size == Vector2.ZERO else desk_box.merge(r)
-	if desk_box.size != Vector2.ZERO:
-		_fill_cells(img, desk_box.grow(6.0), k, Color("34414f"))
+	# 隔间地面：每间一块，小地图上就成了一排小格子 —— 一眼认得出这是「隔间房」
+	for item in data.get("pod_floors", []):
+		var pf: Dictionary = item
+		_fill_cells(img, Rect2(float(pf["x"]), float(pf["y"]), float(pf["w"]), float(pf["h"])),
+			k, Color("33404f"))
+	# 休息区地毯
+	for item in data.get("rugs", []):
+		var rg: Dictionary = item
+		_fill_cells(img, Rect2(float(rg["x"]), float(rg["y"]), float(rg["w"]), float(rg["h"])),
+			k, Color("2c333d"))
 
 	for item in data.get("walls", []):
 		var p: Dictionary = item
@@ -375,7 +401,8 @@ func _bake_minimap() -> Texture2D:
 				rect.size.x * 0.48, 1.6), k, Color("b8f0ff"))
 	for item in data.get("seats", []):
 		var s: Dictionary = item
-		_fill_cells(img, Rect2(float(s["x"]) + 0.6, float(s["y"]) + 3.0, 2.1, 2.6), k, Color("cf9a5c"))
+		_fill_cells(img, Rect2(float(s["x"]), float(s["y"]), float(s["w"]), float(s["h"])),
+			k, Color("7f9ec4"))
 
 	# 出入口
 	var e: Dictionary = data.get("exit", {})
@@ -399,7 +426,53 @@ func _fill_cells(img: Image, r: Rect2, k: float, col: Color) -> void:
 	img.fill_rect(Rect2i(x0, y0, x1 - x0, y1 - y0), col)
 
 
-## 一块地毯：深色底 + 一圈包边 + 细织纹
+## 隔间地胶：比外面的木地板深一档的灰蓝，带细密织纹和一圈内嵌包边。
+## 深色还有个副作用是好的 —— 屏幕光打上去才有「隔间里亮着」的对比。
+## 半透明覆盖。**不能用 Image.fill_rect** —— 它直接写像素、不做混合，
+## 传 Color(0,0,0,0.2) 得到的是「20% 不透明的黑」，等于把地板挖出一片透明，
+## 底下就是房间外的纯黑（地毯曾经整块变黑，就是栽在这）。
+## 这里用 blend_rect 真做一次 alpha 混合。
+func _blend(img: Image, r: Rect2i, c: Color) -> void:
+	var x := maxi(0, r.position.x)
+	var y := maxi(0, r.position.y)
+	var w := mini(r.size.x + r.position.x - x, img.get_width() - x)
+	var h := mini(r.size.y + r.position.y - y, img.get_height() - y)
+	if w <= 0 or h <= 0:
+		return
+	if c.a >= 0.999:
+		img.fill_rect(Rect2i(x, y, w, h), c)
+		return
+	var layer := Image.create(w, h, false, Image.FORMAT_RGBA8)
+	layer.fill(c)
+	img.blend_rect(layer, Rect2i(0, 0, w, h), Vector2i(x, y))
+
+
+func _paint_pod_floor(img: Image, r: Rect2) -> void:
+	var x0 := maxi(0, int(r.position.x))
+	var y0 := maxi(0, int(r.position.y))
+	var x1 := mini(img.get_width(), int(r.end.x))
+	var y1 := mini(img.get_height(), int(r.end.y))
+	if x1 - x0 < 6 or y1 - y0 < 6:
+		return
+	img.fill_rect(Rect2i(x0, y0, x1 - x0, y1 - y0), Color("1f242c"))
+	# 织纹：横竖各铺一层极淡的线，远看是绒面而不是纯色块
+	for yy in range(y0 + 2, y1 - 2, 4):
+		_blend(img, Rect2i(x0 + 2, yy, x1 - x0 - 4, 1), Color(1, 1, 1, 0.020))
+	for xx in range(x0 + 2, x1 - 2, 8):
+		_blend(img, Rect2i(xx, y0 + 2, 1, y1 - y0 - 4), Color(0, 0, 0, 0.10))
+	# 包边（内缩 2px，像压边条）
+	var edge := Color("2e3540")
+	img.fill_rect(Rect2i(x0 + 1, y0 + 1, x1 - x0 - 2, 1), edge)
+	img.fill_rect(Rect2i(x0 + 1, y1 - 2, x1 - x0 - 2, 1), edge)
+	img.fill_rect(Rect2i(x0 + 1, y0 + 1, 1, y1 - y0 - 2), edge)
+	img.fill_rect(Rect2i(x1 - 2, y0 + 1, 1, y1 - y0 - 2), edge)
+	# 靠墙一侧压暗，地面就有了受光方向
+	_blend(img, Rect2i(x0 + 2, y0 + 1, x1 - x0 - 4, 5), Color(0, 0, 0, 0.28))
+
+
+## 一块地毯：暗蓝灰底 + 双线包边 + 交错织纹。
+## 关键是**不能和木地板同色** —— 纯棕色铺在棕地板上会被读成「一个高出来的平台」，
+## 之前就是吃了这个亏。冷色压在暖木地板上，再加一层 8px 的交错格子，才像布。
 func _paint_rug(img: Image, r: Rect2) -> void:
 	var x0 := maxi(0, int(r.position.x))
 	var y0 := maxi(0, int(r.position.y))
@@ -407,12 +480,23 @@ func _paint_rug(img: Image, r: Rect2) -> void:
 	var y1 := mini(img.get_height(), int(r.end.y))
 	if x1 - x0 < 8 or y1 - y0 < 8:
 		return
-	img.fill_rect(Rect2i(x0, y0, x1 - x0, y1 - y0), Color("1d242c"))
-	img.fill_rect(Rect2i(x0, y0, x1 - x0, 3), Color("2b343f"))
-	img.fill_rect(Rect2i(x0, y1 - 3, x1 - x0, 3), Color("2b343f"))
-	img.fill_rect(Rect2i(x0, y0, 3, y1 - y0), Color("2b343f"))
-	img.fill_rect(Rect2i(x1 - 3, y0, 3, y1 - y0), Color("2b343f"))
-	var yy := y0 + 7
-	while yy < y1 - 6:
-		img.fill_rect(Rect2i(x0 + 6, yy, x1 - x0 - 12, 1), Color(1, 1, 1, 0.018))
-		yy += 5
+	var base := Color("454d63")
+	img.fill_rect(Rect2i(x0, y0, x1 - x0, y1 - y0), base)
+	# 织纹：细横线 + 一道更暗的内场，远看是绒面。
+	# 别用 8px 交错格 —— 在游戏视距下会变成一张棋盘，抢掉整个房间的注意力。
+	for yy in range(y0 + 3, y1 - 3, 3):
+		_blend(img, Rect2i(x0 + 3, yy, x1 - x0 - 6, 1), Color(1, 1, 1, 0.022))
+	_blend(img, Rect2i(x0 + 5, y0 + 5, x1 - x0 - 10, y1 - y0 - 10), Color(0, 0, 0, 0.05))
+	# 双线包边：外圈暗、内圈亮
+	var w := x1 - x0
+	var h := y1 - y0
+	img.fill_rect(Rect2i(x0, y0, w, 2), Color("23283a"))
+	img.fill_rect(Rect2i(x0, y1 - 2, w, 2), Color("23283a"))
+	img.fill_rect(Rect2i(x0, y0, 2, h), Color("23283a"))
+	img.fill_rect(Rect2i(x1 - 2, y0, 2, h), Color("23283a"))
+	img.fill_rect(Rect2i(x0 + 3, y0 + 3, w - 6, 1), Color("6b7699"))
+	img.fill_rect(Rect2i(x0 + 3, y1 - 4, w - 6, 1), Color("6b7699"))
+	img.fill_rect(Rect2i(x0 + 3, y0 + 3, 1, h - 6), Color("6b7699"))
+	img.fill_rect(Rect2i(x1 - 4, y0 + 3, 1, h - 6), Color("6b7699"))
+
+

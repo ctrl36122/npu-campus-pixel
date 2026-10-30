@@ -37,7 +37,7 @@ func _build() -> void:
 	_room.set_script(RoomScript)
 	get_root().add_child(_room)
 
-	if not bool(_room.call("load_room", "res://assets/rooms/game_lounge.json")):
+	if not bool(_room.call("load_room", "res://assets/rooms/dorm_space.json")):
 		printerr("[probe] 房间加载失败")
 		quit(1)
 		return

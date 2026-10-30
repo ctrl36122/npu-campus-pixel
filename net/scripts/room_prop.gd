@@ -47,10 +47,18 @@ func _draw() -> void:
 			_vending(o, w, h)
 		"pit":
 			_pit(o, w, h)
-		"chair":
-			_chair(o, w, h)
-		"chair_front":
-			_chair_front(o, w, h)
+		"chair_seat":
+			_chair_seat(o, w, h)
+		"chair_back":
+			_chair_back(o, w, h)
+		"sofa":
+			_sofa(o, w, h)
+		"plant":
+			_plant(o, w, h)
+		"cushion":
+			_cushion(o, w, h)
+		"door":
+			_door(o, w, h)
 		"deco":
 			_crate(o, w, h, Color("4a5b46"), Color("36452f"))   # 绿植箱 / 空调
 		"block":
@@ -118,50 +126,62 @@ func _table(o: Vector2, w: float, h: float) -> void:
 
 # ---------------------------------------------------------------- 工位（桌子 + 显示器 + 键盘）
 
+## 工位桌：桌面 + 显示器 + 键鼠。所有子件都按 rect 的比例算，
+## 这样 2 格深的小桌和 6 格深的大桌都能用，不会出现「显示器比人还高」。
 func _desk(o: Vector2, w: float, h: float) -> void:
-	_shadow(o, w, h)
-	draw_rect(Rect2(o.x, o.y + h - RISE_DESK, w, RISE_DESK), Color("2c3742"))
-	draw_rect(Rect2(o.x, o.y + h - RISE_DESK, w, 1.0), Color("222a33"))
-	draw_rect(Rect2(o.x, o.y - RISE_DESK, w, h), Color("48586a"))
-	draw_rect(Rect2(o.x, o.y - RISE_DESK, w, 1.0), Color("6b8096"))
-	draw_rect(Rect2(o.x, o.y - RISE_DESK, 1.0, h), Color("556678"))
-	draw_rect(Rect2(o.x + w - 1.0, o.y - RISE_DESK, 1.0, h), Color("38434f"))
+	var front := clampf(h * 0.46, 5.0, 11.0)      # 正面（厚度）
+	var rise := front
+	_shadow(o, w, h, 2.0)
+	# 桌体：正面 + 桌面
+	draw_rect(Rect2(o.x, o.y + h - front, w, front), Color("2c3742"))
+	draw_rect(Rect2(o.x, o.y + h - front, w, 1.0), Color("222a33"))
+	draw_rect(Rect2(o.x, o.y - rise, w, h), Color("48586a"))
+	draw_rect(Rect2(o.x, o.y - rise, w, 1.0), Color("6b8096"))
+	draw_rect(Rect2(o.x, o.y - rise, 1.0, h), Color("556678"))
+	draw_rect(Rect2(o.x + w - 1.0, o.y - rise, 1.0, h), Color("38434f"))
+	# 桌面上的桌垫：比桌面暗一点，把屏幕和键盘衬出来
+	var pad_x := o.x + w * 0.12
+	var pad_w := w * 0.76
+	draw_rect(Rect2(pad_x, o.y - rise + 2.0, pad_w, h - 4.0), Color(0, 0, 0, 0.13))
 
-	# 显示器：立在桌面靠后，屏幕朝镜头
-	var mw := minf(w * 0.64, 46.0)
-	var mh := 20.0
+	# ── 显示器：宽高都跟着桌面走 ──
+	var mw := clampf(w * 0.50, 11.0, 32.0)
+	var mh := clampf(mw * 0.58, 7.0, 16.0)
 	var mx := o.x + (w - mw) * 0.5
-	var my := o.y - RISE_DESK + 4.0
-	# 底座阴影 + 支架
-	draw_rect(Rect2(mx + 2.0, my + mh + 2.0, mw, 3.0), Color(0, 0, 0, 0.35))
-	draw_rect(Rect2(mx + mw * 0.5 - 3.0, my + mh + 1.0, 6.0, 4.0), Color("1b2228"))
-	# 机身
-	draw_rect(Rect2(mx - 2.0, my - 2.0, mw + 4.0, mh + 4.0), Color("151a1f"))
-	draw_rect(Rect2(mx - 2.0, my - 2.0, mw + 4.0, 1.0), Color("39424a"))
-	# 屏幕（冷白偏青，跟夜间窗光一个色系）
+	var my := o.y - rise + 1.5        # 贴着桌面后沿（靠墙），前面留给键盘
+	# 支架 + 底座阴影
+	draw_rect(Rect2(mx + mw * 0.5 - 2.0, my + mh, 4.0, 3.0), Color("1b2228"))
+	draw_rect(Rect2(mx + mw * 0.5 - 4.0, my + mh + 2.5, 8.0, 1.5), Color("161b20"))
+	# 机身（外框）
+	draw_rect(Rect2(mx - 1.5, my - 1.5, mw + 3.0, mh + 3.0), Color("151a1f"))
+	draw_rect(Rect2(mx - 1.5, my - 1.5, mw + 3.0, 1.0), Color("39424a"))
+	# 屏幕
 	draw_rect(Rect2(mx, my, mw, mh), Color("9fe9ff"))
 	draw_rect(Rect2(mx, my, mw, 1.0), Color("d8f7ff"))
-	# 画面内容：标题条 + 两行正文 + 一个亮点，远看像在跑程序
-	draw_rect(Rect2(mx + 2.0, my + 2.0, mw * 0.42, 2.0), Color(0.05, 0.28, 0.36, 0.9))
-	draw_rect(Rect2(mx + 2.0, my + 7.0, mw * 0.74, 1.0), Color(0.05, 0.30, 0.38, 0.55))
-	draw_rect(Rect2(mx + 2.0, my + 11.0, mw * 0.58, 1.0), Color(0.05, 0.30, 0.38, 0.55))
-	draw_rect(Rect2(mx + 2.0, my + 15.0, mw * 0.44, 1.0), Color(0.05, 0.30, 0.38, 0.40))
-	draw_rect(Rect2(mx + mw - 6.0, my + mh - 5.0, 3.0, 3.0), Color(0.20, 0.75, 0.45, 0.9))
+	# 画面内容：标题条 + 两行正文 + 一个亮点，远看像在跑东西
+	draw_rect(Rect2(mx + 1.5, my + 1.5, mw * 0.42, 1.5), Color(0.05, 0.28, 0.36, 0.9))
+	var rows := int(maxf(2.0, (mh - 5.0) / 3.0))
+	for i in range(rows):
+		draw_rect(Rect2(mx + 1.5, my + 4.5 + float(i) * 3.0, mw * (0.72 - 0.1 * float(i)), 1.0),
+			Color(0.05, 0.30, 0.38, 0.55))
+	if mh > 9.0:
+		draw_rect(Rect2(mx + mw - 4.0, my + mh - 4.0, 2.0, 2.0), Color(0.20, 0.75, 0.45, 0.9))
 	# 屏幕反光
-	draw_line(Vector2(mx + 2.0, my + mh - 2.0), Vector2(mx + mw * 0.35, my + 2.0), Color(1, 1, 1, 0.22), 1.0)
+	draw_line(Vector2(mx + 1.5, my + mh - 1.5), Vector2(mx + mw * 0.35, my + 1.5),
+		Color(1, 1, 1, 0.20), 1.0)
 
-	# 键盘：靠近桌子前沿，玩家坐下时正好在手边
-	var kw := minf(w * 0.5, 34.0)
+	# ── 键盘 + 鼠标：贴近桌沿，坐下时正好在手边 ──
+	var kw := clampf(w * 0.46, 9.0, 26.0)
+	var kh := clampf(h * 0.34, 4.0, 8.0)
 	var kx := o.x + (w - kw) * 0.5
-	var ky := o.y + h - RISE_DESK - 13.0
-	draw_rect(Rect2(kx, ky, kw, 9.0), Color("232a30"))
+	var ky := o.y + h - front - kh - 1.0        # 落在桌面上、贴近桌沿，不压在正面
+	draw_rect(Rect2(kx, ky, kw, kh), Color("232a30"))
 	draw_rect(Rect2(kx, ky, kw, 1.0), Color("3f4a52"))
-	var kxx := kx + 2.0
-	while kxx < kx + kw - 2.0:
-		draw_rect(Rect2(kxx, ky + 2.0, 1.0, 6.0), Color(0.20, 0.24, 0.27, 0.9))
+	var kxx := kx + 1.5
+	while kxx < kx + kw - 1.5:
+		draw_rect(Rect2(kxx, ky + 1.5, 1.0, kh - 3.0), Color(0.20, 0.24, 0.27, 0.9))
 		kxx += 2.0
-	# 鼠标
-	draw_rect(Rect2(kx + kw + 3.0, ky + 2.0, 4.0, 7.0), Color("2a3238"))
+	draw_rect(Rect2(kx + kw + 2.0, ky + 1.0, 3.0, kh - 1.0), Color("2a3238"))
 
 
 # ---------------------------------------------------------------- 白板
@@ -252,45 +272,183 @@ func _pit(o: Vector2, w: float, h: float) -> void:
 	draw_rect(Rect2(o.x, o.y, 2.0, h), Color("232830"))
 
 
-## 椅子比其它件小一圈。rect 是「占地」（1×2 格），椅子本体只画在靠底的那一块，
-## 上方留空就是坐人的位置——玩家站到那儿会被 y-sort 排到椅子后面，看着像坐下了。
+# ---------------------------------------------------------------- 椅子
+#
+# 尺度参照人物：人约 18px 高、11px 宽。老版本椅子是一块 26×26 的方块 ——
+# 比人还大，坐进去就是「被箱子吞掉」，这也是之前怎么看都不像坐着的根因。
+# 现在坐面 16×12、椅背 13×12，跟人一个量级。
+#
+# 椅子拆两个节点，各自在 z 轴上让路：
+#   chair_seat  z = -1  坐垫与椅脚，永远在人身后
+#   chair_back  z = +2  椅背，永远在人前面 —— 坐着时挡住臀腿，只露头和肩
+# 一个节点做不到「一半在身后、一半在身前」，y-sort 是整块比较。
+# 椅背摆哪一侧由 Room.gd 按座位朝向算，这里只管把它画成一块软包板。
+# 具体落点用 tools/_probe_sit.gd 对照过（见 _scratch/sit_lab.png）。
+
+
+## 坐垫 + 椅脚。rect 是椅子占地，坐垫占上面大部分，底部留给椅脚。
 ##
-## 三件套：靠背（深色、比坐面高）、坐面（亮木色、中间压暗表示软垫）、
-## 一圈轮廓线。只画一个方块的话，远看跟木箱没区别。
-## 坐面的**前沿薄条**（只有 12px 高），z_index 抬到人之上，专门用来盖住坐着的人的腿。
-## 椅子主体是另一个节点（z_index 压到人之下），所以「身后有椅背、身前有坐沿」
-## 才能同时成立 —— 单个节点要么整个人被吞、要么人整个浮在椅子前。
-func _chair_front(o: Vector2, w: float, h: float) -> void:
-	draw_rect(Rect2(o.x, o.y, w, h), Color("b07a45"))
-	draw_rect(Rect2(o.x, o.y, w, 1.0), Color("c98d52"))     # 前沿高光
-	draw_rect(Rect2(o.x, o.y, 1.0, h), Color("a06c3c"))
-	draw_rect(Rect2(o.x + w - 1.0, o.y, 1.0, h), Color("83552c"))
-	draw_rect(Rect2(o.x, o.y + h - 1.0, w, 1.0), Color("7a4f26"))
-	draw_rect(Rect2(o.x + 2.0, o.y + 2.0, w - 4.0, h - 3.0), Color(0, 0, 0, 0.10))
+## 配色是「黑椅 + 橙色腰线」：房间整体是蓝灰色（地面、隔板、显示器全是冷色），
+## 椅子再用蓝就和人身上的蓝衬衫糊在一起 —— 坐着时人和椅子分不开，根本看不出坐姿。
+func _chair_seat(o: Vector2, w: float, h: float) -> void:
+	var foot := clampf(h * 0.26, 3.0, 4.5)     # 椅脚高度
+	var seat_h := h - foot
+	var cx := o.x + w * 0.5
+	_shadow(o, w, h, 2.0)
+
+	# 椅脚：立柱 + 底盘（五爪椅在这个尺寸上分不出来）
+	draw_rect(Rect2(cx - 2.0, o.y + seat_h, 4.0, foot - 1.5), Color("22262c"))
+	draw_rect(Rect2(cx - 5.0, o.y + h - 1.5, 10.0, 1.5), Color("1b1f24"))
+
+	# 坐垫比占地左右各宽 1px：椅背 13px、坐垫 18px，两侧各露 2px 坐垫，
+	# 才不会被误读成「一个箱子」。
+	var sx := o.x - 1.0
+	var sw := w + 2.0
+	draw_rect(Rect2(sx, o.y, sw, seat_h), Color("2b3038"))              # 外沿（暗）
+	draw_rect(Rect2(sx + 1.0, o.y, sw - 2.0, seat_h - 2.0), Color("4a545f"))
+	draw_rect(Rect2(sx + 1.0, o.y, sw - 2.0, 1.0), Color("5c6774"))     # 受光边
+	draw_rect(Rect2(sx + 2.0, o.y + 2.0, sw - 4.0, seat_h - 4.0), Color("3b434e"))
+	# 前沿压暗，坐垫才有厚度
+	draw_rect(Rect2(sx + 1.0, o.y + seat_h - 2.0, sw - 2.0, 2.0), Color("21262c"))
 
 
-func _chair(o: Vector2, w: float, h: float) -> void:
-	var seat := minf(w, h * 0.5)
-	var sx := o.x + (w - seat) * 0.5
-	var sy := o.y + h - seat
-	_shadow(Vector2(sx, sy), seat, seat, 1.0)
+## 椅背：一块立起来的软包板，比坐垫高、比人窄 —— 坐着时正好挡住臀腿、
+## 露出头和肩膀，这才是「坐在椅子上」的读法。
+func _chair_back(o: Vector2, w: float, h: float) -> void:
+	var cx := o.x + w * 0.5
+	var top := o.y + 1.0
+	var bot := o.y + h - 1.5
+	if bot - top < 5.0:
+		bot = top + 5.0
+	var body := Color("333a45")
+	var hi := Color("6d7a89")
+	var lo := Color("1f242a")
 
-	# 靠背：立在坐面后沿，比坐面窄一点、更高
-	var bw := seat - 2.0
-	var bx := o.x + (w - bw) * 0.5
-	var bh := 15.0
-	var by := sy - bh + 4.0
-	draw_rect(Rect2(bx, by, bw, bh), Color("7a4f2c"))
-	draw_rect(Rect2(bx, by, bw, 1.0), Color("9a663a"))
-	draw_rect(Rect2(bx, by, 1.0, bh), Color("8a5a33"))
-	draw_rect(Rect2(bx + bw - 1.0, by, 1.0, bh), Color("5e3d1e"))
-	draw_rect(Rect2(bx + 2.0, by + bh * 0.52, bw - 4.0, 1.0), Color(0, 0, 0, 0.20))
+	# 连接件（椅背插进坐垫那一截）
+	draw_rect(Rect2(cx - 2.0, bot, 4.0, 1.5), Color("1d2126"))
 
-	# 坐面
-	draw_rect(Rect2(sx, sy, seat, seat), Color("b07a45"))
-	draw_rect(Rect2(sx, sy, seat, 1.0), Color("c98d52"))
-	draw_rect(Rect2(sx, sy, 1.0, seat), Color("a06c3c"))
-	draw_rect(Rect2(sx + seat - 1.0, sy, 1.0, seat), Color("83552c"))
-	draw_rect(Rect2(sx, sy + seat - 1.0, seat, 1.0), Color("7a4f26"))
-	# 坐垫内凹
-	draw_rect(Rect2(sx + 3.0, sy + 3.0, seat - 6.0, seat - 6.0), Color(0, 0, 0, 0.12))
+	# 板体：内缩矩形 + 补一层，凑出 2px 圆角
+	draw_rect(Rect2(o.x + 2.0, top, w - 4.0, bot - top), body)
+	draw_rect(Rect2(o.x, top + 2.0, w, bot - top - 2.0), body)
+	draw_rect(Rect2(o.x + 2.0, top, w - 4.0, 1.0), hi)
+	draw_rect(Rect2(o.x, top + 2.0, 1.0, bot - top - 2.0), lo)
+	draw_rect(Rect2(o.x + w - 1.0, top + 2.0, 1.0, bot - top - 2.0), lo)
+
+	# 内衬软包 + 橙色腰线（黑椅配橙条是电竞椅的经典样子，也把它和蓝衬衫分开）
+	var ix := o.x + 2.0
+	var iy := top + 2.5
+	var iw := w - 4.0
+	var ih := bot - iy - 1.0
+	if iw > 4.0 and ih > 4.0:
+		draw_rect(Rect2(ix, iy, iw, ih), Color("454e5a"))
+		draw_rect(Rect2(ix, iy, iw, 1.0), Color(0, 0, 0, 0.18))
+		if ih > 3.5:
+			draw_rect(Rect2(ix, iy + ih * 0.55, iw, 1.5), Color("c2683a"))
+
+	# 两侧扶手（露在板体外面 1px），坐着时正好在腰侧
+	var ay := o.y + h * 0.45
+	draw_rect(Rect2(o.x - 1.0, ay, 1.5, 3.5), Color("2b3038"))
+	draw_rect(Rect2(o.x + w - 0.5, ay, 1.5, 3.5), Color("2b3038"))
+
+
+# ---------------------------------------------------------------- 门
+
+## 玻璃移门。房间南墙留了门洞，但洞外是虚空 —— 不加门就是一块纯黑，
+## 看着像「墙上破了个洞」。画一扇关着的门，既盖住黑，也告诉玩家出口在哪。
+func _door(o: Vector2, w: float, h: float) -> void:
+	var frame := Color("59646f")
+	var glass_a := Color("20303c")
+	var glass_b := Color("2b4250")
+	# 门框
+	draw_rect(Rect2(o.x, o.y, w, h), frame)
+	draw_rect(Rect2(o.x, o.y, w, 1.5), frame.lightened(0.22))
+	# 两扇玻璃
+	var gw := w * 0.5 - 2.0
+	draw_rect(Rect2(o.x + 1.5, o.y + 2.0, gw, h - 4.0), glass_a)
+	draw_rect(Rect2(o.x + 2.5, o.y + 3.0, gw - 2.0, h - 6.0), glass_b)
+	draw_rect(Rect2(o.x + w * 0.5 + 0.5, o.y + 2.0, gw, h - 4.0), glass_a)
+	draw_rect(Rect2(o.x + w * 0.5 + 1.5, o.y + 3.0, gw - 2.0, h - 6.0), glass_b)
+	# 中缝 + 两个拉手
+	draw_rect(Rect2(o.x + w * 0.5 - 0.5, o.y + 1.0, 1.0, h - 2.0), frame.darkened(0.15))
+	draw_rect(Rect2(o.x + w * 0.5 - 3.0, o.y + h * 0.45, 1.5, h * 0.3), Color("8b97a3"))
+	draw_rect(Rect2(o.x + w * 0.5 + 1.5, o.y + h * 0.45, 1.5, h * 0.3), Color("8b97a3"))
+	# 玻璃上的斜反光
+	draw_line(Vector2(o.x + 3.0, o.y + h - 3.0), Vector2(o.x + gw * 0.9, o.y + 3.0),
+		Color(1, 1, 1, 0.10), 1.0)
+	draw_line(Vector2(o.x + w * 0.5 + 3.0, o.y + h - 3.0), Vector2(o.x + w * 0.5 + gw * 0.9, o.y + 3.0),
+		Color(1, 1, 1, 0.10), 1.0)
+
+
+# ---------------------------------------------------------------- 沙发
+
+## 朝南（面朝镜头）的沙发：靠背立在 rect 北沿，座面在它前面，
+## 两端各一块扶手。休息区里正对着门口，进来第一眼就看见。
+func _sofa(o: Vector2, w: float, h: float) -> void:
+	var arm := clampf(w * 0.10, 2.0, 5.0)
+	var back_h := clampf(h * 0.72, 6.0, 12.0)
+	var body := Color("6b4f6f")
+	var hi := Color("8b6a90")
+	var lo := Color("4e3a52")
+	_shadow(o, w, h, 3.0)
+
+	# 靠背（往画面上方立）
+	draw_rect(Rect2(o.x + arm, o.y - back_h + 2.0, w - arm * 2.0, back_h), body)
+	draw_rect(Rect2(o.x + arm, o.y - back_h + 2.0, w - arm * 2.0, 1.0), hi)
+	draw_rect(Rect2(o.x + arm, o.y - back_h + 2.0, 1.0, back_h), hi.darkened(0.25))
+	draw_rect(Rect2(o.x + w - arm - 1.0, o.y - back_h + 2.0, 1.0, back_h), lo)
+	# 靠背上的两道压线，坐下去才有「分格」的感觉
+	var seg := (w - arm * 2.0) / 3.0
+	for i in range(1, 3):
+		draw_rect(Rect2(o.x + arm + seg * i - 0.5, o.y - back_h + 5.0, 1.0, back_h - 6.0),
+			Color(0, 0, 0, 0.16))
+
+	# 座面（被靠背压住上半截）
+	draw_rect(Rect2(o.x + arm, o.y + 1.0, w - arm * 2.0, h - 1.0), Color("7d5d81"))
+	draw_rect(Rect2(o.x + arm, o.y + 1.0, w - arm * 2.0, 1.0), Color("95739a"))
+	draw_rect(Rect2(o.x + arm, o.y + h - 2.0, w - arm * 2.0, 2.0), lo)
+	# 坐垫分两块
+	draw_rect(Rect2(o.x + arm + (w - arm * 2.0) * 0.5 - 0.5, o.y + 3.0, 1.0, h - 6.0),
+		Color(0, 0, 0, 0.14))
+
+	# 扶手：比座面高一点，两侧各一块
+	for sx in [o.x, o.x + w - arm]:
+		draw_rect(Rect2(sx, o.y - 5.0, arm, h + 5.0), Color("5e4462"))
+		draw_rect(Rect2(sx, o.y - 5.0, arm, 1.0), Color("7d5d81"))
+		draw_rect(Rect2(sx + (0.0 if sx == o.x else arm - 1.0), o.y - 5.0, 1.0, h + 5.0), lo)
+
+
+# ---------------------------------------------------------------- 绿植 / 坐垫
+
+## 盆栽：花盆 + 三团叶子。房间里全是指示灯和屏幕，需要一点绿的断一下。
+func _plant(o: Vector2, w: float, h: float) -> void:
+	_shadow(o, w, h, 1.5)
+	var pot_w := w * 0.52
+	var pot_x := o.x + (w - pot_w) * 0.5
+	var pot_h := clampf(h * 0.45, 4.0, 7.0)
+	var pot_y := o.y + h - pot_h
+	draw_rect(Rect2(pot_x, pot_y, pot_w, pot_h), Color("7d4d34"))
+	draw_rect(Rect2(pot_x, pot_y, pot_w, 1.0), Color("9a6444"))
+	draw_rect(Rect2(pot_x + pot_w - 1.0, pot_y, 1.0, pot_h), Color("613a26"))
+
+	# 叶子：三团叠着长，越往上越小
+	var cx := o.x + w * 0.5
+	var leaf := Color("3f6b45")
+	var leaf_hi := Color("548b5a")
+	var top_y := pot_y - h * 0.62
+	var tiers := [
+		Rect2(cx - w * 0.46, pot_y - h * 0.26, w * 0.92, h * 0.30),
+		Rect2(cx - w * 0.34, pot_y - h * 0.48, w * 0.68, h * 0.26),
+		Rect2(cx - w * 0.22, top_y, w * 0.44, h * 0.24),
+	]
+	for t in tiers:
+		draw_rect(t, leaf)
+		draw_rect(Rect2(t.position.x, t.position.y, t.size.x, 1.0), leaf_hi)
+	draw_rect(Rect2(cx - 0.5, pot_y - h * 0.30, 1.0, h * 0.30), Color("2f5236"))
+
+
+## 地上的坐垫：几乎平铺，只有 2px 厚度 + 一圈包边
+func _cushion(o: Vector2, w: float, h: float) -> void:
+	draw_rect(Rect2(o.x, o.y - 2.0, w, h), Color("5a4a6e"))
+	draw_rect(Rect2(o.x, o.y - 2.0, w, 1.0), Color("7a6890"))
+	draw_rect(Rect2(o.x, o.y + h - 2.0, w, 2.0), Color("453a55"))
+	draw_rect(Rect2(o.x + 2.0, o.y - 1.0, w - 4.0, h - 4.0), Color(0, 0, 0, 0.10))

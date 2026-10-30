@@ -1252,7 +1252,7 @@ const DOOR_CHECK_HZ := 8.0
 ## 室内视距。房间只有 910×754 px，比视口（1280/zoom）还小 ——
 ## 用校园那档 1.2 进去，整间房缩在屏幕中间、四周露黑，人也只有几个像素。
 ## 1.9 让房间填满屏幕，人物约 34px 高，坐着/站着一眼能分清。
-const ROOM_ZOOM := 1.9
+const ROOM_ZOOM := 2.1
 const CAMPUS_ZOOM := 1.2
 ## 离座位多近才能坐（像素，campus/Objects 局部空间 = 8px/格）
 const SEAT_RADIUS := 46.0
@@ -1302,7 +1302,7 @@ func _try_interact() -> bool:
 		leave_room()
 		return true
 	if _near_dorm != "":
-		enter_room("res://assets/rooms/game_lounge.json")
+		enter_room("res://assets/rooms/dorm_space.json")
 		return true
 	return false
 
@@ -1442,7 +1442,7 @@ func _auto_press_e() -> void:
 ## 等玩家 spawn 出来再进房间（联机会话建立有延迟）
 func _auto_enter_room() -> void:
 	await get_tree().create_timer(2.0).timeout
-	if not enter_room("res://assets/rooms/game_lounge.json"):
+	if not enter_room("res://assets/rooms/dorm_space.json"):
 		push_warning("[arena] 自动进房间失败")
 		return
 
@@ -1460,10 +1460,15 @@ func _set_cam_limit(avatar: Node, free_it: bool) -> void:
 				"top": cam.get("limit_top"),
 				"bottom": cam.get("limit_bottom"),
 			}
-		cam.set("limit_left", -10000000)
-		cam.set("limit_right", 10000000)
-		cam.set("limit_top", -10000000)
-		cam.set("limit_bottom", 10000000)
+		# 把相机限制在**房间矩形**里，而不是把限制全放开。
+		# 全放开的话，人走到房间角落就会看到墙外的纯黑 —— 房间比视口大，
+		# 相机本来就该在房间内滑，不该滑到外面去。
+		var rp: Vector2 = (room as Node2D).global_position
+		var rs: Vector2 = (room as Node2D).get("size_px") * (room as Node2D).global_scale
+		cam.set("limit_left", int(rp.x))
+		cam.set("limit_top", int(rp.y))
+		cam.set("limit_right", int(rp.x + rs.x))
+		cam.set("limit_bottom", int(rp.y + rs.y))
 	elif not _cam_limit.is_empty():
 		for k in _cam_limit:
 			cam.set("limit_" + String(k), _cam_limit[k])
@@ -1472,15 +1477,23 @@ func _set_cam_limit(avatar: Node, free_it: bool) -> void:
 	cam.call("force_update_scroll")
 
 
-## 收集可进入的宿舍楼。命名规则：带「座」或「宿舍」，排除餐厅/食堂 ——
-## 星天苑 A~H、云天苑 A~F、海天苑 1/2 号楼都符合，星天苑北餐厅之类不会误入。
+## 只有真·宿舍楼能进：星天苑 A~H、云天苑 A~F、海天苑 1/2 号楼。
+##
+## 早先用「名字里带『座』或『宿舍』」当判据，结果教学西楼/教学东楼 A~D 座
+## 共 8 栋教学楼也被放进来 —— 站在教学楼门口也能开门进宿舍空间，明显不对。
+## 现在按楼盘名前缀认：星天苑 / 云天苑 / 海天苑，且必须带「座」或「号楼」。
+const DORM_PREFIXES: Array[String] = ["星天苑", "云天苑", "海天苑"]
+
 func _collect_dorms() -> void:
 	_dorms.clear()
 	for b in MapData.buildings():
 		var n := str(b.get("name", ""))
-		if not (n.contains("座") or n.contains("宿舍")):
-			continue
-		if n.contains("餐厅") or n.contains("食堂"):
+		var is_dorm := false
+		for pf in DORM_PREFIXES:
+			if n.begins_with(pf) and (n.contains("座") or n.contains("号楼")):
+				is_dorm = true
+				break
+		if not is_dorm:
 			continue
 		var w := float(b.get("w_cells", 0.0))
 		var h := float(b.get("h_cells", 0.0))
@@ -1491,7 +1504,7 @@ func _collect_dorms() -> void:
 			"name": n,
 			"rect": Rect2(cen - Vector2(w, h) * 0.5, Vector2(w, h)),
 		})
-	print("[arena] 可进入的建筑 %d 栋" % _dorms.size())
+	print("[arena] 可进入的宿舍 %d 栋" % _dorms.size())
 
 
 func _build_door_hint() -> void:
