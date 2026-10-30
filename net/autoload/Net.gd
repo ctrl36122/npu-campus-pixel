@@ -425,7 +425,21 @@ func post_message(text: String) -> void:
 	# 只有服务端落盘（客户端各有一份副本，写多了会互相覆盖）
 	if is_server():
 		_record_chat(speaker, clean)
+		# 关键：Godot 的 rpc() 从客户端只发到服务器，服务端**不会**自动转发给别人。
+		# 以前少了这一步，客户端发的消息只有它自己和主机看得到 —— 别人那边聊天框
+		# 一片空白（主机自己说的话却正常，因为主机 rpc() 直接发给所有客户端）。
+		if sender != my_id():
+			for id in multiplayer.get_peers():
+				if int(id) != sender:
+					_relay_message.rpc_id(int(id), speaker, clean)
 	message_received.emit(speaker, clean)
+
+
+## 服务端转发别人的聊天。客户端收到后走和本地一样的气泡 + 列表逻辑。
+@rpc("authority", "call_remote", "reliable", 0)
+func _relay_message(speaker: String, text: String) -> void:
+	note_received([text])
+	message_received.emit(speaker, text)
 
 
 # ---------------------------------------------------------------- 聊天落盘

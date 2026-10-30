@@ -1474,6 +1474,9 @@ func enter_room(path: String, floor_n: int = 1) -> bool:
 	# 每次进楼默认从 1 层开始（但自家在那层就直接落到自家那层）；建好门牌、显示楼层指示
 	current_floor = clampi(floor_n, 1, FLOOR_COUNT)
 	Net.set_my_floor(current_floor)
+	# 告诉服务端「我进房间了、在第几层、落在哪」：房间内不跑服务端模拟，
+	# 但位置/楼层要同步出去，否则同房间的人互相看不见（房间内只有自己）。
+	me.call("set_room_state", true, current_floor, target)
 	_build_door_plates()
 	_update_floor_label()
 	_update_floor_visibility()
@@ -1495,6 +1498,7 @@ func leave_room() -> void:
 		_night_dark.visible = true
 	if me != null:
 		me.call("teleport_to", _return_cell * TS)
+		me.call("set_room_state", false, 0, _return_cell * TS)
 		me.set("_room_freeze", false)
 		_set_cam_limit(me, false)
 		me.set("_cam_zoom_target", CAMPUS_ZOOM)
@@ -2231,7 +2235,10 @@ func _go_floor(n: int) -> void:
 	Net.set_my_floor(want)
 	var me: Node = _local_avatar()
 	if me != null:
-		me.call("teleport_to", _elevator_step_out())
+		var spot: Vector2 = _elevator_step_out()
+		me.call("teleport_to", spot)
+		# 换层 = 房间里换一个「层号」：同层才互相可见，位置也一起同步过去
+		me.call("set_room_state", true, want, spot)
 	_refresh_door_plates()
 	_update_floor_label()
 	_update_floor_visibility()
@@ -2724,7 +2731,15 @@ func _update_floor_visibility() -> void:
 		if bool(c.get("is_local_player")):
 			c.visible = true
 			continue
+		# 房间里 / 校园里是两个互不相干的坐标空间（房间在校园北界外 1500 格，
+		# 同一份几何复制 5 层）。所以要按「在不在房间里」先分一次，
+		# 再按楼层分 —— 只看楼层号的话，校园里的人楼层也是 1，
+		# 会和你房间里的人混在一起。
+		var peer_in_room: bool = bool(c.get("room_inside"))
+		if peer_in_room != in_room:
+			c.visible = false
+			continue
 		if not in_room:
 			c.visible = true
 			continue
-		c.visible = Net.floor_of(int(c.get("owner_peer_id"))) == current_floor
+		c.visible = int(c.get("room_floor")) == current_floor
