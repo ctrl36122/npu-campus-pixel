@@ -789,14 +789,19 @@ func _on_room_changed(inside: bool) -> void:
 		if _mini_title != null and is_instance_valid(_mini_title):
 			_mini_title.text = String(rm.get("data").get("name", "内景"))
 		_resize_mini(_mini_w, _mini_w * sz.y / sz.x)
+		# 全屏地图同步切到房间视图（点小图/M 展开时就不会再显示校园）
+		if _map != null and is_instance_valid(_map) and _map.has_method("set_room"):
+			_map.call("set_room", rm)
 	else:
 		_mini.call("clear_room")
 		if _mini_title != null and is_instance_valid(_mini_title):
 			_mini_title.text = "校园地图"
 		_resize_mini(_base_mini_w, _base_mini_w * MINI_H / MINI_W)
+		if _map != null and is_instance_valid(_map) and _map.has_method("clear_room"):
+			_map.call("clear_room")
 
 
-## 现在是否在建筑内景里（房间没有校园图，M 键要挡掉）
+## 现在是否在建筑内景里（右上角小图 / 全屏地图都已切到房间视图）
 func _in_room() -> bool:
 	return _arena != null and is_instance_valid(_arena) and bool(_arena.get("in_room"))
 
@@ -890,8 +895,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	if key == KEY_TAB:
 		_toggle_settings(not _settings.visible)
 		get_viewport().set_input_as_handled()
-	elif key == KEY_M and _online and not _in_room():
-		# M 打开全屏校园地图（也等价于点右上角小地图）
+	elif key == KEY_M and _online:
+		# M 打开全屏地图：在校园里是整张校园；进房间后全屏地图已切到
+		# 房间平面图（见 _on_room_changed），所以房间内 M 同样能开、看到的是房间。
 		if _map != null and is_instance_valid(_map) and _map.visible:
 			_close_map()
 		else:

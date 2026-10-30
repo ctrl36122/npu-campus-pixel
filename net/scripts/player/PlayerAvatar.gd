@@ -89,6 +89,9 @@ var _render_lag: Vector2 = Vector2.ZERO
 var _occluded: bool = false
 ## 当前不透明度，向目标平滑逼近（走过楼边不该「啪」一下变透）
 var _occl_a: float = 1.0
+## 进宿舍空间期间本地权威：服务器不知道你在房间里，临时冻结对自己位置的 reconcile，
+## 否则服务器每帧把人拉回校园，而相机 limit 卡在房间内 → 你被困在房间边界外、看不到自己。
+var _room_freeze := false
 var _stand_req_at := 0.0
 
 
@@ -399,7 +402,10 @@ func _process(delta: float) -> void:
 		if seq != last_seen_seq:
 			last_seen_seq = seq
 			if is_local_player:
-				_reconcile(seq, authoritative)
+				# 进房间期间本地权威：服务器不知道你在宿舍空间里，不能让它把人拉回校园
+				# （否则相机 limit 卡在房间内，你会被卡在房间边界外、屏幕上只剩地板边角）。
+				if not _room_freeze:
+					_reconcile(seq, authoritative)
 			smoother.push(authoritative, Time.get_ticks_msec())
 		if not is_local_player:
 			position = smoother.sample(Time.get_ticks_msec(), position)

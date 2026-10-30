@@ -19,6 +19,14 @@ var tex: Texture2D
 var campus: Node2D
 var arena: Node2D
 var font: Font
+## 校园底图（从房间视图切回时复原，setup 里记下）
+var _campus_tex: Texture2D
+## 当前底图逻辑尺寸：校园常量 424×800，进房间换成房间 W×H 格
+var _map_px := MAP_PX
+## 房间视图模式：全屏地图换成房间平面图（房间无「传送」概念，点击不传送）
+var _room_mode := false
+var _room: Node2D = null
+var _room_cells := Vector2.ZERO          # 房间尺寸（格），玩家点按此归一
 
 var zoom: float = 1.0
 var pan: Vector2 = Vector2.ZERO
@@ -38,6 +46,7 @@ var _ready_once := false
 
 func setup(t: Texture2D, c: Node2D, a: Node2D, f: Font) -> void:
 	tex = t
+	_campus_tex = t
 	campus = c
 	arena = a
 	font = f
@@ -133,8 +142,12 @@ func _draw() -> void:
 	var map_rect := Rect2(o, MAP_PX * s)
 	draw_rect(map_rect, Color("#3c4c5e"), false, 2.0)
 
+	# 房间视图：顶部居中标题，不画楼名（房间没有「楼」）
+	if _room_mode and _room != null and is_instance_valid(_room) and font != null:
+		_outlined_text(String(_room.get("data").get("name", "内景")),
+			Vector2(size.x * 0.5, 22.0), 18, Color(0.95, 0.97, 1.0, 0.96))
 	# 放大到一定程度才画楼名，否则会糊成一团（阈值和网页版 picker 的 1.5 一致）
-	if zoom >= 1.5 and font != null:
+	if not _room_mode and zoom >= 1.5 and font != null:
 		var fs := clampi(int(round(10.0 * zoom)), 10, 20)
 		var placed: Array[Rect2] = []
 		for b in _buildings:
@@ -159,8 +172,13 @@ func _draw() -> void:
 
 	# 玩家位置
 	for p in get_tree().get_nodes_in_group("players"):
-		var local: Vector2 = campus.to_local(p.global_position)
-		var mp2: Vector2 = local / CAMPUS_LOCAL * MAP_PX
+		var mp2: Vector2
+		if _room_mode and _room != null and is_instance_valid(_room):
+			var pl: Vector2 = _room.to_local(p.global_position)   # 房间局部：8px/格
+			mp2 = (pl / TS) / _room_cells * _map_px
+		else:
+			var local: Vector2 = campus.to_local(p.global_position)
+			mp2 = local / CAMPUS_LOCAL * _map_px
 		var sp2: Vector2 = o + mp2 * s
 		var col: Color = Color(1, 1, 1) if p.is_local_player else Color("#ffb03a")
 		draw_circle(sp2, 4.0, col)
@@ -172,10 +190,16 @@ func _draw() -> void:
 		var touch := DisplayServer.is_touchscreen_available() or OS.has_feature("mobile") \
 			or OS.has_environment("XGD_TOUCH")
 		var hint: String
-		if touch:
-			hint = "缩放 %d%%　·　点任意位置传送　·　单指拖动　·　双指缩放　·　右上角关闭" % int(round(zoom * 100.0))
+		if _room_mode:
+			if touch:
+				hint = "缩放 %d%%　·　房间视图（不传送）　·　单指拖动　·　双指缩放　·　右上角关闭" % int(round(zoom * 100.0))
+			else:
+				hint = "缩放 %d%%　·　房间视图（不传送）　·　滚轮缩放　·　拖拽平移　·　M / Esc 关闭" % int(round(zoom * 100.0))
 		else:
-			hint = "缩放 %d%%　·　点击任意位置传送　·　滚轮缩放　·　拖拽平移　·　M / Esc 关闭" % int(round(zoom * 100.0))
+			if touch:
+				hint = "缩放 %d%%　·　点任意位置传送　·　单指拖动　·　双指缩放　·　右上角关闭" % int(round(zoom * 100.0))
+			else:
+				hint = "缩放 %d%%　·　点击任意位置传送　·　滚轮缩放　·　拖拽平移　·　M / Esc 关闭" % int(round(zoom * 100.0))
 		draw_rect(Rect2(0, size.y - 40, size.x, 40), Color(0.02, 0.03, 0.045, 0.92))
 		draw_string(font, Vector2(0, size.y - 18), hint,
 			HORIZONTAL_ALIGNMENT_CENTER, size.x, 13, Color("#9fb0bd"))
@@ -191,7 +215,7 @@ func _outlined_text(s: String, at: Vector2, fs: int, col: Color) -> void:
 
 # ---------------------------------------------------------------- 变换
 func _base_scale() -> float:
-	return minf(size.y * 0.84 / MAP_PX.y, size.x * 0.84 / MAP_PX.x)
+	return minf(size.y * 0.84 / _map_px.y, size.x * 0.84 / _map_px.x)
 
 
 func _scale() -> float:
@@ -199,13 +223,52 @@ func _scale() -> float:
 
 
 func _origin(s: float) -> Vector2:
-	return size * 0.5 + pan - MAP_PX * s * 0.5
+	return size * 0.5 + pan - _map_px * s * 0.5
 
 
 func reset_view() -> void:
 	zoom = 1.0
 	pan = Vector2.ZERO
 	_sync_image()
+	queue_redraw()
+
+
+## 进建筑内景：全屏地图换成房间平面图（与右上角小图共用同一张房间底图）。
+## 房间没有「传送」概念，所以 _try_teleport 在房间模式下直接 no-op。
+## M 键在房间内原本被屏蔽，现在既然有房间视图，M 也能开了（见 online_boot）。
+func set_room(room: Node2D) -> void:
+	if room == null or not is_instance_valid(room):
+		return
+	var rt: Texture2D = room.get("minimap_tex")
+	var sz: Vector2 = room.get("size_px")
+	if rt == null or sz.x < 1.0 or sz.y < 1.0:
+		return
+	_room_mode = true
+	_room = room
+	_room_cells = sz / TS
+	_map_px = _room_cells
+	tex = rt
+	if _img != null and is_instance_valid(_img):
+		_img.texture = rt
+		_img.size = _map_px
+	_buildings.clear()
+	reset_view()
+	queue_redraw()
+
+
+## 回到校园视图：复原底图、楼名、逻辑尺寸
+func clear_room() -> void:
+	if not _room_mode:
+		return
+	_room_mode = false
+	_room = null
+	_map_px = MAP_PX
+	tex = _campus_tex
+	if _img != null and is_instance_valid(_img):
+		_img.texture = _campus_tex
+		_img.size = MAP_PX
+	_collect_buildings()
+	reset_view()
 	queue_redraw()
 
 
@@ -315,6 +378,8 @@ func _input(event: InputEvent) -> void:
 
 
 func _try_teleport(at: Vector2) -> void:
+	if _room_mode:
+		return                                   # 房间视图只读，没有「传到房间某点」的概念
 	if campus == null or arena == null:
 		return
 	var s := _scale()

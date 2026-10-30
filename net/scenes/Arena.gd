@@ -154,6 +154,7 @@ func _ready() -> void:
 
 	# 调试：启动即进房间（正常玩法走到宿舍旁按 E）
 	if OS.has_environment("XGD_ROOM"):
+		print("[dbg] XGD_ROOM 命中，准备自动进房间")
 		_auto_enter_room()
 	# 调试：模拟按一次 E，验证的是「按键 → 就近判定 → 进房间」整条链路
 	if OS.has_environment("XGD_TEST_E"):
@@ -1356,6 +1357,7 @@ func enter_room(path: String) -> bool:
 	var sp: Vector2 = room.get("spawn_px")
 	var target: Vector2 = room.position + sp
 	me.call("teleport_to", target)
+	me.set("_room_freeze", true)
 	_set_cam_limit(me, true)
 	# 调试时 XGD_ZOOM 优先，否则统一用房间视距（房间比校园开阔得多）
 	if OS.has_environment("XGD_ZOOM"):
@@ -1390,6 +1392,7 @@ func leave_room() -> void:
 		_night_dark.visible = true
 	if me != null:
 		me.call("teleport_to", _return_cell * TS)
+		me.set("_room_freeze", false)
 		_set_cam_limit(me, false)
 		me.set("_cam_zoom_target", CAMPUS_ZOOM)
 	if room != null:
@@ -1496,10 +1499,23 @@ func _auto_walk_out() -> void:
 
 ## 等玩家 spawn 出来再进房间（联机会话建立有延迟）
 func _auto_enter_room() -> void:
-	await get_tree().create_timer(2.0).timeout
+	var t := get_tree().create_timer(4.0)
+	t.timeout.connect(func():
+		if _local_avatar() == null:
+			# 玩家还没 spawn 出来，稍后再试一次
+			var t2 := get_tree().create_timer(2.0)
+			t2.timeout.connect(func(): _try_auto_room())
+			return
+		_try_auto_room()
+	)
+
+
+func _try_auto_room() -> void:
 	if not enter_room("res://assets/rooms/dorm_space.json"):
 		push_warning("[arena] 自动进房间失败")
-		return
+	else:
+		print("[dbg] 自动进房成功 in_room=", in_room,
+			" 玩家=", (_local_avatar() as Node2D).position if _local_avatar() != null else Vector2.ZERO)
 
 
 ## 进出房间时放开/恢复相机边界。只动本地玩家的相机，远端玩家不影响视角。
