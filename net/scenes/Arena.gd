@@ -1407,6 +1407,14 @@ func enter_room(path: String, floor_n: int = 1) -> bool:
 	var target: Vector2 = room.position + sp
 	me.call("teleport_to", target)
 	me.set("_room_freeze", true)
+	# 进房前校园那边可能还有没被服务器确认的预测命令，房间期间又不发包，
+	# 残留下来只会在出房后被重放（人莫名其妙往前冲一段），这里直接倒干净。
+	var stale_buffer: Variant = me.get("buffer")
+	if stale_buffer != null:
+		stale_buffer.entries.clear()
+	var stale_commands: Variant = me.get("commands")
+	if stale_commands is Dictionary:
+		(stale_commands as Dictionary).clear()
 	_set_cam_limit(me, true)
 	# 视距只按「竖向」适配：让南北两排房间刚好一屏看全（镜头高度固定），
 	# 横向靠拉长的走廊去滚动 —— 走起来才有沉浸感。

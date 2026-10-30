@@ -60,11 +60,14 @@ ROOM_END = ROOM_X[-1] + ROOM_W           # 最后一间房间右沿
 W = ROOM_END + T                         # 94
 H = S_Y1 + T                             # 30
 
-# 电梯：走廊东端、贴着东墙
+# 电梯：走廊东端、嵌进东墙里的一樘门（门洞开在东墙上，门与按钮画在墙里/门边）
 ELEV_X0 = ROOM_END - 6.0                 # 电梯前室起点
 ELEV_W = 6.0
 ELEV_Y0 = CR_Y0                          # 12
 ELEV_H = CR_H                            # 6
+ELEV_DOOR_Y0 = 13.2                      # 门洞起点（走廊竖向居中）
+ELEV_DOOR_H = 3.6                        # 门洞高（人 2.25 格，够宽）
+ELEV_DOOR_Y1 = ELEV_DOOR_Y0 + ELEV_DOOR_H
 
 
 def r2(v):
@@ -84,7 +87,10 @@ def build():
     walls.append({"x": 0, "y": T, "w": T, "h": ENTR_Y0 - T})             # 西（出入口上方）
     walls.append({"x": 0, "y": ENTR_Y0 + ENTR_H, "w": T,
                   "h": (H - T) - (ENTR_Y0 + ENTR_H)})                    # 西（出入口下方）
-    walls.append({"x": W - T, "y": T, "w": T, "h": H - T * 2})           # 东
+    # 东墙：中间留出电梯门洞 —— 门就嵌在这面墙里（不再是一个浮在走廊上的盒子）
+    walls.append({"x": W - T, "y": T, "w": T, "h": ELEV_DOOR_Y0 - T})     # 东（门洞北）
+    walls.append({"x": W - T, "y": ELEV_DOOR_Y1, "w": T,
+                  "h": (H - T) - ELEV_DOOR_Y1})                           # 东（门洞南）
 
     # 西端出入口的门
     props.append({"k": "door", "x": 0.1, "y": ENTR_Y0, "w": T - 0.2, "h": ENTR_H})
@@ -145,10 +151,10 @@ def build():
     rugs.append({"x": r2(X0 + 1), "y": r2(CR_Y0 + 1.5),
                  "w": r2(ELEV_X0 - 1 - X0 - 1), "h": r2(CR_H - 3.0)})
 
-    # ── 电梯：东端前室 + 东墙前的电梯门 ────────────────────────────────
-    # 电梯门画在东墙前（不压墙，免得和 wall 抢 y 排序闪烁），朝西开向走廊。
-    props.append({"k": "elevator", "x": r2(W - T - 2.0), "y": r2(ELEV_Y0 + 0.5),
-                  "w": 2.0, "h": r2(ELEV_H - 1.0)})
+    # ── 电梯：嵌进东墙的门（门洞位置就是墙上的缺口） ──────────────────
+    # 门本体同时当碰撞体用：东墙被切开一段，没有它人能顺着门洞走进墙外的虚空。
+    props.append({"k": "elevator", "x": r2(W - T), "y": r2(ELEV_DOOR_Y0),
+                  "w": r2(T), "h": r2(ELEV_DOOR_H), "solid": True})
     # 电梯前室的地面与标识（用一块地胶区分）
     pod_floors.append({"x": r2(ELEV_X0), "y": r2(ELEV_Y0),
                        "w": r2(ELEV_W), "h": r2(ELEV_H)})
@@ -160,9 +166,9 @@ def build():
         # 出生点放在走廊西端（进楼的位置附近）
         "spawn": {"x": 6.0, "y": CR_Y0 + CR_H * 0.5},
         "exit": {"x": 0.5, "y": ENTR_Y0, "w": 1.5, "h": ENTR_H},
-        # 电梯前室（站进来按 E 换层）
-        "elevator": {"x": r2(ELEV_X0), "y": r2(ELEV_Y0),
-                     "w": r2(ELEV_W), "h": r2(ELEV_H)},
+        # 电梯交互区：站在门前这一小块，按 E 弹楼层（不是整间前室）
+        "elevator": {"x": r2(W - T - 2.2), "y": r2(ELEV_DOOR_Y0),
+                     "w": 2.2, "h": r2(ELEV_DOOR_H)},
         "room_doors": room_doors,
         # 每间房的床（index 与 room_doors 一致）：认领后从这张床出生 / 躺着
         "beds": beds,

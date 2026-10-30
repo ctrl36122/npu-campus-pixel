@@ -385,27 +385,53 @@ func _door(o: Vector2, w: float, h: float) -> void:
 
 # ---------------------------------------------------------------- 电梯门
 
-## 电梯门：两扇合上的金属滑门 + 顶部一枚绿色楼层指示灯。
-## 「名义上的电梯」—— 只是走廊尽头的交互点，按 E 弹楼层选择。
+## 电梯门：嵌在东墙里的一樘金属双开滑门，门洞就是墙上那段缺口。
+## 视角是俯视 2.5D，所以门和西端那扇玻璃门一样平贴画在墙带里；
+## 用金属色 + 中缝 + 门楣到站小屏跟普通门区分开。
+## 门南侧贴墙凸出一块呼梯面板（一颗亮着的按钮），比整扇门更像电梯。
 func _elevator(o: Vector2, w: float, h: float) -> void:
-	# 门框（比门体略大一圈）
-	draw_rect(Rect2(o.x - 1.0, o.y - 1.0, w + 2.0, h + 2.0), Color("2a3038"))
-	draw_rect(Rect2(o.x - 1.0, o.y - 1.0, w + 2.0, 1.0), Color("3f4853"))
-	# 两扇门
-	var half := w * 0.5
+	var recess := Color("171c22")
+	var frame := Color("2c333b")
+	var leaf_hi := Color("9aa7b4")
+	var leaf := Color("7a8692")
+	var leaf_lo := Color("5d6873")
+
+	# 门洞（墙被切开的那一段）：先铺一层暗，门缝里才有"井道"的深度
+	draw_rect(Rect2(o.x, o.y, w, h), recess)
+	# 门套：四周一圈，把门和砌体分开
+	draw_rect(Rect2(o.x, o.y, w, 1.0), frame)
+	draw_rect(Rect2(o.x, o.y + h - 1.0, w, 1.0), frame)
+	draw_rect(Rect2(o.x, o.y, 1.0, h), frame)
+	draw_rect(Rect2(o.x + w - 1.0, o.y, 1.0, h), frame)
+
+	# 两扇门沿着墙（南北向）并排：俯视看就是上下两块金属板
+	var half := (h - 2.0) * 0.5
 	for k in range(2):
-		var dx := o.x + float(k) * half
-		draw_rect(Rect2(dx + 0.5, o.y + 1.0, half - 1.0, h - 2.0), Color("6a7684"))
-		draw_rect(Rect2(dx + 1.5, o.y + 2.0, half - 3.0, h - 4.0), Color("828e9c"))
-		# 金属高光竖条
-		draw_rect(Rect2(dx + half * 0.5 - 0.75, o.y + 2.0, 1.5, h - 4.0), Color("a2aeba"))
-	# 中缝
-	draw_rect(Rect2(o.x + half - 0.5, o.y + 1.0, 1.0, h - 2.0), Color("1d232a"))
-	# 顶部楼层指示灯（绿色小屏）
-	var lw := minf(14.0, w * 0.5)
-	draw_rect(Rect2(o.x + (w - lw) * 0.5, o.y - 5.0, lw, 4.0), Color("141a20"))
-	draw_rect(Rect2(o.x + (w - lw) * 0.5 + 2.0, o.y - 4.0, lw - 4.0, 1.5),
-		Color(0.35, 0.92, 0.52, 1.0))
+		var dy := o.y + 1.0 + float(k) * (half + 0.5)
+		draw_rect(Rect2(o.x + 1.0, dy, w - 2.0, half), leaf)
+		draw_rect(Rect2(o.x + 1.0, dy, w - 2.0, 1.0), leaf_hi)          # 上沿反光
+		draw_rect(Rect2(o.x + 1.0, dy + half - 1.0, w - 2.0, 1.0), leaf_lo)
+	# 中缝（两扇门合上的那道线）
+	draw_rect(Rect2(o.x + 1.0, o.y + h * 0.5 - 0.6, w - 2.0, 1.2), Color("0f1318"))
+	# 朝走廊这一侧（西沿）再压一道窄高光，金属感靠它
+	draw_rect(Rect2(o.x + 1.0, o.y + 2.0, 1.0, h - 4.0), leaf_hi.darkened(0.10))
+
+	# 门楣到站屏：一条暗底 + 一段绿光
+	var sw := w - 6.0
+	draw_rect(Rect2(o.x + 3.0, o.y + 1.5, sw, 2.5), Color("10151a"))
+	draw_rect(Rect2(o.x + 3.5, o.y + 2.2, sw - 1.0, 1.2), Color(0.34, 0.92, 0.52, 1.0))
+
+	# 呼梯面板：贴墙凸出到走廊一侧、门的中下部，一颗亮着的按钮 + 上/下箭头
+	var px := o.x - 6.0
+	var py := o.y + h - 15.0
+	draw_rect(Rect2(px + 0.5, py + 0.5, 6.0, 11.0), Color(0, 0, 0, 0.28))   # 投影
+	draw_rect(Rect2(px, py, 6.0, 11.0), Color("2b333c"))
+	draw_rect(Rect2(px, py, 6.0, 1.0), Color("49545f"))
+	draw_rect(Rect2(px + 1.2, py + 1.6, 3.6, 3.4), Color("4a5560"))          # 上行键
+	draw_rect(Rect2(px + 1.2, py + 6.0, 3.6, 3.4), Color("4a5560"))          # 下行键
+	# 上行键亮着（暖黄），下行键留个暗点 —— 站在门口就是"正在呼梯"
+	draw_rect(Rect2(px + 2.0, py + 2.5, 2.0, 1.8), Color(1.0, 0.82, 0.36, 1.0))
+	draw_rect(Rect2(px + 2.0, py + 7.0, 2.0, 1.6), Color(0.30, 0.35, 0.40, 1.0))
 
 
 # ---------------------------------------------------------------- 沙发

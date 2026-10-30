@@ -322,7 +322,21 @@ func _on_tick(tick: int) -> void:
 	if GameState.phase != GameState.Phase.IN_RUN:
 		return
 	if is_local_player:
-		if buffer.entries.size() < InputBufferScript.CAPACITY:
+		if _room_freeze:
+			# 房间内是「本地权威」：服务器根本不知道宿舍空间的存在，坐标体系完全不同，
+			# 所以这里既不进预测缓冲也不发包（发包只会让服务器上的人在校园里乱走）。
+			#
+			# 以前的做法是照常 push 进 buffer、只跳过 reconcile —— 但 buffer 只在
+			# reconcile 里确认，等于只进不出：64 条（30Hz 下约 2 秒）塞满之后
+			# `buffer.entries.size() < CAPACITY` 恒为假，连输入都不再采样了。
+			# 人定在原地、_moving 还停在 true，动画一直循环 —— 这就是
+			# 「在宿舍走几步就卡住、却什么都没碰到」的真凶（和碰撞无关）。
+			var local_command: Dictionary = input.sample(self, 0, tick)
+			if ui_blocked:                       # 设置面板打开时冻结移动
+				local_command["x"] = 0.0
+				local_command["y"] = 0.0
+			_apply_movement(local_command)
+		elif buffer.entries.size() < InputBufferScript.CAPACITY:
 			var command: Dictionary = input.sample(self, next_seq, tick)
 			if ui_blocked:                       # 设置面板打开时冻结移动
 				command["x"] = 0.0
@@ -331,13 +345,15 @@ func _on_tick(tick: int) -> void:
 			if not Net.is_server():
 				_apply_movement(command)
 			buffer.push(command, position)
-		if Net.is_server():
-			for command in buffer.pending():
-				_accept_command(owner_peer_id, command)
-		else:
-			# Resend everything unacknowledged: unreliable packets can be lost.
-			Net.send_to(1, self, &"_push_inputs", [buffer.pending()])
-	if Net.is_server():
+		# 房间内不进网络链路：没有要发的命令，也没有要等服务器回的确认
+		if not _room_freeze:
+			if Net.is_server():
+				for command in buffer.pending():
+					_accept_command(owner_peer_id, command)
+			else:
+				# Resend everything unacknowledged: unreliable packets can be lost.
+				Net.send_to(1, self, &"_push_inputs", [buffer.pending()])
+	if Net.is_server() and not _room_freeze:
 		# One command is one fixed movement step. The server grants movement
 		# time (one step per tick, a little banked for jitter), so a client that
 		# floods commands cannot move faster than everyone else.
