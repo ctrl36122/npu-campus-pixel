@@ -382,13 +382,17 @@ func _apply_movement(command: Dictionary) -> void:
 	velocity = direction * speed
 	var before := position
 	move_and_collide(velocity * NetTick.DELTA)
+	var moved := position - before
 	# 物理位置已经前移，视觉位置留在原处（_render_lag 抵消掉这一步），
 	# 再由 _process 平滑追上去 —— 30Hz 的阶跃就变成了连续移动。
-	_render_lag -= position - before
+	_render_lag -= moved
 	# 视觉方向跟着实际输入走（服务端模拟时同样会更新，保证远端看到的朝向一致）
 	if direction.length() > 0.01:
 		_face_dir = direction.normalized()
-		_moving = true
+		# 撞墙/家具被挡住、实际没挪动 → 不播行走动画，否则会「原地踏步」
+		# （宿舍里家具密，走几步就贴上去、动画却一直循环，看着就像卡死了）。
+		# 仍保持 _face_dir，所以角色会面朝挡住他的那面墙、站定，而不是诡异地空走。
+		_moving = moved.length() > 0.5
 	else:
 		_moving = false
 
