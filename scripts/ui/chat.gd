@@ -28,6 +28,8 @@ const C_OTHER := "#e6eef6"
 const C_SYS := "#8a99a6"
 const C_TIME := "#5f6f7c"
 
+const ChatGuard := preload("res://net/chat_guard.gd")
+
 var _font: Font
 var _panel: Panel                    # 用 Panel 而不是 PanelContainer：容器会被内容撑大，
 var _rule: ColorRect                 # 消息一多就把输入行顶到屏幕外
@@ -49,6 +51,7 @@ var _last_vk := 0                     # 上次读到的软键盘高度，变了�
 var _drag_finger := -1                # 正在拖消息区的手指
 var _drag_y0 := 0.0                   # 按下时的 y（用于按绝对位移算滚动）
 var _drag_scroll0 := 0
+var _last_send_ms := 0                # 本地节流：上一次成功发出的时间
 
 
 func _ready() -> void:
@@ -366,9 +369,29 @@ func _close_input(send: bool) -> void:
 	if OS.has_feature("mobile"):
 		DisplayServer.virtual_keyboard_hide()
 	if send and not text.is_empty():
-		Net.post_message.rpc(text)      # call_local：自己也会立刻收到一条
-		_idle = 0.0
-		_panel.modulate.a = 1.0
+		_send_now(text)
+
+
+## 发送前在本地先过一遍：禁言、刷屏、违规词。
+## 本地拦一道是为了不让「自己看到发出去了、其实别人收不到」——
+## 服务端还会再查一次，因为客户端永远不可信（可以直接 rpc 上来）。
+func _send_now(text: String) -> void:
+	# 命令（/mute 之类）跳过这些检查，权限由服务端判
+	if not text.begins_with("/"):
+		if Net.local_muted:
+			_append_system("你已被禁言，暂时不能发言")
+			return
+		var now := Time.get_ticks_msec()
+		if _last_send_ms > 0 and now - _last_send_ms < ChatGuard.MIN_INTERVAL_MS:
+			_append_system("说慢一点，别刷屏")
+			return
+		_last_send_ms = now
+		if ChatGuard.has_blocked(text):
+			_append_system("消息里有不当用语，已用 * 代替")
+		text = ChatGuard.filter(text)
+	Net.post_message.rpc(text)      # call_local：自己也会立刻收到一条
+	_idle = 0.0
+	_panel.modulate.a = 1.0
 
 
 func _on_submitted(text: String) -> void:
@@ -405,6 +428,10 @@ func _set_local_blocked(v: bool) -> void:
 
 # ---------------------------------------------------------------- 收消息
 func _on_message(speaker: String, text: String) -> void:
+	# 系统提示：不弹头顶气泡，也不去玩家名单里找对应的人
+	if speaker == Net.SYS_SPEAKER:
+		_apply_system_cmd(text)
+		return
 	var mine := speaker == str(Net.peers.get(Net.my_id(), {}).get("name", ""))
 	_append(speaker, text, mine, "")
 	for p in get_tree().get_nodes_in_group("players"):
@@ -412,6 +439,24 @@ func _on_message(speaker: String, text: String) -> void:
 		if nm == speaker and p.has_method("show_bubble"):
 			p.show_bubble(text)
 			break
+
+
+## 系统下发的内容：@ 开头的是控制指令（不把原文显示出来），其余当普通提示。
+func _apply_system_cmd(text: String) -> void:
+	match text:
+		"@CLEAR":
+			_history.clear()
+			_rebuild_log()
+			_panel.modulate.a = 1.0
+			_idle = 0.0
+		"@MUTED":
+			Net.local_muted = true
+			_append_system("你已被管理员禁言，暂时不能发言")
+		"@UNMUTED":
+			Net.local_muted = false
+			_append_system("禁言已解除，可以正常发言了")
+		_:
+			_append_system(text)
 
 
 ## 服务端补发的历史消息：只进列表，不弹头顶气泡

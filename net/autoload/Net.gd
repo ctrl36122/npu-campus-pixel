@@ -31,6 +31,11 @@ signal emote_received(id: int, index: int)
 ## 联机信息变了（比如 UPnP 探测出结果），设置面板据此刷新「联机地址」那栏
 signal info_changed
 
+const ChatGuard := preload("res://net/chat_guard.gd")
+## 系统提示用的「发言人」。客户端聊天面板见到它就渲染成灰色的系统行，
+## 不去名单里找对应玩家、也不弹头顶气泡。
+const SYS_SPEAKER := "[系统]"
+
 var last_error: String = ""
 var local_name: String = "Player"
 ## 本地选好的角色外观 id（随注册上报，服务器用它决定每个人的贴图）
@@ -57,6 +62,22 @@ var port_mapper: Node
 ## 拿不到就是空串，原因写在 wan_status 里。
 var public_address: String = ""
 var wan_status: String = ""
+
+# ---------------------------------------------------------------- 聊天内容管理
+## 被禁言的 uid。用 uid 而不是昵称：昵称随时能改，uid 才是本机固定的身份。
+var _muted: Dictionary = {}
+## uid -> 上一条消息的 ticks（刷屏节流）
+var _last_msg_ms: Dictionary = {}
+## uid -> 上一条内容 / 连续重复次数（复读机拦截）
+var _last_text: Dictionary = {}
+var _last_text_n: Dictionary = {}
+## 管理员 uid 白名单，来自环境变量 XGD_ADMIN（逗号分隔）
+var _admin_uids: PackedStringArray = []
+## XGD_ADMIN 没配时，第一个连上来的玩家兜底当管理员（小圈子共玩的默认约定）
+var _fallback_admin_uid: String = ""
+## 本地是否已被禁言。服务端下发 @MUTED 后置位，聊天框据此在发送前就拦住，
+## 而不是「先显示成自己发出去了、其实别人收不到」。
+var local_muted: bool = false
 
 
 ## 网页导出、或显式加了 XGD_OFFLINE=1 时走单机（桌面也能用这个变量预演网页行为）
@@ -105,6 +126,7 @@ func _ready() -> void:
 	multiplayer.connection_failed.connect(func(): leave_game("Connection failed. Check the address and UDP port."))
 	multiplayer.server_disconnected.connect(func(): leave_game("The host disconnected. Start a new session from the lobby."))
 	_load_uid()
+	_load_admin()
 	multiplayer.peer_disconnected.connect(_peer_disconnected)
 	port_mapper = preload("res://net/scripts/net/PortMapper.gd").new()
 	add_child(port_mapper)
@@ -325,6 +347,10 @@ func _register(display_name: String, uid: String, hero: String = "adam") -> void
 	if safe_name.is_empty():
 		safe_name = "Player"
 	peers[sender] = {"name": safe_name, "uid": safe_uid, "hero": hero, "ready": false, "floor": 1}
+	# 没配 XGD_ADMIN 时，第一个进来的人自动成为管理员（小圈子共玩不需要额外配置）。
+	if _admin_uids.is_empty() and _fallback_admin_uid.is_empty():
+		_fallback_admin_uid = safe_uid
+		print("[net] 未配置 XGD_ADMIN，%s 作为第一个玩家自动成为管理员" % safe_name)
 	_publish_roster()
 	_send_history_to(sender)          # 新来的人先看到刚才在聊什么
 	_sync_claims.rpc_id(sender, room_claims)   # 以及现有的房间认领公告
@@ -417,22 +443,42 @@ func post_message(text: String) -> void:
 	var sender: int = multiplayer.get_remote_sender_id()
 	if sender == 0:
 		sender = my_id()
+	if OS.has_environment("XGD_DEBUG"):
+		print("[net] post_message sender=%d registered=%s text=%s" % [
+			sender, str(peers.has(sender)), text])
 	if not peers.has(sender):
 		return
 	note_received([text])
 	var speaker: String = str(peers[sender]["name"])
 	var clean := text.left(160)
+
+	# 以 / 开头的是管理命令：只交给服务端执行，绝不进公共聊天。
+	# 客户端本地那一趟（call_local）直接返回，指令原文不会出现在自己的聊天框里。
+	# 复用现有 RPC、不新增通道 —— 旧客户端连新服务端不会 checksum failed。
+	if clean.begins_with("/"):
+		if is_server():
+			_handle_command(sender, clean)
+		return
+
+	# 违规词打码。客户端发送前已经过一遍同样的 filter（等长替换，幂等），
+	# 这里再兜一次，防止有人绕开客户端直接 rpc 上来。
+	var safe := ChatGuard.filter(clean)
+	if safe != clean and is_server():
+		_notice_to(sender, "消息里有不当用语，已用 * 代替")
+
 	# 只有服务端落盘（客户端各有一份副本，写多了会互相覆盖）
 	if is_server():
-		_record_chat(speaker, clean)
+		if not _accept_message(sender, safe):
+			return          # 被禁言 / 刷屏 / 复读，已经单独回执过了
+		_record_chat(speaker, safe)
 		# 关键：Godot 的 rpc() 从客户端只发到服务器，服务端**不会**自动转发给别人。
 		# 以前少了这一步，客户端发的消息只有它自己和主机看得到 —— 别人那边聊天框
 		# 一片空白（主机自己说的话却正常，因为主机 rpc() 直接发给所有客户端）。
 		if sender != my_id():
 			for id in multiplayer.get_peers():
 				if int(id) != sender:
-					_relay_message.rpc_id(int(id), speaker, clean)
-	message_received.emit(speaker, clean)
+					_relay_message.rpc_id(int(id), speaker, safe)
+	message_received.emit(speaker, safe)
 
 
 ## 服务端转发别人的聊天。客户端收到后走和本地一样的气泡 + 列表逻辑。
@@ -440,6 +486,150 @@ func post_message(text: String) -> void:
 func _relay_message(speaker: String, text: String) -> void:
 	note_received([text])
 	message_received.emit(speaker, text)
+
+
+# ---------------------------------------------------------------- 聊天内容管理
+## 管理员白名单来自环境变量 XGD_ADMIN（服务器上写进 systemd 的 Environment=）。
+## 没配置就由第一个连上来的玩家兜底 —— 校园里自己开房那套本来就没服务器可配。
+func _load_admin() -> void:
+	_admin_uids = PackedStringArray()
+	for part in OS.get_environment("XGD_ADMIN").split(",", false):
+		var u := part.strip_edges()
+		if not u.is_empty():
+			_admin_uids.append(u)
+	if not _admin_uids.is_empty():
+		print("[net] 管理员 uid：", ", ".join(_admin_uids))
+
+
+func _is_admin(uid: String) -> bool:
+	if uid.is_empty():
+		return false
+	if _admin_uids.has(uid):
+		return true
+	if not _admin_uids.is_empty():
+		return false
+	if not _fallback_admin_uid.is_empty():
+		return uid == _fallback_admin_uid
+	# 还没有任何客户端连上来（单机预览 / 自己开房当主机）：主机本人就是管理员。
+	# 不补这条的话，主机在单机模式下用不了任何管理命令 —— _register 只在
+	# 客户端加入时触发，主机自己从不经过它。
+	return is_server() and uid == local_uid
+
+
+## 服务端：这条消息放不放行。不放行时已经给发送者回了提示。
+func _accept_message(sender: int, text: String) -> bool:
+	var uid := str(peers.get(sender, {}).get("uid", ""))
+	if _muted.has(uid):
+		_notice_to(sender, "@MUTED")        # 客户端收到后置 local_muted 并提示
+		return false
+	var now := Time.get_ticks_msec()
+	if ChatGuard.too_fast(int(_last_msg_ms.get(uid, 0)), now):
+		_notice_to(sender, "说慢一点，别刷屏")
+		return false
+	_last_msg_ms[uid] = now
+	if str(_last_text.get(uid, "")) == text:
+		var n := int(_last_text_n.get(uid, 0)) + 1
+		_last_text_n[uid] = n
+		if n >= ChatGuard.REPEAT_LIMIT:
+			_last_text_n[uid] = 1
+			_notice_to(sender, "同一句话别连着发")
+			return false
+	else:
+		_last_text[uid] = text
+		_last_text_n[uid] = 1
+	return true
+
+
+## 服务端：解析 / 开头的管理命令。/help 所有人可用，其余只有管理员。
+func _handle_command(sender: int, raw: String) -> void:
+	var parts := raw.strip_edges().split(" ", false)
+	if parts.is_empty():
+		return
+	var cmd := str(parts[0]).to_lower()
+	var arg := ""
+	if parts.size() > 1:
+		arg = " ".join(PackedStringArray(parts.slice(1))).strip_edges()
+	var uid := str(peers.get(sender, {}).get("uid", ""))
+
+	print("[net] 收到命令 %s（来自 %s / uid %s）" % [
+		cmd, str(peers.get(sender, {}).get("name", "?")), uid])
+
+	if cmd == "/help":
+		_notice_to(sender, "可用命令：/who 在线名单 · /mute 昵称 · /unmute 昵称 · /clear 清空聊天记录")
+		return
+	if not _is_admin(uid):
+		_notice_to(sender, "这条命令只有管理员能用。")
+		return
+
+	match cmd:
+		"/who":
+			var lines := PackedStringArray()
+			for id in peers:
+				lines.append("%s(uid %s)" % [
+					str(peers[id].get("name", "?")), str(peers[id].get("uid", "?"))])
+			_notice_to(sender, "在线 %d 人：%s" % [peers.size(), " · ".join(lines)])
+		"/mute":
+			var t1 := _find_peer_by_name(arg)
+			if t1 <= 0:
+				_notice_to(sender, "找不到这个昵称：%s" % arg)
+				return
+			_muted[str(peers[t1].get("uid", ""))] = true
+			_mute_state_to(t1)
+			print("[net] 禁言 %s" % str(peers[t1].get("name", "?")))
+			_broadcast_notice("%s 已被禁言" % str(peers[t1].get("name", "?")))
+		"/unmute":
+			var t2 := _find_peer_by_name(arg)
+			if t2 <= 0:
+				_notice_to(sender, "找不到这个昵称：%s" % arg)
+				return
+			_muted.erase(str(peers[t2].get("uid", "")))
+			_mute_state_to(t2)
+			print("[net] 解除禁言 %s" % str(peers[t2].get("name", "?")))
+			_broadcast_notice("%s 的禁言已解除" % str(peers[t2].get("name", "?")))
+		"/clear":
+			if not _chat_loaded:
+				_load_chat_log()
+			_chat_log.clear()
+			_save_chat_log()
+			print("[net] 聊天记录已清空（操作者 %s）" % str(peers.get(sender, {}).get("name", "?")))
+			_broadcast_notice("@CLEAR")     # 客户端收到后清空自己的聊天面板
+			_broadcast_notice("聊天记录已清空")
+		_:
+			_notice_to(sender, "没有这个命令：%s（/help 查看）" % cmd)
+
+
+func _find_peer_by_name(name: String) -> int:
+	var want := name.strip_edges()
+	if want.is_empty():
+		return 0
+	for id in peers:
+		if str(peers[id].get("name", "")) == want:
+			return int(id)
+	return 0
+
+
+func _mute_state_to(peer: int) -> void:
+	var uid := str(peers.get(peer, {}).get("uid", ""))
+	_notice_to(peer, "@MUTED" if _muted.has(uid) else "@UNMUTED")
+
+
+## 给某个人发一条系统提示。走现有的 _relay_message 通道，不新增 RPC。
+func _notice_to(peer: int, msg: String) -> void:
+	if peer <= 0:
+		return
+	if is_server() and peer == my_id():
+		message_received.emit(SYS_SPEAKER, msg)
+	else:
+		_relay_message.rpc_id(peer, SYS_SPEAKER, msg)
+
+
+## 服务端：给所有人发系统提示（本机玩家自己也要收到一份）
+func _broadcast_notice(msg: String) -> void:
+	if not is_server():
+		return
+	message_received.emit(SYS_SPEAKER, msg)
+	for id in multiplayer.get_peers():
+		_relay_message.rpc_id(int(id), SYS_SPEAKER, msg)
 
 
 # ---------------------------------------------------------------- 聊天落盘
