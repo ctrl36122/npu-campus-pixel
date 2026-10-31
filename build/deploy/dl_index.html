@@ -107,6 +107,20 @@ xattr -cr 像素工大.app &amp;&amp; codesign --force --deep --sign - 像素工
     服务器已经是最新的，装最新客户端即可。
   </div>
 
+  <div class="note" style="margin-top:18px;border-top:none;padding-top:0">
+    <span style="color:#ffd08a;font-weight:700">下载后建议核对 SHA-256</span><br>
+    本站只有 http，文件是明文传输的。如果担心下载途中被人替换，可以本地算一次哈希对照。
+    Windows 用 PowerShell：
+    <pre style="font-size:11.5px">Get-FileHash .\XGD-Campus-win64.zip -Algorithm SHA256</pre>
+    macOS / Linux：
+    <pre style="font-size:11.5px">shasum -a 256 XGD-Campus-macos.zip</pre>
+    三个包的正确值（v1.2.3）：
+    <pre style="font-size:11px;white-space:pre-wrap;word-break:break-all">68f8449b46305ef7a41cb48c2d029390eda971d4c266ef79ee47769c1d9192ee  XGD-Campus-win64.zip
+fb5c0ea616618e6e9fdb14b80524ac922ada174d31734fb7552796e4b0fdf93e  XGD-Campus-macos.zip
+135035f13c4b2f3219237fd196fdef883865a306d950e43cd1dddb6335ef130d  XGD-Campus-android.zip</pre>
+    也可以直接下清单：<a href="/dl/SHA256SUMS.txt" style="color:#ffb454">SHA256SUMS.txt</a>
+  </div>
+
 </div>
 </body>
 </html>

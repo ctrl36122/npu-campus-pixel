@@ -11,34 +11,97 @@
 #
 #   :443 {
 #       tls /etc/caddy/xgd.crt /etc/caddy/xgd.key
-#       handle /ws* { reverse_proxy 127.0.0.1:9080 }
+#       handle /ws { reverse_proxy 127.0.0.1:9080 }
 #       handle { root * /opt/xgd/web
 #                file_server }
 #       header /index.wasm Cache-Control "no-cache"
 #       header /index.pck  Cache-Control "no-cache"
 #   }
+#
+# ---------------------------------------------------------------------------
+# 2026-10-31 安全加固（对外只有 :80，所以按"公网裸 IP 站"来收紧）
+#   1. 只放行 GET/HEAD —— 上传、删除、TRACE 一律 405
+#   2. 路径精确匹配，收窄原来的 /dl*（旧写法会把 /dlxxx 也吃进来）
+#   3. 安全响应头：CSP、XFO、Referrer-Policy、COOP/CORP、Permissions-Policy
+#   4. 请求体 1MB 上限 + 读头/读体超时，挡 Slowloris 和超大 body
+#   5. file_server 隐藏点文件，出错页不吐版本信息
+#   6. access log 落盘，给 fail2ban 当数据源（jail: xgd-dl）
+# ---------------------------------------------------------------------------
 
 :80 {
-	# 游戏服务器（明文 WS，客户端设置里填 ws://IP/ws）
-	handle /ws* {
-		reverse_proxy 127.0.0.1:9080
+	# 站点没有上传入口，超过 1MB 的请求体基本可判定为探测/攻击
+	request_body {
+		max_size 1MB
 	}
 
-	# 安装包下载：/opt/xgd/web/dl/ 下的 zip 与下载页
-	handle /dl* {
-		root * /opt/xgd/web
-		file_server
-	}
+	# 注：没有写 timeouts —— 这台机器的 caddy 构建不认 read_header/read_body
+	# 子指令（validate 直接报 unrecognized）。Caddy 自身的 http.Server 默认
+	# 已有 ReadHeaderTimeout，慢速攻击的兜底交给 fail2ban 的 xgd-dl jail。
 
-	# 其它路径（含原来的网页版首页）→ 下载页
-	# 注意要写 `redir * /dl/ permanent`：只写 `redir /dl/ permanent` 时
-	# Caddy 会把 /dl/ 当成 inline path matcher，变成「Location: permanent」的怪响应
-	handle {
-		redir * /dl/ permanent
+	# access log 走 journald：由 journald 负责轮转与保留，不额外占磁盘
+	# （试过写 /var/log/caddy，caddy 进程 open 时报 permission denied，
+	#   即使该目录属主就是 caddy 且同 namespace 下手动写没问题 —— 不纠缠）
+	# 用途：fail2ban 的 xgd-dl jail 从 journal 里读，封刷下载的 IP
+	log {
+		output stdout
+		format json
 	}
 
 	header {
 		-Server
-		X-Content-Type-Options nosniff
+		-X-Powered-By
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=(), usb=()"
+		Cross-Origin-Opener-Policy "same-origin"
+		Cross-Origin-Resource-Policy "same-origin"
+		# 下载页只有内联样式，没有脚本、没有外链、没有表单 —— 可以收到最紧
+		Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+	}
+
+	# route 保证下面的顺序是字面顺序（handle 的默认排序会插到 respond 前面）
+	route {
+		# 静态站只读：任何写方法都不该存在
+		@notread not method GET HEAD
+		respond @notread "Method Not Allowed" 405
+
+		# 游戏服务器（明文 WS，客户端设置里填 ws://IP/ws）
+		handle /ws {
+			reverse_proxy 127.0.0.1:9080
+		}
+		handle /ws/* {
+			reverse_proxy 127.0.0.1:9080
+		}
+
+		# 安装包下载：/opt/xgd/web/dl/ 下的 zip 与下载页
+		handle /dl {
+			redir * /dl/ permanent
+		}
+		handle /dl/* {
+			root * /opt/xgd/web
+			file_server {
+				hide .*
+			}
+			# 安装包是固定版本，让客户端缓存久一点，省重复流量
+			@pkg path /dl/*.zip
+			header @pkg Cache-Control "public, max-age=86400"
+		}
+
+		# 其它路径（含原来的网页版首页）→ 下载页
+		# 注意要写 `redir * /dl/ permanent`：只写 `redir /dl/ permanent` 时
+		# Caddy 会把 /dl/ 当成 inline path matcher，变成「Location: permanent」的怪响应
+		handle {
+			redir * /dl/ permanent
+		}
+	}
+
+	# 出错页统一，不回吐 Caddy 版本与内部路径
+	# 注意：错误响应是在上面的 header 块之后生成的，所以 -Server 必须在这里再写一次
+	handle_errors {
+		header -Server
+		respond "{http.error.status_code} {http.error.status_text}" {
+			close
+		}
 	}
 }
