@@ -153,6 +153,8 @@ func _ready() -> void:
 	Net.seat_changed.connect(_on_seat_changed)
 	# 别人的认领公告一到（或自己认领成功）立刻刷新门牌；名单变化会影响「谁跟你同层」
 	Net.room_claims_changed.connect(_refresh_door_plates)
+	# 好友表一变，门锁跟着变（好友能进我的房、我也能进他的）
+	Net.social_changed.connect(_on_social_changed)
 	Net.roster_changed.connect(_update_floor_visibility)
 	# 先把本地存档里的「我的房间 + 公告」灌进 Net：没连上服务器也能显示，
 	# 连上了就用它把服务端丢掉的那份补回来。
@@ -168,6 +170,9 @@ func _ready() -> void:
 	# 调试：进房间后往南走，验证「走到门口自动离开」
 	if OS.has_environment("XGD_TEST_DOOR"):
 		_auto_walk_out()
+	# 调试：进房间后走到 1 号房门口，验证门会自动滑开、人过得去
+	if OS.has_environment("XGD_TEST_GATE"):
+		_auto_walk_gate()
 
 	_guard_local_spawn()
 	if not (OS.has_environment("XGD_NOHOME")):
@@ -1285,6 +1290,14 @@ const SEAT_RADIUS := 22.0
 ## 座位码 ≥ 这个值表示「躺着」（5..8），和 PlayerAvatar.LIE_BASE 一致
 const LIE_SEAT_CODE := 5
 
+## ── 房间门（私人空间的门禁） ──────────────────────────────────────────
+## 站到门口这么近（像素）门就往开滑；走开到这个距离再合上。两个阈值分开是
+## 为了留一段滞回 —— 只用一个值的话，人站在临界线上门会疯狂开合。
+const DOOR_OPEN_R := 26.0
+const DOOR_CLOSE_R := 40.0
+## 站得离别人多近可以按 E 加好友（3 格）。比这个远就还是原来的门牌/座椅交互。
+const FRIEND_RANGE := 24.0
+
 var room: Node2D
 var in_room := false
 var _return_cell := Vector2.ZERO
@@ -1294,6 +1307,8 @@ var _cam_limit := {}
 ## 可进入的建筑：[{name, rect}]。rect 是格坐标的包围盒外扩前原尺寸。
 var _dorms: Array = []
 var _near_dorm := ""
+## 站在旁边的另一个玩家（加好友用），空字典 = 旁边没人
+var _near_buddy: Dictionary = {}
 var _room_title := ""
 var _door_hint: Button          # 提示兼交互按钮（手机上点它就是按 E）
 var _door_clock := 0.0
@@ -1378,6 +1393,11 @@ func _try_interact() -> bool:
 		return true
 	if in_room and _near_elevator((me as Node2D).position):
 		_open_floor_panel()
+		return true
+	# 身边有人：E 是加好友。必须排在「门口公告」之前 —— 两个人贴着门站着的时候，
+	# 按 E 想加的显然是眼前这个人，不是墙上那块牌子。
+	if not _near_buddy.is_empty():
+		_try_add_friend(_near_buddy)
 		return true
 	# 门口公告板：站在某间宿舍门口按 E —— 空房是认领，自己的房是编写，别人的房是查看。
 	# 手机上没有 F 键（提示条本身就是按钮），所以认领必须也能从 E 走通。
@@ -1478,6 +1498,7 @@ func enter_room(path: String, floor_n: int = 1) -> bool:
 	# 但位置/楼层要同步出去，否则同房间的人互相看不见（房间内只有自己）。
 	me.call("set_room_state", true, current_floor, target)
 	_build_door_plates()
+	_update_room_doors()          # 进门先按认领关系把每扇门锁好/放开
 	_update_floor_label()
 	_update_floor_visibility()
 	room_changed.emit(true)
@@ -1622,6 +1643,47 @@ func _auto_enter_room() -> void:
 			t2.timeout.connect(func(): _try_auto_room())
 			return
 		_try_auto_room()
+	)
+
+
+## 调试：把本地玩家摆到 1 号房门口正下方，按住 ↑ 两秒。
+## 空房应该自动滑开、人直接走进隔间；锁着的房应该停在门洞外。
+## 用 XGD_TEST_GATE=1 触发（配合 XGD_ROOM=1）。
+func _auto_walk_gate() -> void:
+	var t := get_tree().create_timer(6.5)
+	t.timeout.connect(func() -> void:
+		var me: Node = _local_avatar()
+		if me == null or room == null:
+			print("[dbg] 门测试：玩家或房间还没就绪")
+			return
+		var rp: Vector2 = (room as Node2D).position
+		# 锁门场景：把 1 号房伪造成「别人认领的」，人应该被挡在门洞外
+		if OS.has_environment("XGD_TEST_GATE_LOCK"):
+			Net.room_claims["%d:0" % current_floor] = {"name": "隔壁老王", "uid": "xgd-someone-else"}
+			Net.room_claims_changed.emit()
+			print("[dbg] 门测试：1 号房伪造为他人所有")
+		# 好友场景：把 1 号房设成「我某个好友的房间」，门应该照样开
+		if OS.has_environment("XGD_TEST_GATE_FRIEND"):
+			var fl: Array = Net.friend_list()
+			if fl.size() > 0:
+				var f: Dictionary = fl[0]
+				Net.room_claims["%d:0" % current_floor] = {
+					"name": String(f["name"]), "uid": String(f["uid"])}
+				Net.room_claims_changed.emit()
+				print("[dbg] 门测试：1 号房设为好友「", f["name"], "」的房间")
+			else:
+				print("[dbg] 门测试：好友列表是空的，跳过")
+		me.call("teleport_to", rp + Vector2(8.0 * TS, 13.6 * TS))
+		Input.action_press("move_up")
+		var t2 := get_tree().create_timer(2.2)
+		t2.timeout.connect(func() -> void:
+			Input.action_release("move_up")
+			var p: Vector2 = (me as Node2D).position
+			var doors: Array = (room as Node2D).get("doors")
+			print("[dbg] 门测试 局部=", (p - rp) / TS,
+				" 门0_open=", doors[0].call("open_ratio"),
+				" 门0_locked=", doors[0].get("locked"))
+		)
 	)
 
 
@@ -1776,11 +1838,26 @@ func _update_interact_hint(delta: float) -> void:
 
 	var pos: Vector2 = (me as Node2D).position
 
+	# 门的开合每 8Hz 定一次「该开还是该关」，动画由 RoomDoor 逐帧插值
+	_update_room_doors()
+
 	if int(me.get("sit_dir")) != 0:
 		_near_seat = {}
 		_near_dorm = ""
+		_near_buddy = {}
 		_door_hint.visible = true
 		_door_hint.text = "按 E %s" % ("起床" if bool(me.call("is_lying")) else "站起来")
+		return
+
+	# 身边站着人：E 优先做「加好友」。比座椅/门牌都具体 —— 人都贴脸了，
+	# 按 E 还去开门口的公告牌子会很怪。
+	var buddy := _near_player()
+	_near_buddy = buddy
+	if not buddy.is_empty():
+		_near_seat = {}
+		_near_dorm = ""
+		_door_hint.visible = true
+		_door_hint.text = _buddy_hint(buddy)
 		return
 
 	var seat := _nearest_seat(pos)
@@ -1816,14 +1893,17 @@ func _update_interact_hint(delta: float) -> void:
 				_door_hint.visible = false
 			else:
 				var no: int = int(rd["index"]) + 1
-				var cur: Dictionary = Net.room_claims.get("%d:%d" % [current_floor, int(rd["index"])], {})
+				var gate := _room_gate(int(rd["index"]))
 				_door_hint.visible = true
-				if cur.is_empty():
-					_door_hint.text = "%d 号房 · 空房 · 按 E 认领" % no
-				elif String(cur.get("uid", "")) == Net.local_uid:
-					_door_hint.text = "%d 号房（你的）· E 写公告 · F 撕下名牌" % no
-				else:
-					_door_hint.text = "%d 号房 ·「%s」的房间 · E 看门口公告" % [no, String(cur.get("name", "?"))]
+				match String(gate["state"]):
+					"empty":
+						_door_hint.text = "%d 号房 · 空房 · 按 E 认领" % no
+					"mine":
+						_door_hint.text = "%d 号房（你的）· E 写公告 · F 撕下名牌" % no
+					"friend":
+						_door_hint.text = "%d 号房 ·「%s」的房间 · 好友可进" % [no, String(gate["name"])]
+					_:
+						_door_hint.text = "%d 号房 ·「%s」的房间 · 门锁着（E 看公告）" % [no, String(gate["name"])]
 		return
 
 	var cell: Vector2 = pos / TS
@@ -2288,6 +2368,131 @@ func _near_elevator(pos: Vector2) -> bool:
 	return r.grow(ELEV_PAD).has_point((pos - room.position) / TS)
 
 
+# ── 房间门禁：谁能进自己的房间 ──────────────────────────────────────────
+## 返回这扇门的判定结果：
+##   state  empty（空房，谁都能进）/ mine / friend / locked
+##   open   我能不能通过（false = 门锁着，碰撞在）
+##   locked 门要不要挂锁标
+##
+## 认领关系是服务端权威的（Net.room_claims），好友关系也是（Net.is_friend），
+## 这里只做一次组合判断，不改任何状态。
+func _room_gate(idx: int) -> Dictionary:
+	var key := "%d:%d" % [current_floor, idx]
+	var cur: Dictionary = Net.room_claims.get(key, {})
+	if cur.is_empty():
+		return {"state": "empty", "open": true, "locked": false, "name": "", "uid": ""}
+	var owner_uid := String(cur.get("uid", ""))
+	var owner_name := String(cur.get("name", "某人"))
+	if owner_uid.is_empty() or owner_uid == Net.local_uid:
+		return {"state": "mine", "open": true, "locked": false, "name": owner_name, "uid": owner_uid}
+	if Net.is_friend(owner_uid):
+		return {"state": "friend", "open": true, "locked": false, "name": owner_name, "uid": owner_uid}
+	return {"state": "locked", "open": false, "locked": true, "name": owner_name, "uid": owner_uid}
+
+
+## 8Hz 巡检（和提示条同一拍）：按「我在哪 + 这扇门归谁」决定每扇门开还是关。
+## 动画本身在 RoomDoor._process 里逐帧插值，所以离散判定看不出来。
+func _update_room_doors() -> void:
+	if not in_room or room == null or not is_instance_valid(room):
+		return
+	var me: Node = _local_avatar()
+	if me == null:
+		return
+	var my_pos: Vector2 = (me as Node2D).position
+	var doors: Array = room.get("doors")
+	for raw in doors:
+		var dr: Node = raw
+		if dr == null or not is_instance_valid(dr):
+			continue
+		var idx: int = int(dr.get("claim_index"))
+		var cel: Rect2 = dr.get("cell")
+		var wp: Vector2 = (room as Node2D).position + Vector2(
+			cel.get_center().x * TS, cel.get_center().y * TS)
+		var dist: float = my_pos.distance_to(wp)
+		var gate := _room_gate(idx)
+		dr.call("set_locked", bool(gate["locked"]))
+		if bool(gate["open"]) and dist < DOOR_OPEN_R:
+			dr.call("set_open", true)
+		elif dist > DOOR_CLOSE_R:
+			dr.call("set_open", false)
+		# 没权限还贴到门口：锁闪一下，比干站着推门有反馈
+		if bool(gate["locked"]) and dist < DOOR_OPEN_R * 0.75:
+			dr.call("warn")
+
+
+## 站在旁边（FRIEND_RANGE 内）的另一个玩家。房间/楼层要一致，否则会加到
+## 另一个楼层上看得见名字、实际不在身边的人。
+func _near_player() -> Dictionary:
+	var me: Node = _local_avatar()
+	if me == null or players == null or not is_instance_valid(players):
+		return {}
+	var my_pos: Vector2 = (me as Node2D).position
+	var best: Dictionary = {}
+	var best_d := FRIEND_RANGE
+	for c in players.get_children():
+		if c == null or not is_instance_valid(c):
+			continue
+		if bool(c.get("is_local_player")):
+			continue
+		if bool(c.get("room_inside")) != in_room:
+			continue
+		if in_room and int(c.get("room_floor")) != current_floor:
+			continue
+		var d: float = (c as Node2D).position.distance_to(my_pos)
+		if d >= best_d:
+			continue
+		var pid: int = int(c.get("owner_peer_id"))
+		var info: Dictionary = Net.peers.get(pid, {})
+		if info.is_empty():
+			continue
+		best_d = d
+		best = {
+			"id": pid,
+			"name": String(info.get("name", "?")),
+			"uid": String(info.get("uid", "")),
+		}
+	return best
+
+
+## 站在别人旁边时提示条写什么。四种状态各一句，按 E 的动作也各不相同。
+func _buddy_hint(b: Dictionary) -> String:
+	var nm := String(b.get("name", "?"))
+	match Net.friend_state(String(b.get("uid", ""))):
+		"friend":
+			return "你和「%s」是好友 · 他的房间你能进" % nm
+		"out":
+			return "已向「%s」发送好友请求，等回应" % nm
+		"in":
+			return "按 E 接受「%s」的好友请求" % nm
+		_:
+			return "按 E 和「%s」成为好友" % nm
+
+
+## E 键加好友：已经是好友 / 已发过 / 对方求我 / 全新，四种情况各走各的。
+func _try_add_friend(b: Dictionary) -> void:
+	var uid := String(b.get("uid", ""))
+	var nm := String(b.get("name", "?"))
+	if uid.is_empty():
+		return
+	match Net.friend_state(uid):
+		"friend":
+			_notice("你和「%s」已经是好友了" % nm)
+		"out":
+			_notice("已经发过请求了，等「%s」回应" % nm)
+		"in":
+			Net.friend_accept(uid)
+			_notice("已接受「%s」的好友请求" % nm)
+		_:
+			Net.friend_request(uid)
+			_notice("已向「%s」发送好友请求，等对方按 E 接受" % nm)
+
+
+## 好友表变了（自己加/删、别人通过）：门锁和门牌都得跟着变。
+func _on_social_changed() -> void:
+	_refresh_door_plates()
+	_update_room_doors()
+
+
 ## 离玩家最近的那扇宿舍门（CLAIM_RADIUS 内），没有就返回空字典
 func _nearest_room_door(pos: Vector2) -> Dictionary:
 	var best: Dictionary = {}
@@ -2603,17 +2808,37 @@ func _refresh_door_plates() -> void:
 		if not is_instance_valid(pc) or not is_instance_valid(lb):
 			continue
 		var idx: int = int(item["index"])
-		var cur: Dictionary = Net.room_claims.get("%d:%d" % [current_floor, idx], {})
-		if cur.is_empty():
-			lb.text = "%d号 · 空房" % (idx + 1)
-			lb.add_theme_color_override("font_color", Color(0.74, 0.80, 0.88, 0.80))
-			pc.modulate = Color(0.72, 0.74, 0.78, 0.85)
-			(pc.get_theme_stylebox("panel") as StyleBoxFlat).border_color = Color(0.55, 0.62, 0.72, 0.85)
-		else:
-			lb.text = "「%s」的房间" % String(cur.get("name", "某人"))
-			lb.add_theme_color_override("font_color", Color("#ffe9a8"))
-			pc.modulate = Color(1, 1, 1, 1)
-			(pc.get_theme_stylebox("panel") as StyleBoxFlat).border_color = Color(0.95, 0.78, 0.38, 0.95)
+		var gate := _room_gate(idx)
+		var sb := pc.get_theme_stylebox("panel") as StyleBoxFlat
+		match String(gate["state"]):
+			"empty":
+				lb.text = "%d号 · 空房" % (idx + 1)
+				lb.add_theme_color_override("font_color", Color(0.74, 0.80, 0.88, 0.80))
+				pc.modulate = Color(0.72, 0.74, 0.78, 0.85)
+				if sb != null:
+					sb.border_color = Color(0.55, 0.62, 0.72, 0.85)
+			"mine":
+				lb.text = "%d号 ·「%s」的房间 · 我的" % [idx + 1, String(gate["name"])]
+				lb.add_theme_color_override("font_color", Color("#ffe9a8"))
+				pc.modulate = Color(1, 1, 1, 1)
+				if sb != null:
+					sb.border_color = Color(0.95, 0.78, 0.38, 0.95)
+			"friend":
+				# 好友的房：青绿色，一眼和「锁着的陌生人」分开
+				lb.text = "%d号 ·「%s」的房间 · 好友" % [idx + 1, String(gate["name"])]
+				lb.add_theme_color_override("font_color", Color("#9ff0d0"))
+				pc.modulate = Color(1, 1, 1, 1)
+				if sb != null:
+					sb.border_color = Color(0.42, 0.90, 0.72, 0.95)
+			_:
+				# 别人的房：压暗 + 挂个锁字，别再让人以为能随便推门
+				lb.text = "%d号 ·「%s」的房间 · 锁" % [idx + 1, String(gate["name"])]
+				lb.add_theme_color_override("font_color", Color(0.78, 0.72, 0.66, 0.90))
+				pc.modulate = Color(0.82, 0.78, 0.76, 0.92)
+				if sb != null:
+					sb.border_color = Color(0.62, 0.52, 0.42, 0.90)
+	# 门锁状态跟着认领一起变（刚认领的房要立刻能进）
+	_update_room_doors()
 
 
 ## 每帧把牌子摆到门口：用 canvas_transform 把房门口的世界坐标换成屏幕坐标，

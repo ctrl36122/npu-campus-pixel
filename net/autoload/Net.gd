@@ -354,6 +354,11 @@ func _register(display_name: String, uid: String, hero: String = "adam") -> void
 	_publish_roster()
 	_send_history_to(sender)          # 新来的人先看到刚才在聊什么
 	_sync_claims.rpc_id(sender, room_claims)   # 以及现有的房间认领公告
+	# 好友切片（谁是他的好友 / 谁在等他接受）—— 房间门禁要靠它判断能不能开门
+	if not _social_loaded:
+		_load_social()
+	_ensure_social(safe_uid, safe_name)
+	_push_social_to(sender)
 
 
 func _publish_roster() -> void:
@@ -555,7 +560,12 @@ func _handle_command(sender: int, raw: String) -> void:
 		cmd, str(peers.get(sender, {}).get("name", "?")), uid])
 
 	if cmd == "/help":
-		_notice_to(sender, "可用命令：/who 在线名单 · /mute 昵称 · /unmute 昵称 · /clear 清空聊天记录")
+		_notice_to(sender, "好友：/friends 列表 · /friend 昵称 加好友 · /accept 昵称 · /deny 昵称 · /unfriend 昵称")
+		_notice_to(sender, "管理员：/who 在线名单 · /mute 昵称 · /unmute 昵称 · /clear 清空聊天记录")
+		return
+	# 好友命令人人可用，必须在管理员检查之前分流
+	if FRIEND_CMDS.has(cmd):
+		_handle_friend_command(sender, cmd, arg)
 		return
 	if not _is_admin(uid):
 		_notice_to(sender, "这条命令只有管理员能用。")
@@ -630,6 +640,356 @@ func _broadcast_notice(msg: String) -> void:
 	message_received.emit(SYS_SPEAKER, msg)
 	for id in multiplayer.get_peers():
 		_relay_message.rpc_id(int(id), SYS_SPEAKER, msg)
+
+
+# ---------------------------------------------------------------- 好友系统
+## 好友关系是**服务端权威**的社交图，按 uid 存（uid 是本机首次启动随机生成、
+## 落在 user://xgd_uid.cfg 的那个 ID）。不能塞进 peers —— peers 是「这次联机
+## 里在线的人」，人一下线就没了，而好友要跨会话记住，所以单独一张表 + 落盘。
+##
+## 四种状态：
+##   "friend"  双向已成立
+##   "out"     我发出的请求，等对方接受
+##   "in"      对方发出的请求，等我接受
+##   "blocked" 我拉黑了他
+##
+## 客户端只拿「以自己为中心」的切片（my_friends），全量 _social 只存在服务端。
+signal social_changed
+## other_uid -> {"name": String, "state": String}，只含与我相关的条目
+var my_friends: Dictionary = {}
+## 服务端专用的全量图：uid -> {"name": String, "friends": {other_uid: state}}
+var _social: Dictionary = {}
+var _social_loaded := false
+const SOCIAL_PATH := "user://social.json"
+const FRIEND_CMDS := ["/friend", "/accept", "/deny", "/unfriend", "/friends"]
+
+
+## 好友状态查询。门禁判定（宿舍门）就靠它。
+func friend_state(uid: String) -> String:
+	if uid.is_empty():
+		return ""
+	return String((my_friends.get(uid, {}) as Dictionary).get("state", ""))
+
+
+func is_friend(uid: String) -> bool:
+	return friend_state(uid) == "friend"
+
+
+## 待我接受的请求：[{"uid": String, "name": String}]，好友面板渲染用。
+func friend_requests() -> Array:
+	var out: Array = []
+	for u in my_friends:
+		if String((my_friends[u] as Dictionary).get("state", "")) == "in":
+			out.append({
+				"uid": String(u),
+				"name": String((my_friends[u] as Dictionary).get("name", "?")),
+			})
+	out.sort_custom(func(a, b): return String(a["name"]) < String(b["name"]))
+	return out
+
+
+## 已是好友的列表（含离线）：[{"uid", "name"}]。
+func friend_list() -> Array:
+	var out: Array = []
+	for u in my_friends:
+		if String((my_friends[u] as Dictionary).get("state", "")) == "friend":
+			out.append({
+				"uid": String(u),
+				"name": String((my_friends[u] as Dictionary).get("name", "?")),
+			})
+	out.sort_custom(func(a, b): return String(a["name"]) < String(b["name"]))
+	return out
+
+
+## 好友的 uid 集合 —— 门禁判定每帧都要问，别每次都建数组。
+func friend_uids() -> Dictionary:
+	var out: Dictionary = {}
+	for u in my_friends:
+		if String((my_friends[u] as Dictionary).get("state", "")) == "friend":
+			out[String(u)] = true
+	return out
+
+
+# --- 客户端入口：一律走现有的 post_message 命令通道 --------------------------
+## 为什么要绕命令通道而不是新 RPC：RPC 方法一改，旧客户端连新服务端就可能
+## checksum failed，所有人必须同时升级。命令走 post_message、回执走
+## _relay_message，都是老通道，旧客户端最多看不懂那几行提示。
+func friend_request(target_uid: String) -> void:
+	_friend_cmd("/friend", target_uid)
+
+
+func friend_accept(target_uid: String) -> void:
+	_friend_cmd("/accept", target_uid)
+
+
+func friend_deny(target_uid: String) -> void:
+	_friend_cmd("/deny", target_uid)
+
+
+func friend_remove(target_uid: String) -> void:
+	_friend_cmd("/unfriend", target_uid)
+
+
+func friend_refresh() -> void:
+	_friend_cmd("/friends", "")
+
+
+func _friend_cmd(cmd: String, arg: String) -> void:
+	if not has_session():
+		message_received.emit(SYS_SPEAKER, "好友功能要联机才能用（单机模式没有别人）。")
+		return
+	var line := cmd if arg.is_empty() else "%s %s" % [cmd, arg]
+	post_message.rpc(line)
+
+
+# --- 服务端：解析命令 -------------------------------------------------------
+func _handle_friend_command(sender: int, cmd: String, arg: String) -> void:
+	var actor_uid := str(peers.get(sender, {}).get("uid", ""))
+	var actor_name := str(peers.get(sender, {}).get("name", "?"))
+	if actor_uid.is_empty():
+		return
+	if not _social_loaded:
+		_load_social()
+	_ensure_social(actor_uid, actor_name)      # 顺手把昵称刷新到表里
+
+	if cmd == "/friends":
+		_notice_to(sender, _friend_summary(actor_uid))
+		return
+
+	var target := _resolve_uid(arg)
+	if target.is_empty():
+		_notice_to(sender, "找不到这个人：%s（可以输昵称，也可以输 uid）" % arg)
+		return
+	if target == actor_uid:
+		_notice_to(sender, "不能对自己做这个操作。")
+		return
+	_ensure_social(target, "")
+
+	match cmd:
+		"/friend":
+			_notice_to(sender, _friend_request(actor_uid, actor_name, target, sender))
+		"/accept":
+			_notice_to(sender, _friend_accept(actor_uid, target))
+		"/deny":
+			_notice_to(sender, _friend_drop(actor_uid, target, "已拒绝 %s 的好友请求。" % _social_name(target)))
+		"/unfriend":
+			_notice_to(sender, _friend_drop(actor_uid, target, "已和 %s 解除好友关系。" % _social_name(target)))
+
+
+## 返回提示文本；顺手把该推的都推出去。
+func _friend_request(actor_uid: String, actor_name: String, target: String, sender: int) -> String:
+	var a: Dictionary = _social[actor_uid]["friends"]
+	var b: Dictionary = _social[target]["friends"]
+	var st_a := String(a.get(target, ""))
+	var st_b := String(b.get(actor_uid, ""))
+	if st_a == "friend":
+		return "你们已经是好友了。"
+	# 对方也正等着我接受 → 直接成了，省一次来回（两个人都点了「加好友」的场景）
+	if st_b == "in":
+		a[target] = "friend"
+		b[actor_uid] = "friend"
+		_save_social()
+		_push_social_both(actor_uid, target)
+		_notice_to(sender, "你和 %s 成为好友了。" % _social_name(target))
+		_notify_uid(target, "%s 通过了你的好友请求，现在是好友了。" % actor_name)
+		return ""
+	if st_a == "out":
+		return "你已经发过请求了，等 %s 回应。" % _social_name(target)
+	a[target] = "out"
+	b[actor_uid] = "in"
+	_save_social()
+	_push_social_both(actor_uid, target)
+	_notify_uid(target, "@FRIENDREQ|%s|%s" % [actor_uid, actor_name])
+	print("[net] 好友请求 %s -> %s" % [actor_name, _social_name(target)])
+	return "好友请求已发给 %s，等对方接受。" % _social_name(target)
+
+
+func _friend_accept(actor_uid: String, target: String) -> String:
+	var a: Dictionary = _social[actor_uid]["friends"]
+	var b: Dictionary = _social[target]["friends"]
+	if String(a.get(target, "")) != "in":
+		return "%s 没给你发过好友请求。" % _social_name(target)
+	a[target] = "friend"
+	b[actor_uid] = "friend"
+	_save_social()
+	_push_social_both(actor_uid, target)
+	_notify_uid(target, "%s 通过了你的好友请求，现在是好友了。" % _social_name(actor_uid))
+	return "已和 %s 成为好友。" % _social_name(target)
+
+
+## 拒绝请求 / 删除好友：两边条目一起清掉（单向残留会让对方一直挂着「已发送」）。
+func _friend_drop(actor_uid: String, target: String, ok_msg: String) -> String:
+	var a: Dictionary = _social[actor_uid]["friends"]
+	var b: Dictionary = _social[target]["friends"]
+	if not a.has(target) and not b.has(actor_uid):
+		return "你们本来就不是好友。"
+	a.erase(target)
+	b.erase(actor_uid)
+	_save_social()
+	_push_social_both(actor_uid, target)
+	return ok_msg
+
+
+# --- 服务端：社交图维护 -----------------------------------------------------
+func _ensure_social(uid: String, nm: String) -> Dictionary:
+	if uid.is_empty():
+		return {}
+	# 主机（listen server）自己不在 peers 里 —— 它从不经过 _register，
+	# 名字只能从 local_name 补。不补的话，别人看到的房主名是空串。
+	var use := nm
+	if use.is_empty() and uid == local_uid:
+		use = local_name
+	if not _social.has(uid):
+		_social[uid] = {"name": use, "friends": {}}
+	elif not use.is_empty() and String(_social[uid].get("name", "")) != use:
+		_social[uid]["name"] = use    # 改过昵称的人，下次连上来就同步过去
+	return _social[uid]
+
+
+func _social_name(uid: String) -> String:
+	var nm := String((_social.get(uid, {}) as Dictionary).get("name", ""))
+	if not nm.is_empty():
+		return nm
+	if uid == local_uid and is_server():
+		return local_name              # 同上：主机自己在 _social 里可能还没名字
+	# 表里没名字就看看在不在线
+	for id in peers:
+		if str(peers[id].get("uid", "")) == uid:
+			return str(peers[id].get("name", "?"))
+	return uid
+
+
+## 昵称或 uid → uid。先精确 uid，再在线昵称，最后离线好友的昵称。
+func _resolve_uid(arg: String) -> String:
+	var a := arg.strip_edges()
+	if a.is_empty():
+		return ""
+	if _social.has(a):
+		return a
+	for id in peers:
+		if str(peers[id].get("name", "")) == a:
+			return str(peers[id].get("uid", ""))
+	for u in _social:
+		if String((_social[u] as Dictionary).get("name", "")) == a:
+			return String(u)
+	return ""
+
+
+func _friend_summary(uid: String) -> String:
+	var fs: Dictionary = _social.get(uid, {}).get("friends", {})
+	if fs.is_empty():
+		return "还没有好友。走到同学旁边按 E，或在聊天框输入 /friend 昵称。"
+	var ok := PackedStringArray()
+	var wait_in := PackedStringArray()
+	var wait_out := PackedStringArray()
+	for o in fs:
+		var st := String(fs[o])
+		var nm := _social_name(String(o))
+		var online := _uid_online(String(o))
+		match st:
+			"friend":
+				ok.append("%s%s" % [nm, "" if online else "（离线）"])
+			"in":
+				wait_in.append(nm)
+			"out":
+				wait_out.append(nm)
+	var parts := PackedStringArray()
+	parts.append("好友 %d 人：%s" % [ok.size(), "、".join(ok) if ok.size() > 0 else "无"])
+	if wait_in.size() > 0:
+		parts.append("待你接受：%s（/accept 昵称）" % "、".join(wait_in))
+	if wait_out.size() > 0:
+		parts.append("等待对方接受：%s" % "、".join(wait_out))
+	return " · ".join(parts)
+
+
+func _uid_online(uid: String) -> bool:
+	for id in peers:
+		if str(peers[id].get("uid", "")) == uid:
+			return true
+	return false
+
+
+## 给某个 uid 发系统提示（在线才发得出，离线就当没发生 —— 好友请求本身已经
+## 存在表里，他下次上线拉 /friends 就能看到）。
+func _notify_uid(uid: String, msg: String) -> void:
+	for id in peers:
+		if str(peers[id].get("uid", "")) == uid:
+			_notice_to(int(id), msg)
+			return
+
+
+func _push_social_both(a: String, b: String) -> void:
+	_push_social_to_uid(a)
+	_push_social_to_uid(b)
+
+
+func _push_social_to_uid(uid: String) -> void:
+	for id in peers:
+		if str(peers[id].get("uid", "")) == uid:
+			_push_social_to(int(id))
+			return
+
+
+func _push_social_to(peer: int) -> void:
+	if not is_server() or peer <= 0:
+		return
+	var uid := str(peers.get(peer, {}).get("uid", ""))
+	if uid.is_empty():
+		return
+	if peer == my_id():
+		_apply_social(_social_slice(uid))
+	else:
+		_sync_social.rpc_id(peer, _social_slice(uid))
+
+
+## 某人的朋友圈切片：[other_uid: {"name", "state"}]
+func _social_slice(uid: String) -> Dictionary:
+	var out: Dictionary = {}
+	var fs: Dictionary = _social.get(uid, {}).get("friends", {})
+	for o in fs:
+		out[String(o)] = {
+			"name": _social_name(String(o)),
+			"state": String(fs[o]),
+		}
+	return out
+
+
+@rpc("authority", "call_remote", "reliable", 1)
+func _sync_social(snapshot: Dictionary) -> void:
+	_apply_social(snapshot)
+
+
+func _apply_social(snapshot: Dictionary) -> void:
+	my_friends = snapshot.duplicate(true)
+	social_changed.emit()
+
+
+# --- 好友落盘（服务端） -----------------------------------------------------
+func _load_social() -> void:
+	_social_loaded = true
+	if not is_server():
+		return                        # 客户端不落这张表，等 _sync_social 下发
+	if not FileAccess.file_exists(SOCIAL_PATH):
+		return
+	var f := FileAccess.open(SOCIAL_PATH, FileAccess.READ)
+	if f == null:
+		return
+	var parsed = JSON.parse_string(f.get_as_text())
+	f.close()
+	if parsed is Dictionary:
+		_social = parsed
+		print("[net] 好友表已载入：%d 个 uid" % _social.size())
+
+
+func _save_social() -> void:
+	if not is_server():
+		return
+	var f := FileAccess.open(SOCIAL_PATH, FileAccess.WRITE)
+	if f == null:
+		push_warning("[net] 好友表写不进去：%s" % SOCIAL_PATH)
+		return
+	f.store_string(JSON.stringify(_social))
+	f.close()
 
 
 # ---------------------------------------------------------------- 聊天落盘

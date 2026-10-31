@@ -19,6 +19,7 @@ const WorldMapScript := preload("res://scripts/ui/world_map.gd")
 const ChatScript := preload("res://scripts/ui/chat.gd")
 const TouchPadScript := preload("res://scripts/ui/touch_pad.gd")
 const ConsentScript := preload("res://scripts/ui/consent.gd")
+const FriendPanelScript := preload("res://scripts/ui/friend_panel.gd")
 
 ## 小地图尺寸（保持 424:800 的校园比例）。200 宽在 1080p 下足够看清街区。
 const MINI_W: float = 200.0
@@ -64,6 +65,8 @@ var _chat: Node
 var _clock: Label
 ## 首次启动的说明页（免责声明 / 隐私 / 聊天规则），点过之后就没了
 var _consent: Node
+## 好友面板（按 P 开合），常驻但不是模态：不开的时候不挡任何东西
+var _friend_panel: Node
 
 
 ## 触屏设备（Android/iOS 包，或 XGD_TOUCH=1 在桌面模拟）
@@ -103,6 +106,7 @@ func _ready() -> void:
 	_build_ui()
 	_build_chat()
 	_add_consent()
+	_add_friend_panel()
 	# 手机：左下摇杆 + 右下按钮（自己要处理多点触摸，所以是独立 Control）
 	if is_touch_ui():
 		# 必须放独立 CanvasLayer：直接挂在 online_boot 下会落到 layer 0（世界层），
@@ -148,6 +152,12 @@ func _ready() -> void:
 	if OS.has_environment("XGD_SETTINGS"):
 		var st := get_tree().create_timer(3.0)
 		st.timeout.connect(func(): _toggle_settings(true))
+	# 调试用：XGD_FRIEND_PANEL=1 时自动打开好友面板（配合 XGD_VERIFY 截图核对布局）
+	if OS.has_environment("XGD_FRIEND_PANEL"):
+		var ft := get_tree().create_timer(3.0)
+		ft.timeout.connect(func() -> void:
+			if _friend_panel != null and is_instance_valid(_friend_panel):
+				_friend_panel.call("open"))
 
 
 func _verify_shot() -> void:
@@ -177,8 +187,30 @@ func _add_consent() -> void:
 		return
 	_consent = ConsentScript.new()
 	add_child(_consent)
-	_set_local_blocked(true)                      # 弹窗期间别让人物跟着 WASD 乱跑
-	_consent.connect("accepted", func() -> void: _set_local_blocked(false))
+	_refresh_block()                              # 弹窗期间别让人物跟着 WASD 乱跑
+	_consent.connect("accepted", func() -> void: _refresh_block())
+
+
+## 好友面板随时可以按 P 打开，所以无条件挂上（不像说明页还要先问要不要弹）。
+func _add_friend_panel() -> void:
+	if Net.is_dedicated:
+		return                                    # 专用服务器没有界面
+	_friend_panel = FriendPanelScript.new()
+	_friend_panel.name = "FriendPanel"
+	add_child(_friend_panel)
+	_friend_panel.connect("opened", func() -> void: _refresh_block())
+	_friend_panel.connect("closed", func() -> void: _refresh_block())
+
+
+## 说明页和好友面板都可能是"该挡住移动"的那一个。谁都没开才放开 ——
+## 分别直接写 true/false 的话，关掉面板会把还开着的说明页一起解除。
+func _refresh_block() -> void:
+	var blocked := false
+	if _consent != null and is_instance_valid(_consent) and bool(_consent.call("should_show")):
+		blocked = true
+	if _friend_panel != null and is_instance_valid(_friend_panel) and bool(_friend_panel.call("is_open")):
+		blocked = true
+	_set_local_blocked(blocked)
 
 
 # ---------------------------------------------------------------- 启动流程
@@ -364,9 +396,8 @@ func _on_session_ready() -> void:
 	_refresh_roster()
 	_wait_world()
 	# 玩家节点是进世界之后才生成的，_add_consent 那次 block 时它还不存在 ——
-	# 说明页没关就再挡一次，否则弹窗期间人物会跟着键盘跑。
-	if _consent != null and is_instance_valid(_consent) and bool(_consent.call("should_show")):
-		_set_local_blocked(true)
+	# 说明页 / 好友面板只要还开着就再挡一次，否则弹窗期间人物会跟着键盘跑。
+	_refresh_block()
 
 
 ## 世界（Arena）是 SessionFlow 在同一个信号里创建的，谁先谁后不确定，

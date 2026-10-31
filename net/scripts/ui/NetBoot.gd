@@ -34,6 +34,12 @@ func _ready() -> void:
 	Net.roster_changed.connect(_refresh)
 	_parse_args()
 	_refresh()
+	# 调试：XGD_SEND_MSG=<文本> 时，连上世界后自动发一条聊天。
+	# 主界面那份钩子在 online_boot 里，局域网大厅走的是这个场景 ——
+	# 没有它就没法 headless 验证好友命令/联机链路。
+	if OS.has_environment("XGD_SEND_MSG"):
+		var mt := get_tree().create_timer(14.0)
+		mt.timeout.connect(func(): Net.post_message.rpc(OS.get_environment("XGD_SEND_MSG")))
 
 
 # ---------------------------------------------------------------- 命令行

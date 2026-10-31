@@ -456,7 +456,18 @@ func _apply_system_cmd(text: String) -> void:
 			Net.local_muted = false
 			_append_system("禁言已解除，可以正常发言了")
 		_:
-			_append_system(text)
+			# 好友请求是控制消息（@FRIENDREQ|uid|昵称），原文不能直接显示，
+			# 换成一句人话；真正接受靠 P 面板或走到对方旁边按 E。
+			if text.begins_with("@FRIENDREQ|"):
+				var parts := text.split("|")
+				var who := String(parts[2]) if parts.size() > 2 else "有人"
+				_append_system("「%s」想加你为好友 · 按 P 打开好友面板" % who)
+				_panel.modulate.a = 1.0          # 让聊天面板亮起来，别错过这条
+				_idle = 0.0
+			elif text.begins_with("@"):
+				pass                             # 认不出来的控制指令：不显示
+			else:
+				_append_system(text)
 
 
 ## 服务端补发的历史消息：只进列表，不弹头顶气泡

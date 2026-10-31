@@ -10,6 +10,7 @@ extends Node2D
 
 const RoomProp := preload("res://net/scripts/room_prop.gd")
 const RoomGlow := preload("res://net/scripts/room_glow.gd")
+const RoomDoor := preload("res://net/scripts/room_door.gd")
 
 const TS := 8.0
 const ROOM_SCALE := 2.0
@@ -28,6 +29,9 @@ var spawn_px := Vector2.ZERO
 var size_px := Vector2.ZERO
 ## 小地图底图（4px/格），右上角那块面板直接用它
 var minimap_tex: Texture2D
+## 房间里所有可开合的门（RoomDoor），下标就是 room_doors 里的 index。
+## 权限（谁能开）由 Arena 按认领关系设置，Room 自己不管。
+var doors: Array = []
 
 
 ## 读一份房间数据并搭好场景。失败返回 false，调用方决定怎么兜底。
@@ -153,9 +157,17 @@ func _build() -> void:
 
 	for item in data.get("props", []):
 		var p: Dictionary = item
-		_add_prop(String(p.get("k", "table")), p)
+		var kind := String(p.get("k", "table"))
+		# 与 room_doors 重合的那 14 樘门不在这里画：它们是会开合的 RoomDoor，
+		# 由 _build_doors() 生成（静态的 room_prop 门永远推不开，也锁不住）。
+		# 西端那扇出口玻璃门不在 room_doors 里，照旧当普通 prop 画。
+		if kind == "door" and _is_room_door_prop(p):
+			continue
+		_add_prop(kind, p)
 		if bool(p.get("solid", false)):
 			_add_solid(p)
+
+	_build_doors()
 
 	# 椅子由 _build_seats() 统一生成（要按朝向摆椅背），这里不重复建
 	minimap_tex = _bake_minimap()
@@ -181,6 +193,32 @@ func _chair_back_rect(sr: Rect2, face: String) -> Dictionary:
 			return {"x": sr.position.x, "y": sr.position.y, "w": 0.55, "h": sr.size.y}
 		_:
 			return {"x": cx - bw * 0.5, "y": sr.end.y - bh, "w": bw, "h": bh}
+
+
+## props 里的 door 项是否就是 room_doors 里的某一樘（坐标完全重合）。
+## 数据是同一份生成器烘出来的，两者矩形一模一样，所以按坐标比就够。
+func _is_room_door_prop(p: Dictionary) -> bool:
+	for item in data.get("room_doors", []):
+		var d: Dictionary = item
+		if (absf(float(d.get("x", -999)) - float(p.get("x", 0))) < 0.01
+				and absf(float(d.get("y", -999)) - float(p.get("y", 0))) < 0.01
+				and absf(float(d.get("w", -999)) - float(p.get("w", 0))) < 0.01
+				and absf(float(d.get("h", -999)) - float(p.get("h", 0))) < 0.01):
+			return true
+	return false
+
+
+## 每间房一樘可开合的门。index 就是 room_doors 里的序号（也是门牌号 - 1）。
+func _build_doors() -> void:
+	for item in data.get("room_doors", []):
+		var d: Dictionary = item
+		var dr := RoomDoor.new()
+		objects.add_child(dr)
+		dr.call("setup",
+			int(d.get("index", 0)),
+			Rect2(float(d["x"]), float(d["y"]), float(d["w"]), float(d["h"])),
+			String(d.get("side", "n")))
+		doors.append(dr)
 
 
 func _add_prop(kind: String, r: Dictionary, z: int = 0) -> void:
