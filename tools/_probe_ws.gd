@@ -5,7 +5,10 @@ extends SceneTree
 func _init() -> void:
 	var url := OS.get_environment("XGD_PROBE_URL")
 	if url.is_empty():
-		url = "ws://<你的服务器IP>/ws"
+		# 服务器地址是本机私有部署信息，不写进仓库
+		print("PROBE NO_URL 请先设 XGD_PROBE_URL=ws://<你的服务器>/ws")
+		quit(4)
+		return
 	print("PROBE URL ", url)
 	var ws := WebSocketPeer.new()
 	var err := ws.connect_to_url(url)
