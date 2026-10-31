@@ -26,14 +26,17 @@
   .row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
   .name { font-size: 17px; font-weight: 700; min-width: 96px; }
   .meta { color: #8c97a8; font-size: 13px; flex: 1; min-width: 180px; }
+  .btns { display: flex; gap: 8px; flex-wrap: wrap; }
   a.btn {
     display: inline-block; padding: 8px 18px; text-decoration: none;
     color: #14181f; background: #ffb454; font-weight: 700; font-size: 14px;
     border: 2px solid #b57b2e; box-shadow: 3px 3px 0 #0a0d12;
+    white-space: nowrap;
   }
   a.btn:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 #0a0d12; }
   a.btn.ghost {
     background: transparent; color: #ffb454; border-color: #5a4326;
+    box-shadow: none; font-weight: 400; font-size: 13px; padding: 8px 14px;
   }
   pre {
     background: #0e1218; border-left: 3px solid #ffb454; margin: 10px 0 4px;
@@ -47,6 +50,10 @@
     color: #77808f; font-size: 12.5px;
   }
   code { color: #ffd08a; font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .src {
+    margin-top: 26px; padding-top: 16px; border-top: 1px solid #2b3444;
+    color: #77808f; font-size: 12.5px;
+  }
 </style>
 </head>
 <body>
@@ -59,7 +66,10 @@
     <div class="row">
       <span class="name">Windows</span>
       <span class="meta">XGD-Campus-win64.zip · 42.1 MB<br>解压后双击「像素工大.exe」，免安装</span>
-      <a class="btn" href="XGD-Campus-win64.zip">下载</a>
+      <div class="btns">
+        <a class="btn" href="https://ghfast.top/https://github.com/ctrl36122/npu-campus-pixel/releases/download/v1.2.3/XGD-Campus-win64.zip">下载</a>
+        <a class="btn ghost" href="https://github.com/ctrl36122/npu-campus-pixel/releases/download/v1.2.3/XGD-Campus-win64.zip">直连</a>
+      </div>
     </div>
   </div>
 
@@ -67,7 +77,10 @@
     <div class="row">
       <span class="name">macOS</span>
       <span class="meta">XGD-Campus-macos.zip · 64.4 MB<br>通用版（Apple 芯片 + Intel），macOS 11+</span>
-      <a class="btn" href="XGD-Campus-macos.zip">下载</a>
+      <div class="btns">
+        <a class="btn" href="https://ghfast.top/https://github.com/ctrl36122/npu-campus-pixel/releases/download/v1.2.3/XGD-Campus-macos.zip">下载</a>
+        <a class="btn ghost" href="https://github.com/ctrl36122/npu-campus-pixel/releases/download/v1.2.3/XGD-Campus-macos.zip">直连</a>
+      </div>
     </div>
     <div class="tip" style="margin-top:12px">
       这个包<b>没有 Apple 开发者签名</b>，Apple 芯片上未签名的程序会被系统直接拦掉。
@@ -82,7 +95,10 @@ xattr -cr 像素工大.app &amp;&amp; codesign --force --deep --sign - 像素工
     <div class="row">
       <span class="name">Android</span>
       <span class="meta">XGD-Campus-android.zip · 32.1 MB<br>解压安装 .apk，需要允许「安装未知来源应用」</span>
-      <a class="btn" href="XGD-Campus-android.zip">下载</a>
+      <div class="btns">
+        <a class="btn" href="https://ghfast.top/https://github.com/ctrl36122/npu-campus-pixel/releases/download/v1.2.3/XGD-Campus-android.zip">下载</a>
+        <a class="btn ghost" href="https://github.com/ctrl36122/npu-campus-pixel/releases/download/v1.2.3/XGD-Campus-android.zip">直连</a>
+      </div>
     </div>
   </div>
 
@@ -91,6 +107,11 @@ xattr -cr 像素工大.app &amp;&amp; codesign --force --deep --sign - 像素工
       <span class="name">网页版</span>
       <span class="meta">已下线 · 不再提供浏览器版<br>请下载上面的客户端（同一台服务器，联机互通）</span>
     </div>
+  </div>
+
+  <div class="tip" style="margin-bottom:0">
+    上面的<b>「下载」走加速镜像</b>，国内基本能跑满带宽；如果镜像不通，点旁边的<b>「直连」</b>走 GitHub 原始地址
+    （国内会慢很多，但一定能下）。两个按钮是同一个文件，哈希完全一致。
   </div>
 
   <div class="note">
@@ -107,9 +128,10 @@ xattr -cr 像素工大.app &amp;&amp; codesign --force --deep --sign - 像素工
     服务器已经是最新的，装最新客户端即可。
   </div>
 
-  <div class="note" style="margin-top:18px;border-top:none;padding-top:0">
+  <div class="src">
     <span style="color:#ffd08a;font-weight:700">下载后建议核对 SHA-256</span><br>
-    本站只有 http，文件是明文传输的。如果担心下载途中被人替换，可以本地算一次哈希对照。
+    文件现在托管在 GitHub Releases，走的是 https；但如果你用的是某个第三方镜像，
+    仍建议本地算一次哈希对照，确认下来的就是原始文件。
     Windows 用 PowerShell：
     <pre style="font-size:11.5px">Get-FileHash .\XGD-Campus-win64.zip -Algorithm SHA256</pre>
     macOS / Linux：
@@ -118,7 +140,8 @@ xattr -cr 像素工大.app &amp;&amp; codesign --force --deep --sign - 像素工
     <pre style="font-size:11px;white-space:pre-wrap;word-break:break-all">68f8449b46305ef7a41cb48c2d029390eda971d4c266ef79ee47769c1d9192ee  XGD-Campus-win64.zip
 fb5c0ea616618e6e9fdb14b80524ac922ada174d31734fb7552796e4b0fdf93e  XGD-Campus-macos.zip
 135035f13c4b2f3219237fd196fdef883865a306d950e43cd1dddb6335ef130d  XGD-Campus-android.zip</pre>
-    也可以直接下清单：<a href="/dl/SHA256SUMS.txt" style="color:#ffb454">SHA256SUMS.txt</a>
+    完整清单（<code>SHA256SUMS.txt</code>）与源码在发布页：
+    <a href="https://github.com/ctrl36122/npu-campus-pixel/releases/tag/v1.2.3" style="color:#ffb454">github.com/ctrl36122/npu-campus-pixel/releases/tag/v1.2.3</a>
   </div>
 
 </div>

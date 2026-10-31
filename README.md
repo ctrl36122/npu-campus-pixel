@@ -62,6 +62,10 @@ xattr -cr 像素工大.app && codesign --force --deep --sign - 像素工大.app
 
 最新版本是 [v1.2.3](../../releases/tag/v1.2.3)（2026-10-31），压缩包里都附了说明文件。
 
+国内直连 GitHub 很慢（实测 15 KB/s），推荐走镜像：
+`https://ghfast.top/` + 上面的下载链接，实测 9~12 MB/s。
+公共下载页 `http://<你的服务器IP>/dl/` 上的按钮已经默认指向镜像。
+
 ## 更新日志
 
 ### v1.2.3 · 2026-10-31
@@ -308,7 +312,20 @@ sudo DOMAIN=game.example.com bash install.sh  # 有域名：自动签 HTTPS 证�
 网页版已经下线：浏览器里没有 UDP、建不了 ENet 主机，跑起来还要额外扛 wasm +
 每个网页玩家一条 WS，收益不值这些开销。`export_presets.example.cfg` 里的 Web 预设
 和 `build/deploy/Caddyfile` 注释里的 `:443` 段落都留着，将来想恢复照着加回来即可。
-现在服务器只做两件事：`ws://IP/ws`（游戏服务器）和 `/dl/`（安装包下载）。
+现在服务器只做两件事：`ws://IP/ws`（游戏服务器）和 `/dl/`（下载页，几 KB 的 HTML）。
+
+**安装包不在服务器上**（2026-10-31 起）。三端 zip 由 GitHub Releases 托管，
+这台 100 Mbps 出口只留给 WebSocket —— 之前有人用 `curl` + `Range` 十分钟拉走 7 GB，
+满带宽时在线玩家会跟着卡。发新版本用：
+
+```bash
+python tools/_publish_release.py v1.2.4 preview \
+    build/release/RELEASE_NOTES_v1.2.4.md build/release/XGD-Campus-*.zip
+```
+
+脚本会建 Release、上传资产，并用 GitHub 返回的 `digest` 校验 SHA-256。
+下载页上的「下载」按钮走 `ghfast.top` 镜像（实测 9~12 MB/s），
+「直连」是 GitHub 原始地址（国内很慢但一定能下）。老链接由 Caddy 302 到新源。
 
 > 服务器地址的优先级：`assets/server.local.json`（本机私有，已被 git 忽略）
 > → 环境变量 `XGD_SERVER` → `assets/server.json`（仓库里的空模板）。

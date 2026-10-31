@@ -2,7 +2,14 @@
 #
 # 2026-10-30：网页版下线（放弃 web 端）。这台机器现在只做两件事：
 #   ws://你的服务器地址/ws      游戏服务器（Windows / macOS / Android 客户端连这里）
-#   http://你的服务器地址/dl/   安装包下载（纯静态，不跑任何游戏逻辑）
+#   http://你的服务器地址/dl/   下载页（纯静态，几 KB）
+#
+# 2026-10-31：安装包迁走。三端 zip 改由 GitHub Releases 托管
+# （ctrl36122/npu-campus-pixel，tag v1.2.3），本页只负责给链接。
+# 原因：这条 100Mbps 出口要和 WebSocket 共用，被人用 curl+Range 刷包时
+# 在线玩家会跟着卡。老链接由下面的 302 兜底，不会失效。
+# 发布命令见 tools/_publish_release.py。
+#
 # 其余路径一律跳到下载页。
 #
 # 网页版的构建产物还留在 /opt/xgd/web（现在不再被 serve，不占带宽也不占连接）。
@@ -74,18 +81,27 @@
 			reverse_proxy 127.0.0.1:9080
 		}
 
-		# 安装包下载：/opt/xgd/web/dl/ 下的 zip 与下载页
 		handle /dl {
 			redir * /dl/ permanent
 		}
+		# 下载页（静态，几 KB）+ 安装包的兼容跳转
 		handle /dl/* {
+			# ------------------------------------------------------------------
+			# 2026-10-31：安装包已迁到 GitHub Releases（见 build/release/ 的发布脚本）
+			# 这台机器只再托管下载页本身，几十 MB 的包不再从这里出去 ——
+			# 之前被 curl + Range 刷掉 7 GB 出向带宽就是这么来的。
+			# 下面四条是给「已经发出去的老链接」兜底的 302，
+			# 不要再把 zip 放回 /opt/xgd/web/dl/，否则又占这条 100Mbps 出口。
+			# ------------------------------------------------------------------
+			redir /dl/XGD-Campus-win64.zip  https://ghfast.top/https://github.com/ctrl36122/npu-campus-pixel/releases/download/v1.2.3/XGD-Campus-win64.zip  302
+			redir /dl/XGD-Campus-macos.zip  https://ghfast.top/https://github.com/ctrl36122/npu-campus-pixel/releases/download/v1.2.3/XGD-Campus-macos.zip  302
+			redir /dl/XGD-Campus-android.zip https://ghfast.top/https://github.com/ctrl36122/npu-campus-pixel/releases/download/v1.2.3/XGD-Campus-android.zip 302
+			redir /dl/SHA256SUMS.txt        https://ghfast.top/https://github.com/ctrl36122/npu-campus-pixel/releases/download/v1.2.3/SHA256SUMS.txt 302
+
 			root * /opt/xgd/web
 			file_server {
 				hide .*
 			}
-			# 安装包是固定版本，让客户端缓存久一点，省重复流量
-			@pkg path /dl/*.zip
-			header @pkg Cache-Control "public, max-age=86400"
 		}
 
 		# 其它路径（含原来的网页版首页）→ 下载页
