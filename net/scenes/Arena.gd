@@ -180,6 +180,10 @@ func _ready() -> void:
 	_guard_local_spawn()
 	if not (OS.has_environment("XGD_NOHOME")):
 		_auto_spawn_home()
+	# 调试：XGD_FORCE_SPAWN="x,y"（格）—— 连接稳定后把本地玩家硬挪过去。
+	# 联机时出生点由服务端说了算，XGD_SPAWN 只对单机/首次连接有效，截图用这个。
+	if OS.has_environment("XGD_FORCE_SPAWN"):
+		_force_spawn_debug()
 
 
 ## 生成校园 NPC。挂在 Objects 下是为了和建筑/树共用 y 排序（走到树后面会被遮住）。
@@ -1603,6 +1607,20 @@ func _guard_local_spawn() -> void:
 	if (me as Node2D).position.length() < 1.0:
 		(me as Node2D).call("teleport_to", _spawn_cell() * TS)
 		push_warning("[arena] 位置同步异常（服务器与客户端版本不一致？）已挪回出生点")
+
+
+## 调试：XGD_FORCE_SPAWN="x,y"（格）。等服务器把位置同步完再传送，否则会被覆盖。
+func _force_spawn_debug() -> void:
+	await get_tree().create_timer(2.8).timeout
+	var raw := OS.get_environment("XGD_FORCE_SPAWN").split(",")
+	if raw.size() != 2:
+		return
+	var me: Node = _local_avatar()
+	if me == null:
+		return
+	var p: Vector2 = Vector2(float(raw[0]), float(raw[1])) * TS
+	(me as Node2D).call("teleport_to", p)
+	print("[dbg] 强制传送到 ", p)
 
 
 ## 调试：进房间后一路往南走，应该踩到门垫就自动出去。
