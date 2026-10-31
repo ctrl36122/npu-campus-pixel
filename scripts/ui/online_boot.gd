@@ -126,7 +126,12 @@ func _ready() -> void:
 	# 验证用：设了 XGD_VERIFY 时，进世界约 5s 后把主视口存成 res://shot_verify.png，
 	# 即使 AI 插件在 play 启动掉线也能留下画面供人工核对（验证后移除）。
 	if OS.has_environment("XGD_VERIFY"):
-		var vt := get_tree().create_timer(5.0)
+		# 默认 5s 后截图；XGD_VERIFY_DELAY=秒 可以推后（比如等远端发来的聊天刷出来再截）
+		var vd := 5.0
+		var vraw := OS.get_environment("XGD_VERIFY_DELAY").strip_edges()
+		if not vraw.is_empty() and vraw.is_valid_float() and float(vraw) > 0.0:
+			vd = float(vraw)
+		var vt := get_tree().create_timer(vd)
 		vt.timeout.connect(_verify_shot)
 	# 调试用：XGD_CHAT_TAP=1 自动点一下右下「聊」按钮（核对大聊天窗）
 	if OS.has_environment("XGD_CHAT_TAP") and is_instance_valid(_touch_pad):
@@ -449,8 +454,9 @@ func _process(delta: float) -> void:
 		avatars += 1
 		names.append("%s@%d,%d%s" % [p.name, int(p.position.x), int(p.position.y),
 			"*" if p.is_local_player else ""])
-	print("[dbg] online=%s id=%d peers=%d avatars=%d phase=%d %s" % [
-		str(_online), Net.my_id(), Net.peer_count(), avatars, GameState.phase, " ".join(names)])
+	print("[dbg] online=%s id=%d peers=%d avatars=%d phase=%d friends=%d claims=%d %s" % [
+		str(_online), Net.my_id(), Net.peer_count(), avatars, GameState.phase,
+		Net.friend_list().size(), Net.room_claims.size(), " ".join(names)])
 
 
 # ---------------------------------------------------------------- 界面

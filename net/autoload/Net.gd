@@ -453,6 +453,15 @@ func post_message(text: String) -> void:
 			sender, str(peers.has(sender)), text])
 	if not peers.has(sender):
 		return
+	# 客户端上这条 RPC 只可能有两种来源：
+	#   1) 自己发的（call_local，sender == 自己）—— 正常显示；
+	#   2) Godot 的 server_relay 把别人的原始 RPC 自动转过来一份。
+	# 第 2 种没经过违规词 / 禁言 / 刷屏检查，而服务端随后还会用 _relay_message 再发一份
+	# 过滤过的 —— 两份都显示，别人那边就会看到同一条消息刷两遍（线上真的有）。
+	# 这里把自动转发那份丢掉，只认服务端过滤后的 _relay_message。
+	# 注意不能直接把 server_relay 关掉：表情（broadcast → rpc_id(0)）靠它转发。
+	if not is_server() and sender != my_id():
+		return
 	note_received([text])
 	var speaker: String = str(peers[sender]["name"])
 	var clean := text.left(160)
@@ -489,6 +498,8 @@ func post_message(text: String) -> void:
 ## 服务端转发别人的聊天。客户端收到后走和本地一样的气泡 + 列表逻辑。
 @rpc("authority", "call_remote", "reliable", 0)
 func _relay_message(speaker: String, text: String) -> void:
+	if OS.has_environment("XGD_DEBUG"):
+		print("[net] relay <- ", speaker, ": ", text, " peer=", my_id())
 	note_received([text])
 	message_received.emit(speaker, text)
 

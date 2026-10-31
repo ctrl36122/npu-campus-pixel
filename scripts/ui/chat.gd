@@ -369,22 +369,26 @@ func _close_input(send: bool) -> void:
 	if OS.has_feature("mobile"):
 		DisplayServer.virtual_keyboard_hide()
 	if send and not text.is_empty():
-		_send_now(text)
+		# 发出去就把输入框清空：以前只 release_focus 不清文本，回车发完后那行字还留在框里，
+		# 再按一次回车就又发一遍，别人那边看到同一条消息刷两遍（自己也会以为发重了）。
+		if _send_now(text):
+			_edit.text = ""
 
 
 ## 发送前在本地先过一遍：禁言、刷屏、违规词。
 ## 本地拦一道是为了不让「自己看到发出去了、其实别人收不到」——
 ## 服务端还会再查一次，因为客户端永远不可信（可以直接 rpc 上来）。
-func _send_now(text: String) -> void:
+## 返回 true 表示真的交给网络了（被本地拦下时返回 false，调用方别清空输入框）。
+func _send_now(text: String) -> bool:
 	# 命令（/mute 之类）跳过这些检查，权限由服务端判
 	if not text.begins_with("/"):
 		if Net.local_muted:
 			_append_system("你已被禁言，暂时不能发言")
-			return
+			return false
 		var now := Time.get_ticks_msec()
 		if _last_send_ms > 0 and now - _last_send_ms < ChatGuard.MIN_INTERVAL_MS:
 			_append_system("说慢一点，别刷屏")
-			return
+			return false
 		_last_send_ms = now
 		if ChatGuard.has_blocked(text):
 			_append_system("消息里有不当用语，已用 * 代替")
@@ -392,6 +396,7 @@ func _send_now(text: String) -> void:
 	Net.post_message.rpc(text)      # call_local：自己也会立刻收到一条
 	_idle = 0.0
 	_panel.modulate.a = 1.0
+	return true
 
 
 func _on_submitted(text: String) -> void:
@@ -428,6 +433,8 @@ func _set_local_blocked(v: bool) -> void:
 
 # ---------------------------------------------------------------- 收消息
 func _on_message(speaker: String, text: String) -> void:
+	if OS.has_environment("XGD_DEBUG"):
+		print("[chat] live ", speaker, ": ", text)
 	# 系统提示：不弹头顶气泡，也不去玩家名单里找对应的人
 	if speaker == Net.SYS_SPEAKER:
 		_apply_system_cmd(text)
@@ -472,6 +479,8 @@ func _apply_system_cmd(text: String) -> void:
 
 ## 服务端补发的历史消息：只进列表，不弹头顶气泡
 func _on_history(speaker: String, text: String, unix_time: int) -> void:
+	if OS.has_environment("XGD_DEBUG"):
+		print("[chat] hist ", speaker, ": ", text)
 	var mine := speaker == str(Net.peers.get(Net.my_id(), {}).get("name", ""))
 	_append(speaker, text, mine, _fmt_unix(unix_time))
 

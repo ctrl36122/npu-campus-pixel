@@ -173,6 +173,9 @@ func _ready() -> void:
 	# 调试：进房间后走到 1 号房门口，验证门会自动滑开、人过得去
 	if OS.has_environment("XGD_TEST_GATE"):
 		_auto_walk_gate()
+	# 调试：按住方向键走几秒（XGD_TEST_WALK=秒数）。用来核对「我动了，对面那边跟着动」
+	if OS.has_environment("XGD_TEST_WALK"):
+		_auto_walk_sync()
 
 	_guard_local_spawn()
 	if not (OS.has_environment("XGD_NOHOME")):
@@ -1683,6 +1686,36 @@ func _auto_walk_gate() -> void:
 			print("[dbg] 门测试 局部=", (p - rp) / TS,
 				" 门0_open=", doors[0].call("open_ratio"),
 				" 门0_locked=", doors[0].get("locked"))
+		)
+	)
+
+
+## 联机同步自检：进世界 8 秒后按住方向键走 N 秒，打印起终点。
+## 另一个实例的 [dbg] 行里，同一个玩家（不带 * 的那个）的位置应该同步在变，
+## 这就是「别人看得见我走」。用 XGD_TEST_WALK=<秒> 触发，
+## 方向用 XGD_TEST_WALK_DIR=right/left/up/down（默认 right）。
+func _auto_walk_sync() -> void:
+	var secs := float(OS.get_environment("XGD_TEST_WALK"))
+	if secs <= 0.0:
+		secs = 2.0
+	var dir := OS.get_environment("XGD_TEST_WALK_DIR").strip_edges().to_lower()
+	if dir.is_empty():
+		dir = "right"
+	var action := "move_" + dir
+	var t := get_tree().create_timer(8.0)
+	t.timeout.connect(func() -> void:
+		var me: Node = _local_avatar()
+		if me == null:
+			print("[dbg] 走位测试：玩家还没就绪")
+			return
+		var p0: Vector2 = (me as Node2D).position
+		print("[dbg] 走位测试 起点=", p0, " 动作=", action)
+		Input.action_press(action)
+		var t2 := get_tree().create_timer(secs)
+		t2.timeout.connect(func() -> void:
+			Input.action_release(action)
+			var p1: Vector2 = (me as Node2D).position
+			print("[dbg] 走位测试 终点=", p1, " 位移=", (p1 - p0).length())
 		)
 	)
 
