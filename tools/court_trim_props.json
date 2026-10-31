@@ -1,0 +1,1140 @@
+[
+ {
+  "name": "云天苑操场北围网1",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 348.2,
+  "baseY": 38.0,
+  "bottom": 0
+ },
+ {
+  "name": "云天苑操场北围网2",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 357.0,
+  "baseY": 38.0,
+  "bottom": 0
+ },
+ {
+  "name": "云天苑操场北围网3",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 365.7,
+  "baseY": 38.0,
+  "bottom": 0
+ },
+ {
+  "name": "云天苑操场北围网4",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 374.5,
+  "baseY": 38.0,
+  "bottom": 0
+ },
+ {
+  "name": "云天苑操场北围网5",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 383.2,
+  "baseY": 38.0,
+  "bottom": 0
+ },
+ {
+  "name": "云天苑操场北围网6",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 392.0,
+  "baseY": 38.0,
+  "bottom": 0
+ },
+ {
+  "name": "云天苑操场南围网1",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 348.2,
+  "baseY": 113.4,
+  "bottom": 0
+ },
+ {
+  "name": "云天苑操场南围网2",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 357.0,
+  "baseY": 113.4,
+  "bottom": 0
+ },
+ {
+  "name": "云天苑操场南围网3",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 365.7,
+  "baseY": 113.4,
+  "bottom": 0
+ },
+ {
+  "name": "云天苑操场南围网4",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 374.5,
+  "baseY": 113.4,
+  "bottom": 0
+ },
+ {
+  "name": "云天苑操场南围网5",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 383.2,
+  "baseY": 113.4,
+  "bottom": 0
+ },
+ {
+  "name": "云天苑操场南围网6",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 392.0,
+  "baseY": 113.4,
+  "bottom": 0
+ },
+ {
+  "name": "云天苑操场灯1",
+  "sprite": "res://assets/props_light_tower.png",
+  "x": 350.2,
+  "baseY": 36.8,
+  "bottom": 0,
+  "collide": [
+   [
+    [
+     350.2,
+     35.8
+    ],
+    [
+     351.8,
+     35.8
+    ],
+    [
+     351.8,
+     36.8
+    ],
+    [
+     350.2,
+     36.8
+    ]
+   ]
+  ]
+ },
+ {
+  "name": "云天苑操场灯2",
+  "sprite": "res://assets/props_light_tower.png",
+  "x": 395.5,
+  "baseY": 36.8,
+  "bottom": 0,
+  "collide": [
+   [
+    [
+     395.5,
+     35.8
+    ],
+    [
+     397.1,
+     35.8
+    ],
+    [
+     397.1,
+     36.8
+    ],
+    [
+     395.5,
+     36.8
+    ]
+   ]
+  ]
+ },
+ {
+  "name": "云天苑操场灯3",
+  "sprite": "res://assets/props_light_tower.png",
+  "x": 350.2,
+  "baseY": 114.0,
+  "bottom": 0,
+  "collide": [
+   [
+    [
+     350.2,
+     113.0
+    ],
+    [
+     351.8,
+     113.0
+    ],
+    [
+     351.8,
+     114.0
+    ],
+    [
+     350.2,
+     114.0
+    ]
+   ]
+  ]
+ },
+ {
+  "name": "云天苑操场灯4",
+  "sprite": "res://assets/props_light_tower.png",
+  "x": 395.5,
+  "baseY": 114.0,
+  "bottom": 0,
+  "collide": [
+   [
+    [
+     395.5,
+     113.0
+    ],
+    [
+     397.1,
+     113.0
+    ],
+    [
+     397.1,
+     114.0
+    ],
+    [
+     395.5,
+     114.0
+    ]
+   ]
+  ]
+ },
+ {
+  "name": "星天苑足球场北围网1",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 24.0,
+  "baseY": 178.8,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑足球场北围网2",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 32.2,
+  "baseY": 178.8,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑足球场北围网3",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 40.4,
+  "baseY": 178.8,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑足球场北围网4",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 48.5,
+  "baseY": 178.8,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑足球场北围网5",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 56.7,
+  "baseY": 178.8,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑足球场南围网1",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 24.0,
+  "baseY": 221.5,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑足球场南围网2",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 32.2,
+  "baseY": 221.5,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑足球场南围网3",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 40.4,
+  "baseY": 221.5,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑足球场南围网4",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 48.5,
+  "baseY": 221.5,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑足球场南围网5",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 56.7,
+  "baseY": 221.5,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑足球场灯1",
+  "sprite": "res://assets/props_light_tower.png",
+  "x": 26.0,
+  "baseY": 177.5,
+  "bottom": 0,
+  "collide": [
+   [
+    [
+     26.0,
+     176.5
+    ],
+    [
+     27.6,
+     176.5
+    ],
+    [
+     27.6,
+     177.5
+    ],
+    [
+     26.0,
+     177.5
+    ]
+   ]
+  ]
+ },
+ {
+  "name": "星天苑足球场灯2",
+  "sprite": "res://assets/props_light_tower.png",
+  "x": 60.2,
+  "baseY": 177.5,
+  "bottom": 0,
+  "collide": [
+   [
+    [
+     60.2,
+     176.5
+    ],
+    [
+     61.8,
+     176.5
+    ],
+    [
+     61.8,
+     177.5
+    ],
+    [
+     60.2,
+     177.5
+    ]
+   ]
+  ]
+ },
+ {
+  "name": "星天苑足球场灯3",
+  "sprite": "res://assets/props_light_tower.png",
+  "x": 26.0,
+  "baseY": 222.1,
+  "bottom": 0,
+  "collide": [
+   [
+    [
+     26.0,
+     221.1
+    ],
+    [
+     27.6,
+     221.1
+    ],
+    [
+     27.6,
+     222.1
+    ],
+    [
+     26.0,
+     222.1
+    ]
+   ]
+  ]
+ },
+ {
+  "name": "星天苑足球场灯4",
+  "sprite": "res://assets/props_light_tower.png",
+  "x": 60.2,
+  "baseY": 222.1,
+  "bottom": 0,
+  "collide": [
+   [
+    [
+     60.2,
+     221.1
+    ],
+    [
+     61.8,
+     221.1
+    ],
+    [
+     61.8,
+     222.1
+    ],
+    [
+     60.2,
+     222.1
+    ]
+   ]
+  ]
+ },
+ {
+  "name": "星天苑排球场北围网1",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 69.1,
+  "baseY": 181.2,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑排球场北围网2",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 76.6,
+  "baseY": 181.2,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑排球场北围网3",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 84.2,
+  "baseY": 181.2,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑排球场北围网4",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 91.8,
+  "baseY": 181.2,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑排球场北围网5",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 99.3,
+  "baseY": 181.2,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑排球场北围网6",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 106.8,
+  "baseY": 181.2,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑排球场北围网7",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 114.4,
+  "baseY": 181.2,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑排球场南围网1",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 69.1,
+  "baseY": 196.8,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑排球场南围网2",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 76.6,
+  "baseY": 196.8,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑排球场南围网3",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 84.2,
+  "baseY": 196.8,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑排球场南围网4",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 91.8,
+  "baseY": 196.8,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑排球场南围网5",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 99.3,
+  "baseY": 196.8,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑排球场南围网6",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 106.8,
+  "baseY": 196.8,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑排球场南围网7",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 114.4,
+  "baseY": 196.8,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑排球场灯1",
+  "sprite": "res://assets/props_light_tower.png",
+  "x": 71.1,
+  "baseY": 180.0,
+  "bottom": 0,
+  "collide": [
+   [
+    [
+     71.1,
+     179.0
+    ],
+    [
+     72.7,
+     179.0
+    ],
+    [
+     72.7,
+     180.0
+    ],
+    [
+     71.1,
+     180.0
+    ]
+   ]
+  ]
+ },
+ {
+  "name": "星天苑排球场灯2",
+  "sprite": "res://assets/props_light_tower.png",
+  "x": 117.9,
+  "baseY": 180.0,
+  "bottom": 0,
+  "collide": [
+   [
+    [
+     117.9,
+     179.0
+    ],
+    [
+     119.5,
+     179.0
+    ],
+    [
+     119.5,
+     180.0
+    ],
+    [
+     117.9,
+     180.0
+    ]
+   ]
+  ]
+ },
+ {
+  "name": "星天苑排球场灯3",
+  "sprite": "res://assets/props_light_tower.png",
+  "x": 71.1,
+  "baseY": 197.4,
+  "bottom": 0,
+  "collide": [
+   [
+    [
+     71.1,
+     196.4
+    ],
+    [
+     72.7,
+     196.4
+    ],
+    [
+     72.7,
+     197.4
+    ],
+    [
+     71.1,
+     197.4
+    ]
+   ]
+  ]
+ },
+ {
+  "name": "星天苑排球场灯4",
+  "sprite": "res://assets/props_light_tower.png",
+  "x": 117.9,
+  "baseY": 197.4,
+  "bottom": 0,
+  "collide": [
+   [
+    [
+     117.9,
+     196.4
+    ],
+    [
+     119.5,
+     196.4
+    ],
+    [
+     119.5,
+     197.4
+    ],
+    [
+     117.9,
+     197.4
+    ]
+   ]
+  ]
+ },
+ {
+  "name": "星天苑篮球场北围网1",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 67.9,
+  "baseY": 193.3,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑篮球场北围网2",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 76.1,
+  "baseY": 193.3,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑篮球场北围网3",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 84.2,
+  "baseY": 193.3,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑篮球场北围网4",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 92.3,
+  "baseY": 193.3,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑篮球场北围网5",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 100.5,
+  "baseY": 193.3,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑篮球场北围网6",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 108.7,
+  "baseY": 193.3,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑篮球场北围网7",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 116.8,
+  "baseY": 193.3,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑篮球场南围网1",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 67.9,
+  "baseY": 224.7,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑篮球场南围网2",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 76.1,
+  "baseY": 224.7,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑篮球场南围网3",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 84.2,
+  "baseY": 224.7,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑篮球场南围网4",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 92.3,
+  "baseY": 224.7,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑篮球场南围网5",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 100.5,
+  "baseY": 224.7,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑篮球场南围网6",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 108.7,
+  "baseY": 224.7,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑篮球场南围网7",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 116.8,
+  "baseY": 224.7,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑篮球场灯1",
+  "sprite": "res://assets/props_light_tower.png",
+  "x": 69.9,
+  "baseY": 192.1,
+  "bottom": 0,
+  "collide": [
+   [
+    [
+     69.9,
+     191.1
+    ],
+    [
+     71.5,
+     191.1
+    ],
+    [
+     71.5,
+     192.1
+    ],
+    [
+     69.9,
+     192.1
+    ]
+   ]
+  ]
+ },
+ {
+  "name": "星天苑篮球场灯2",
+  "sprite": "res://assets/props_light_tower.png",
+  "x": 120.3,
+  "baseY": 192.1,
+  "bottom": 0,
+  "collide": [
+   [
+    [
+     120.3,
+     191.1
+    ],
+    [
+     121.9,
+     191.1
+    ],
+    [
+     121.9,
+     192.1
+    ],
+    [
+     120.3,
+     192.1
+    ]
+   ]
+  ]
+ },
+ {
+  "name": "星天苑篮球场灯3",
+  "sprite": "res://assets/props_light_tower.png",
+  "x": 69.9,
+  "baseY": 225.3,
+  "bottom": 0,
+  "collide": [
+   [
+    [
+     69.9,
+     224.3
+    ],
+    [
+     71.5,
+     224.3
+    ],
+    [
+     71.5,
+     225.3
+    ],
+    [
+     69.9,
+     225.3
+    ]
+   ]
+  ]
+ },
+ {
+  "name": "星天苑篮球场灯4",
+  "sprite": "res://assets/props_light_tower.png",
+  "x": 120.3,
+  "baseY": 225.3,
+  "bottom": 0,
+  "collide": [
+   [
+    [
+     120.3,
+     224.3
+    ],
+    [
+     121.9,
+     224.3
+    ],
+    [
+     121.9,
+     225.3
+    ],
+    [
+     120.3,
+     225.3
+    ]
+   ]
+  ]
+ },
+ {
+  "name": "星天苑操场北围网1",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 64.6,
+  "baseY": 228.0,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑操场北围网2",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 72.0,
+  "baseY": 228.0,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑操场北围网3",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 79.4,
+  "baseY": 228.0,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑操场北围网4",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 86.7,
+  "baseY": 228.0,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑操场北围网5",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 94.1,
+  "baseY": 228.0,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑操场北围网6",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 101.5,
+  "baseY": 228.0,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑操场南围网1",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 64.6,
+  "baseY": 307.8,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑操场南围网2",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 72.0,
+  "baseY": 307.8,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑操场南围网3",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 79.4,
+  "baseY": 307.8,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑操场南围网4",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 86.7,
+  "baseY": 307.8,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑操场南围网5",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 94.1,
+  "baseY": 307.8,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑操场南围网6",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 101.5,
+  "baseY": 307.8,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑操场灯1",
+  "sprite": "res://assets/props_light_tower.png",
+  "x": 66.6,
+  "baseY": 226.7,
+  "bottom": 0,
+  "collide": [
+   [
+    [
+     66.6,
+     225.7
+    ],
+    [
+     68.2,
+     225.7
+    ],
+    [
+     68.2,
+     226.7
+    ],
+    [
+     66.6,
+     226.7
+    ]
+   ]
+  ]
+ },
+ {
+  "name": "星天苑操场灯2",
+  "sprite": "res://assets/props_light_tower.png",
+  "x": 105.0,
+  "baseY": 226.7,
+  "bottom": 0,
+  "collide": [
+   [
+    [
+     105.0,
+     225.7
+    ],
+    [
+     106.6,
+     225.7
+    ],
+    [
+     106.6,
+     226.7
+    ],
+    [
+     105.0,
+     226.7
+    ]
+   ]
+  ]
+ },
+ {
+  "name": "星天苑操场灯3",
+  "sprite": "res://assets/props_light_tower.png",
+  "x": 66.6,
+  "baseY": 308.4,
+  "bottom": 0,
+  "collide": [
+   [
+    [
+     66.6,
+     307.4
+    ],
+    [
+     68.2,
+     307.4
+    ],
+    [
+     68.2,
+     308.4
+    ],
+    [
+     66.6,
+     308.4
+    ]
+   ]
+  ]
+ },
+ {
+  "name": "星天苑操场灯4",
+  "sprite": "res://assets/props_light_tower.png",
+  "x": 105.0,
+  "baseY": 308.4,
+  "bottom": 0,
+  "collide": [
+   [
+    [
+     105.0,
+     307.4
+    ],
+    [
+     106.6,
+     307.4
+    ],
+    [
+     106.6,
+     308.4
+    ],
+    [
+     105.0,
+     308.4
+    ]
+   ]
+  ]
+ },
+ {
+  "name": "星天苑羽毛球场北围网1",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 107.3,
+  "baseY": 230.2,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑羽毛球场北围网2",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 116.8,
+  "baseY": 230.2,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑羽毛球场南围网1",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 107.3,
+  "baseY": 271.3,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑羽毛球场南围网2",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 116.8,
+  "baseY": 271.3,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑羽毛球场灯1",
+  "sprite": "res://assets/props_light_tower.png",
+  "x": 114.8,
+  "baseY": 229.0,
+  "bottom": 0,
+  "collide": [
+   [
+    [
+     114.8,
+     228.0
+    ],
+    [
+     116.4,
+     228.0
+    ],
+    [
+     116.4,
+     229.0
+    ],
+    [
+     114.8,
+     229.0
+    ]
+   ]
+  ]
+ },
+ {
+  "name": "星天苑羽毛球场灯2",
+  "sprite": "res://assets/props_light_tower.png",
+  "x": 114.8,
+  "baseY": 271.9,
+  "bottom": 0,
+  "collide": [
+   [
+    [
+     114.8,
+     270.9
+    ],
+    [
+     116.4,
+     270.9
+    ],
+    [
+     116.4,
+     271.9
+    ],
+    [
+     114.8,
+     271.9
+    ]
+   ]
+  ]
+ },
+ {
+  "name": "星天苑网球场北围网1",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 105.3,
+  "baseY": 269.5,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑网球场北围网2",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 114.5,
+  "baseY": 269.5,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑网球场南围网1",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 105.3,
+  "baseY": 308.6,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑网球场南围网2",
+  "sprite": "res://assets/props_fence_h.png",
+  "x": 114.5,
+  "baseY": 308.6,
+  "bottom": 0
+ },
+ {
+  "name": "星天苑网球场灯1",
+  "sprite": "res://assets/props_light_tower.png",
+  "x": 112.7,
+  "baseY": 268.3,
+  "bottom": 0,
+  "collide": [
+   [
+    [
+     112.7,
+     267.3
+    ],
+    [
+     114.2,
+     267.3
+    ],
+    [
+     114.2,
+     268.3
+    ],
+    [
+     112.7,
+     268.3
+    ]
+   ]
+  ]
+ },
+ {
+  "name": "星天苑网球场灯2",
+  "sprite": "res://assets/props_light_tower.png",
+  "x": 112.7,
+  "baseY": 309.2,
+  "bottom": 0,
+  "collide": [
+   [
+    [
+     112.7,
+     308.2
+    ],
+    [
+     114.2,
+     308.2
+    ],
+    [
+     114.2,
+     309.2
+    ],
+    [
+     112.7,
+     309.2
+    ]
+   ]
+  ]
+ }
+]
