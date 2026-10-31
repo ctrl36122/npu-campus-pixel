@@ -22,6 +22,11 @@ API = "https://api.github.com"
 
 
 def token() -> str:
+    # 先认环境变量：后台 / CI 里 git credential fill 可能拿不到（无 tty）
+    for key in ("GH_TOKEN", "GITHUB_TOKEN"):
+        v = (os.environ.get(key) or "").strip()
+        if v:
+            return v
     p = subprocess.run(
         ["git", "credential", "fill"],
         input="protocol=https\nhost=github.com\n\n",
@@ -30,7 +35,7 @@ def token() -> str:
     for line in p.stdout.splitlines():
         if line.startswith("password="):
             return line.split("=", 1)[1]
-    raise SystemExit("拿不到 GitHub 令牌")
+    raise SystemExit("拿不到 GitHub 令牌（可设 GH_TOKEN 环境变量）")
 
 
 TOK = token()
