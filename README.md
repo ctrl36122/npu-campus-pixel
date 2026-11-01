@@ -347,7 +347,7 @@ sudo DOMAIN=game.example.com bash install.sh  # 有域名：自动签 HTTPS 证�
 
 ```bash
 python tools/_publish_release.py v1.2.4 preview \
-    build/release/RELEASE_NOTES_v1.2.4.md build/release/XGD-Campus-*.zip
+	build/release/RELEASE_NOTES_v1.2.4.md build/release/XGD-Campus-*.zip
 ```
 
 脚本会建 Release、上传资产，并用 GitHub 返回的 `digest` 校验 SHA-256。
@@ -421,4 +421,3 @@ macOS 预设的要点写在 `export_presets.example.cfg` 末尾的注释里：�
 - 代码：MIT
 - **本项目是校园爱好者的非官方作品**，与西北工业大学官方无关；校名、校徽等标识归学校所有，
   仅用于校园文化展示，不作商业用途
-

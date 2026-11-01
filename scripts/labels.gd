@@ -38,6 +38,11 @@ func setup_from_world(world: Node2D) -> void:
 		var spr: Sprite2D = n.get_node_or_null("Sprite")
 		if spr == null or spr.texture == null:
 			continue
+		# 只标建筑。不能只依赖 props 组：world.tscn 里存的节点不带 groups
+		# （PackedScene 打包时不序列化分组成员），导致路灯/围网/灯杆全被当楼标出来。
+		var tex_path := spr.texture.resource_path
+		if not tex_path.contains("/buildings/"):
+			continue
 		var nm := str(n.name)
 		if nm == "" or nm == "无名建筑":
 			continue

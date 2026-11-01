@@ -182,6 +182,14 @@ func _build_objects(d) -> void:
 				for p in bp:
 					pv.append(Vector2(float(p[0]), float(p[1])))
 				bpolys.append(pv)
+		# 铺装类道具（球场、广场）上的树也不生成，否则从场地中间长出来
+		for p in d.get("props", []):
+			var pp = p.get("poly", [])
+			if pp.size() >= 3:
+				var pv3 := PackedVector2Array()
+				for q in pp:
+					pv3.append(Vector2(float(q[0]), float(q[1])))
+				bpolys.append(pv3)
 		var seq := 0
 		for it in inst:
 			var si := int(it.get("sp", -1))
