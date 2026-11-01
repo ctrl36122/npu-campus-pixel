@@ -36,7 +36,7 @@ PALETTE = {
     "basketball": ((168, 104, 64), (132, 80, 48)),    # 橙红，和跑道区分
     "volleyball": ((178, 134, 76), (140, 102, 56)),
     "tennis":     ((58, 124, 104), (44, 98, 82)),
-    "badminton":  ((78, 106, 146), (60, 82, 116)),
+    "badminton":  ((88, 120, 152), (68, 94, 126)),
     "track":      ((166, 82, 62), (92, 140, 82)),      # 跑道砖红，内场草
     "generic":    ((100, 118, 94), (80, 96, 76)),
 }
@@ -127,7 +127,13 @@ def draw_grid(d, W, H, kind):
             x0 = ox + i * (pw + gap)
             y0 = oy + j * (ph + gap)
             x1, y1 = x0 + pw, y0 + ph
-            d.rectangle([x0, y0, x1, y1], fill=base, outline=LINE, width=2)
+            # 羽毛球场只有 42×19 px，边框跟着用 2px 会把整块变成"窗框"，
+            # 远看像一排窗户而不是球场画线 —— 小场地一律 1px，而且用暗线，
+            # 只有中网用亮线，整体读作"一块铺装场地"而不是窗格阵列。
+            if kind == "badminton":
+                d.rectangle([x0, y0, x1, y1], fill=base, outline=LINE_DIM, width=1)
+            else:
+                d.rectangle([x0, y0, x1, y1], fill=base, outline=LINE, width=2)
             mx, my = (x0 + x1) // 2, (y0 + y1) // 2
             if kind == "basketball":
                 d.line([(mx, y0 + 2), (mx, y1 - 2)], fill=LINE, width=2)
@@ -135,6 +141,12 @@ def draw_grid(d, W, H, kind):
                 d.ellipse([mx - r, my - r, mx + r, my + r], outline=LINE, width=2)
                 for bx in (x0 + max(4, pw // 9), x1 - max(4, pw // 9)):
                     d.line([(bx, my - ph // 5), (bx, my + ph // 5)], fill=LINE, width=2)
+            elif kind == "badminton":
+                # 中网横跨长边中点，前后各一条发球线
+                d.line([(mx, y0), (mx, y1)], fill=LINE, width=1)
+                for fx in (x0 + pw // 5, x1 - pw // 5):
+                    d.line([(fx, y0 + 1), (fx, y1 - 1)], fill=LINE_DIM, width=1)
+                d.line([(x0 + 1, my), (x1 - 1, my)], fill=LINE_DIM, width=1)
             elif kind == "tennis":
                 d.line([(mx, y0 + 2), (mx, y1 - 2)], fill=LINE, width=2)
                 ins_y, ins_x = max(2, ph // 4), max(2, pw // 4)

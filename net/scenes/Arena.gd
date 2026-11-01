@@ -304,13 +304,54 @@ func _build_water_mask() -> void:
 func _init_boats() -> void:
 	_boats.clear()
 	for i in BOAT_CELLS.size():
+		var spawn := _boat_spawn(BOAT_CELLS[i] as Vector2)
+		var d: Vector2 = spawn["dir"]
 		_boats.append({
-			"pos": (BOAT_CELLS[i] as Vector2) * TS,
+			"pos": spawn["pos"],
 			"rider": 0,
 			"moving": false,
-			"dirx": 1.0,
-			"diry": 0.0,
+			"dirx": d.x,
+			"diry": d.y,
 		})
+
+
+## 船的出生点微调：只在船体会探出水面时才把它往水域内侧推最多两格，
+## 其余情况原地不动 —— 位置本来就是贴着岸选的，推远了反而上不了船
+## （上船判定 BOAT_NEAR_R 只有 3.75 格）。
+## 朝向按水域形状定：够横着放就横放，窄河道竖放。
+## 纯函数、只读水面掩码，服务端与客户端算出来必然一致（船位要两端对上）。
+func _boat_spawn(cell: Vector2) -> Dictionary:
+	var cx := int(cell.x)
+	var cy := int(cell.y)
+	var fallback := {"pos": cell * TS, "dir": Vector2.RIGHT}
+	if _water_mask.is_empty() or cx < 0 or cy < 0 or cx >= _water_w or cy >= _water_h:
+		return fallback
+	if _water_mask[cy * _water_w + cx] == 0:
+		return fallback
+	# 水平方向连通段
+	var x0 := cx
+	while x0 > 0 and _water_mask[cy * _water_w + x0 - 1] != 0:
+		x0 -= 1
+	var x1 := cx
+	while x1 < _water_w - 1 and _water_mask[cy * _water_w + x1 + 1] != 0:
+		x1 += 1
+	var span_w := x1 - x0 + 1
+	# 船体横放时半长 1.9 格，留 2 格余量；竖放时半宽只有 0.8 格，不用管
+	var pad := 2.0
+	var px := clampf(cell.x, float(x0) + pad, float(x1 + 1) - pad)
+	if float(x1 + 1) - float(x0) < pad * 2.0:
+		px = float(x0 + x1 + 1) * 0.5            # 太窄就居中，反正都放不下
+	# 以最终落点为列量纵向长度，判断是横条还是竖条
+	var col := clampi(int(px), 0, _water_w - 1)
+	var y0 := cy
+	while y0 > 0 and _water_mask[(y0 - 1) * _water_w + col] != 0:
+		y0 -= 1
+	var y1 := cy
+	while y1 < _water_h - 1 and _water_mask[(y1 + 1) * _water_w + col] != 0:
+		y1 += 1
+	var span_h := y1 - y0 + 1
+	var dir := Vector2.RIGHT if span_w >= span_h else Vector2.DOWN
+	return {"pos": Vector2(px, cy + 0.5) * TS, "dir": dir}
 
 
 ## 建本地小船节点。挂在 Objects 下参与 y 排序；专用服务器不建（没有渲染）。
