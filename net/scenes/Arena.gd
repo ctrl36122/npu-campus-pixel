@@ -42,6 +42,34 @@ func _spawn_cell() -> Vector2:
 		if parts.size() == 2 and parts[0].is_valid_float() and parts[1].is_valid_float():
 			return Vector2(float(parts[0]), float(parts[1]))
 	return SPAWN_CELL
+
+
+# ── 水上小船 ────────────────────────────────────────────────────────────────
+## 船位（格）：最大的南侧湖 5 艘，其余 5 块独立水域各 2 艘，共 15 艘。
+## 每个点都落在水格里，并且紧贴一格可行走岸线（已用 world.json 的水面矩形
+## 和楼体轮廓逐个校验过：人在岸上走两步就能看到提示，上船不用下水）。
+## 这张表在服务端和每个客户端完全一致，所以船的编号可以直接走 RPC。
+const BoatScript := preload("res://net/scenes/Boat.gd")
+const BOAT_CELLS: Array = [
+	Vector2(241, 259), Vector2(248, 240),      # 出生点西侧湖（近南门）
+	Vector2(264, 318), Vector2(281, 324),      # 中央小湖
+	Vector2(355, 335), Vector2(365, 355),      # 东侧小水塘
+	Vector2(255, 394), Vector2(291, 352),      # 图书馆前湖
+	Vector2(283, 458), Vector2(284, 526),      # 长条水道
+	Vector2(137, 579), Vector2(207, 582), Vector2(288, 613),
+	Vector2(269, 682), Vector2(221, 666),      # 南侧大湖
+]
+## 船速与走路完全一致（PlayerAvatar.SPEED = 110 局部 px/s），Shift 同样的倍率。
+const BOAT_SPEED := 110.0
+const BOAT_SPRINT := 1.55
+## 站在岸边多近可以按 E 上船（局部像素，约 3.75 格）
+const BOAT_NEAR_R := 30.0
+## 人物脚底相对船心的偏移：稍微偏南，保证 y 排序时人画在船体上面
+const BOAT_RIDER_OFFSET := Vector2(0, 2.0)
+## 船位广播频率（30Hz，和移动同步同频）
+const BOAT_SEND_HZ := 30.0
+## 单个网络包允许的最大船位位移（防瞬移；留出 3 个 tick 的抖动余量）
+const BOAT_STEP_MAX := 48.0
 ## 相邻玩家的散开半径（校园局部像素，未放大）= 10 格。
 ## 人多时靠这个半径一圈圈往外排，避免几十个人叠成一坨。
 const SPREAD: float = 80.0
@@ -96,6 +124,11 @@ var _dn: Object
 
 
 func _ready() -> void:
+	# 0) 水域掩码 + 小船初始状态。专用服务器也要跑这两步：
+	#    服务端要校验船位、裁定谁在船上，只是不建任何视觉。
+	_build_water_mask()
+	_init_boats()
+
 	# 1) 挂校园
 	campus = CAMPUS.instantiate()
 	campus.name = "Campus"
@@ -143,6 +176,7 @@ func _ready() -> void:
 	_spawn_npcs()
 	_setup_wildlife()
 	_setup_lamps()
+	_setup_boats()
 
 	_collect_xray()
 	queue_redraw()
@@ -224,6 +258,467 @@ func _water_rects() -> Array:
 	if parsed is Dictionary:
 		return parsed.get("water", [])
 	return []
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  水上小船：水域掩码 + 本地划船 + 服务端裁定与船位同步
+#
+#  船位/占用由**服务端**裁决（一人一船、不能抢别人正在划的船）。
+#  划船的客户端本地推进船位（手感不延迟），每 30Hz 把船位报给服务端；
+#  服务端校验「人是不是这条船的乘客 / 目标点是不是水 / 单步位移是否合理」，
+#  再广播给其他所有客户端。其他人看到的船位是服务端权威值，画的时候插值。
+#
+#  乘客的位置复用宿舍那套「本地权威 + 每 tick 推送」链路：
+#  PlayerAvatar._room_freeze = true 时服务端不模拟输入，位置通过 _push_room_pose
+#  推给服务端，再以负 seq 广播给远端。所以别人能看到你站在船上一起移动。
+# ══════════════════════════════════════════════════════════════════════════
+
+## 从 world.json 的 water 矩形生成 424×800 的水格掩码。
+## 船和玩家的坐标都是「校园局部像素」（8px/格），查表时除以 TS 即可。
+func _build_water_mask() -> void:
+	_water_w = int(CELLS.x)
+	_water_h = int(CELLS.y)
+	var f := FileAccess.open("res://assets/world.json", FileAccess.READ)
+	if f == null:
+		return
+	var parsed = JSON.parse_string(f.get_as_text())
+	if not (parsed is Dictionary):
+		return
+	var mp: Dictionary = parsed.get("map", {})
+	_water_w = maxi(1, int(mp.get("W", _water_w)))
+	_water_h = maxi(1, int(mp.get("H", _water_h)))
+	_water_mask = PackedByteArray()
+	_water_mask.resize(_water_w * _water_h)
+	_water_mask.fill(0)
+	for r in parsed.get("water", []):
+		var x0: int = int(r.get("x", 0))
+		var y0: int = int(r.get("y", 0))
+		var x1: int = x0 + int(r.get("w", 0))
+		var y1: int = y0 + int(r.get("h", 0))
+		for y in range(maxi(0, y0), mini(_water_h, y1)):
+			var row: int = y * _water_w
+			for x in range(maxi(0, x0), mini(_water_w, x1)):
+				_water_mask[row + x] = 1
+
+
+func _init_boats() -> void:
+	_boats.clear()
+	for i in BOAT_CELLS.size():
+		_boats.append({
+			"pos": (BOAT_CELLS[i] as Vector2) * TS,
+			"rider": 0,
+			"moving": false,
+			"dirx": 1.0,
+			"diry": 0.0,
+		})
+
+
+## 建本地小船节点。挂在 Objects 下参与 y 排序；专用服务器不建（没有渲染）。
+func _setup_boats() -> void:
+	var objs: Node2D = campus.get_node_or_null("Objects")
+	if objs == null:
+		return
+	_boat_nodes.clear()
+	for i in _boats.size():
+		var node := Node2D.new()
+		node.name = "boat_%d" % i
+		node.set_script(BoatScript)
+		objs.add_child(node)
+		node.call("setup", i, _boats[i]["pos"])
+		_boat_nodes.append(node)
+
+
+func _is_water(local: Vector2) -> bool:
+	if _water_mask.is_empty():
+		return true                      # 数据缺失时不挡船，避免整片水域都不能划
+	var cx: int = int(floor(local.x / TS))
+	var cy: int = int(floor(local.y / TS))
+	if cx < 0 or cy < 0 or cx >= _water_w or cy >= _water_h:
+		return false
+	return _water_mask[cy * _water_w + cx] != 0
+
+
+## 船只能在水格中心之间走；撞到岸线时按轴分离，斜着划不会贴死。
+func _slide_on_water(from: Vector2, to: Vector2) -> Vector2:
+	if _is_water(to):
+		return to
+	var x_only := Vector2(to.x, from.y)
+	if _is_water(x_only):
+		return x_only
+	var y_only := Vector2(from.x, to.y)
+	if _is_water(y_only):
+		return y_only
+	return from
+
+
+func _boat_input_dir(me: Node) -> Vector2:
+	if bool(me.get("ui_blocked")):
+		return Vector2.ZERO
+	var focus: Control = get_viewport().gui_get_focus_owner()
+	if focus is LineEdit or focus is TextEdit:
+		return Vector2.ZERO
+	return Input.get_vector("move_left", "move_right", "move_up", "move_down").limit_length()
+
+
+## 每帧驱动本机正在划的船，并把乘客位置贴在船上。
+func _update_boat_control(delta: float) -> void:
+	if _my_boat < 0 or _my_boat >= _boats.size():
+		return
+	var me: Node = _local_avatar()
+	if me == null:
+		_my_boat = -1
+		return
+	if not _boat_confirmed:
+		# 本地先上船，但要等服务端确认；长时间没回包（掉线/被抢）就撤回岸上。
+		_boat_wait += delta
+		if _boat_wait > 2.5:
+			_abort_local_ride()
+			return
+
+	var b: Dictionary = _boats[_my_boat]
+	var dir := _boat_input_dir(me)
+	var speed: float = BOAT_SPEED * (BOAT_SPRINT if Input.is_action_pressed("sprint") else 1.0)
+	var before: Vector2 = b["pos"]
+	if dir.length() > 0.05:
+		var target: Vector2 = before + dir * speed * delta
+		b["pos"] = _slide_on_water(before, target)
+		# 船头朝移动方向：像素画法只做 4 个正交方向（左右/上下），
+		# 斜着划时取分量更大的那一轴，船不会出现「斜着躺」的锯齿。
+		if absf(dir.x) >= absf(dir.y):
+			b["dirx"] = 1.0 if dir.x >= 0.0 else -1.0
+			b["diry"] = 0.0
+		else:
+			b["dirx"] = 0.0
+			b["diry"] = 1.0 if dir.y >= 0.0 else -1.0
+		b["moving"] = (b["pos"] as Vector2).distance_to(before) > 0.02
+		me.set("_face_dir", dir.normalized())
+	else:
+		b["moving"] = false
+
+	# 乘客跟着船走。脚底比船心略靠南，y 排序时人物会画在船体上面。
+	(me as Node2D).position = (b["pos"] as Vector2) + BOAT_RIDER_OFFSET
+
+	# 30Hz 上报船位：本机是服务端就广播，否则发给服务端再转发。
+	_boat_send_clock += delta
+	if _boat_send_clock >= 1.0 / BOAT_SEND_HZ:
+		_boat_send_clock = 0.0
+		if Net.is_server():
+			if not Net.is_offline():
+				_boat_pose.rpc(_my_boat, b["pos"], bool(b["moving"]), float(b["dirx"]), float(b["diry"]))
+		elif Net.has_session():
+			_push_boat.rpc_id(1, _my_boat, b["pos"], bool(b["moving"]), float(b["dirx"]), float(b["diry"]))
+
+
+func _update_boats() -> void:
+	if Net.is_dedicated or _boat_nodes.is_empty():
+		return
+	for i in _boat_nodes.size():
+		var node: Node = _boat_nodes[i]
+		if node == null or not is_instance_valid(node):
+			continue
+		var b: Dictionary = _boats[i]
+		node.call("set_occupied", int(b["rider"]) != 0)
+		if i == _my_boat:
+			node.call("set_riding", true)
+			node.call("apply_local", b["pos"], bool(b["moving"]), float(b["dirx"]), float(b["diry"]))
+		else:
+			node.call("set_riding", false)
+			node.call("set_net", b["pos"], bool(b["moving"]), float(b["dirx"]), float(b["diry"]))
+
+
+func _nearest_boat(pos: Vector2) -> int:
+	var best: int = -1
+	var best_d: float = BOAT_NEAR_R
+	for i in _boats.size():
+		var d: float = pos.distance_to(_boats[i]["pos"])
+		if d < best_d:
+			best_d = d
+			best = i
+	return best
+
+
+func _clear_avatar_motion(me: Node) -> void:
+	var buf: Variant = me.get("buffer")
+	if buf != null:
+		buf.entries.clear()
+	var cmds: Variant = me.get("commands")
+	if cmds is Dictionary:
+		(cmds as Dictionary).clear()
+
+
+## 本地（乐观）上船：立刻吸附、关碰撞、进入本地权威；再让服务端裁定。
+func _try_board(index: int) -> bool:
+	if in_room or index < 0 or index >= _boats.size():
+		return false
+	var me: Node = _local_avatar()
+	if me == null:
+		return false
+	var b: Dictionary = _boats[index]
+	if int(b["rider"]) != 0 and int(b["rider"]) != Net.my_id():
+		_notice("这艘小船已经有人了")
+		return false
+	if (me as Node2D).position.distance_to(b["pos"]) > BOAT_NEAR_R:
+		return false
+	_boat_return_pos = (me as Node2D).position
+	_my_boat = index
+	_boat_confirmed = Net.is_server()
+	_boat_wait = 0.0
+	_boat_send_clock = 0.0
+	b["rider"] = Net.my_id()
+	b["moving"] = false
+	_clear_avatar_motion(me)
+	me.set("_room_freeze", true)
+	me.call("set_boat_state", true, (b["pos"] as Vector2) + BOAT_RIDER_OFFSET)
+	if Net.is_server():
+		call_deferred("_do_boat_request", 1, index, true, _boat_return_pos)
+	elif Net.has_session():
+		_request_boat.rpc_id(1, index, true, _boat_return_pos)
+	return true
+
+
+## 本地（乐观）下船：只在能靠岸时成功；落点用物理查询找最近的可行走空地。
+func _try_disembark() -> bool:
+	if _my_boat < 0 or _my_boat >= _boats.size():
+		return false
+	var idx: int = _my_boat
+	var b: Dictionary = _boats[idx]
+	var land := _find_land_near(b["pos"])
+	if not bool(land["ok"]):
+		_notice("靠岸后再按 E 下船")
+		return false
+	var target: Vector2 = land["pos"]
+	_my_boat = -1
+	_boat_confirmed = false
+	# 占用不要在这里清：本机是主机时，服务端那份 _boats 就是本对象，
+	# 先清零会让 _do_boat_request 以为「船已经空了」而跳过广播，其他客户端
+	# 就会一直看到这艘船还有人。等服务端处理完请求再统一刷掉。
+	b["moving"] = false
+	var me: Node = _local_avatar()
+	if me != null:
+		_clear_avatar_motion(me)
+		me.set("_room_freeze", false)
+		me.call("set_boat_state", false, target)
+	if Net.is_server():
+		call_deferred("_do_boat_request", 1, idx, false, target)
+	elif Net.has_session():
+		_request_boat.rpc_id(1, idx, false, target)
+	return true
+
+
+## 服务端拒绝/超时/被别人抢走时撤回到岸上（不走路的话会一直停在原地）。
+## clear_rider = false：服务端刚广播了「这艘船现在是别人的」，别把人家的占用抹掉。
+func _abort_local_ride(clear_rider: bool = true) -> void:
+	var idx: int = _my_boat
+	_my_boat = -1
+	_boat_confirmed = false
+	if idx < 0 or idx >= _boats.size():
+		return
+	if clear_rider:
+		_boats[idx]["rider"] = 0
+		_boats[idx]["moving"] = false
+	var me: Node = _local_avatar()
+	if me == null:
+		return
+	_clear_avatar_motion(me)
+	me.set("_room_freeze", false)
+	var target: Vector2 = _boat_return_pos
+	var land := _find_land_near(_boats[idx]["pos"])
+	if bool(land["ok"]):
+		target = land["pos"]
+	me.call("set_boat_state", false, target)
+	# 上船请求可能已经到服务端了（只是确认包晚到/丢了）：主动请它释放一次，
+	# 服务端没记「我」在这条船上时这条请求会被安全忽略。
+	if Net.is_server():
+		call_deferred("_do_boat_request", 1, idx, false, target)
+	elif Net.has_session():
+		_request_boat.rpc_id(1, idx, false, target)
+
+
+## 船附近最近的可站立陆地（从船心向外一圈圈找，最多 12 格）。
+## 水面本身是实体碰撞，所以直接用物理点查询就能排除。
+## 只在按 E 下船时调用（不下船就不扫物理，省 CPU）。
+func _find_land_near(origin: Vector2) -> Dictionary:
+	if not _is_water(origin) and _point_free(origin):
+		return {"ok": true, "pos": origin}
+	for ring in range(1, 13):
+		var n: int = maxi(8, ring * 4)
+		for i in n:
+			var a: float = float(i) * TAU / float(n)
+			var p: Vector2 = origin + Vector2(cos(a), sin(a)) * (float(ring) * TS)
+			if _is_water(p):
+				continue
+			if _point_free(p):
+				return {"ok": true, "pos": p}
+	return {"ok": false, "pos": Vector2.ZERO}
+
+
+func _point_free(local: Vector2) -> bool:
+	var space := get_world_2d().direct_space_state
+	var params := PhysicsPointQueryParameters2D.new()
+	params.position = players.to_global(local)
+	params.collision_mask = 1
+	params.collide_with_areas = false
+	params.collide_with_bodies = true
+	return space.intersect_point(params, 1).is_empty()
+
+
+## 船位附近有没有岸（只查水格掩码，不碰物理）。用于每 8Hz 刷新的提示文案，
+## 避免在水中央每帧扫几百个物理点。
+func _shore_near(origin: Vector2, radius_cells: int = 12) -> bool:
+	if _water_mask.is_empty():
+		return true
+	var cx: int = int(floor(origin.x / TS))
+	var cy: int = int(floor(origin.y / TS))
+	for dy in range(-radius_cells, radius_cells + 1):
+		for dx in range(-radius_cells, radius_cells + 1):
+			var x: int = cx + dx
+			var y: int = cy + dy
+			if x < 0 or y < 0 or x >= _water_w or y >= _water_h:
+				continue
+			if _water_mask[y * _water_w + x] == 0:
+				return true
+	return false
+
+
+func _broadcast_boat(index: int) -> void:
+	if not Net.is_server() or Net.is_offline():
+		return
+	var b: Dictionary = _boats[index]
+	_boat_rider.rpc(index, int(b["rider"]), b["pos"], float(b["dirx"]), float(b["diry"]))
+
+
+func _release_boats_of(id: int) -> void:
+	if not Net.is_server():
+		return
+	for i in _boats.size():
+		if int(_boats[i]["rider"]) == id:
+			_boats[i]["rider"] = 0
+			_boats[i]["moving"] = false
+			_broadcast_boat(i)
+
+
+# ---------------------------------------------------------------- 小船 RPC
+## 客户端 -> 服务端：上/下船请求。物理查询不能直接在 RPC 回调里做，延后一帧。
+@rpc("any_peer", "call_remote", "reliable", 0)
+func _request_boat(index: int, boarding: bool, pos: Vector2) -> void:
+	if not Net.is_server():
+		return
+	call_deferred("_do_boat_request", multiplayer.get_remote_sender_id(), index, boarding, pos)
+
+
+## 服务端裁定：船是否空着、人是否真在船边、下船落点是否是可站立的陆地。
+func _do_boat_request(id: int, index: int, boarding: bool, pos: Vector2) -> void:
+	if not Net.is_server() or index < 0 or index >= _boats.size():
+		return
+	if id != 1 and not Net.peers.has(id):
+		return
+	var av: Node = players.get_node_or_null(str(id))
+	if av == null:
+		return
+	var b: Dictionary = _boats[index]
+
+	if boarding:
+		if int(b["rider"]) != 0 and int(b["rider"]) != id:
+			_broadcast_boat(index)
+			return
+		# 一人一船：已经在别的船上就不允许再上一条（正常玩法由 E 先下船挡住）
+		for i in _boats.size():
+			if i != index and int(_boats[i]["rider"]) == id:
+				_broadcast_boat(index)
+				return
+		if (av as Node2D).position.distance_to(b["pos"]) > BOAT_NEAR_R + 12.0:
+			_broadcast_boat(index)
+			return
+		b["rider"] = id
+		b["moving"] = false
+		_clear_avatar_motion(av)
+		av.set("_room_freeze", true)
+		av.call("set_boat_state", true, (b["pos"] as Vector2) + BOAT_RIDER_OFFSET)
+		_broadcast_boat(index)
+		return
+
+	if int(b["rider"]) != id:
+		return
+	# 客户端给的落点要复核：必须不是水、没有静态碰撞、且在船边 3 格内；
+	# 不满足就由服务端自己找最近岸边（两端物理数据一致，正常不会走到这里）。
+	var target: Vector2 = pos
+	var ok: bool = not _is_water(target) and _point_free(target) \
+		and target.distance_to(b["pos"]) <= 3.0 * TS
+	if not ok:
+		var land := _find_land_near(b["pos"])
+		if not bool(land["ok"]):
+			_broadcast_boat(index)
+			return
+		target = land["pos"]
+	b["rider"] = 0
+	b["moving"] = false
+	_clear_avatar_motion(av)
+	av.set("_room_freeze", false)
+	av.call("set_boat_state", false, target)
+	_broadcast_boat(index)
+
+
+## 客户端 -> 服务端：划船时的船位。服务端只认船上的那个人，并复核水格与步长。
+@rpc("any_peer", "call_remote", "unreliable_ordered", 3)
+func _push_boat(index: int, pos: Vector2, moving_now: bool, dirx: float, diry: float) -> void:
+	if not Net.is_server() or index < 0 or index >= _boats.size():
+		return
+	var b: Dictionary = _boats[index]
+	if int(b["rider"]) != multiplayer.get_remote_sender_id():
+		return
+	if not pos.is_finite() or not is_finite(dirx) or not is_finite(diry) or not _is_water(pos):
+		return
+	if (pos as Vector2).distance_to(b["pos"]) > BOAT_STEP_MAX:
+		# 客户端算漂了/作弊瞬移：把服务端的位置打回去（0.5 秒节流，避免刷可靠包）。
+		var now := Time.get_ticks_msec() / 1000.0
+		if now - _boat_snap_at > 0.5:
+			_boat_snap_at = now
+			_broadcast_boat(index)
+		return
+	b["pos"] = pos
+	b["moving"] = moving_now
+	b["dirx"] = dirx
+	b["diry"] = diry
+	Net.note_received([index, pos, moving_now, dirx, diry])
+	if not Net.is_offline():
+		_boat_pose.rpc(index, pos, moving_now, dirx, diry)
+
+
+## 服务端 -> 客户端：占用变化 / 上下船落点 / 新玩家补发的船位（可靠）。
+@rpc("authority", "call_remote", "reliable", 0)
+func _boat_rider(index: int, rider: int, pos: Vector2, dirx: float, diry: float) -> void:
+	if index < 0 or index >= _boats.size():
+		return
+	var b: Dictionary = _boats[index]
+	b["rider"] = rider
+	b["pos"] = pos
+	b["moving"] = false
+	b["dirx"] = dirx
+	b["diry"] = diry
+	if index == _my_boat:
+		if rider == Net.my_id():
+			_boat_confirmed = true
+			_boat_wait = 0.0
+		else:
+			_abort_local_ride(false)
+	var node: Node = _boat_nodes[index] if index < _boat_nodes.size() else null
+	if node != null and is_instance_valid(node):
+		node.call("snap", pos, dirx, diry)
+		node.call("set_occupied", rider != 0)
+
+
+## 服务端 -> 客户端：划船中的船位（不可靠有序，和房间姿态同一频道）。
+## 自己正在划的那艘直接忽略，避免服务端回包把本地权威的位置拉着抖。
+@rpc("authority", "call_remote", "unreliable_ordered", 3)
+func _boat_pose(index: int, pos: Vector2, moving_now: bool, dirx: float, diry: float) -> void:
+	if index < 0 or index >= _boats.size() or index == _my_boat:
+		return
+	var b: Dictionary = _boats[index]
+	b["pos"] = pos
+	b["moving"] = moving_now
+	b["dirx"] = dirx
+	b["diry"] = diry
+	Net.note_received([index, pos, moving_now, dirx, diry])
 
 
 ## 沿真实路网放置路灯实体（位置由 OSM 路网一次性烘焙到 assets/lamps.json）。
@@ -802,6 +1297,8 @@ func _update_daynight() -> void:
 
 
 func _process(delta: float) -> void:
+	_update_boat_control(delta)
+	_update_boats()
 	_update_xray(delta)
 	_update_daynight()
 	_update_interact_hint(delta)
@@ -1138,6 +1635,11 @@ func allow_peer(id: int) -> void:
 	for node in get_tree().get_nodes_in_group("world_sync"):
 		var sync: MultiplayerSynchronizer = node
 		sync.set_visibility_for(id, true)
+	# 新玩家进入世界时补发一遍船位：他进服之前别人可能已经把船划走了。
+	if id != 1 and not Net.is_offline():
+		for i in _boats.size():
+			_boat_rider.rpc_id(id, i, int(_boats[i]["rider"]), _boats[i]["pos"],
+				float(_boats[i]["dirx"]), float(_boats[i]["diry"]))
 
 
 ## Server only: create a player's avatar at a free spawn point.
@@ -1191,6 +1693,8 @@ func remove_player(id: int) -> void:
 	var avatar: Node = players.get_node_or_null(str(id))
 	if avatar != null:
 		avatar.queue_free()
+	# 人掉线/退出时把他占的船释放掉，否则这艘船会永远显示「有人」
+	_release_boats_of(id)
 
 
 ## Server only: 玩家在游戏里换外观时，把新的 hero_id 写进他的 avatar。
@@ -1210,6 +1714,12 @@ func clear_run() -> void:
 		# Remove now so the next round cannot see old names this frame.
 		players.remove_child(child)
 		child.queue_free()
+	# 回合清场：船上的人也没了，把所有船恢复成空船
+	for i in _boats.size():
+		if int(_boats[i]["rider"]) != 0:
+			_boats[i]["rider"] = 0
+			_boats[i]["moving"] = false
+			_broadcast_boat(i)
 
 
 # ---------------------------------------------------------------- 传送
@@ -1222,6 +1732,9 @@ func request_teleport(world_pos: Vector2) -> void:
 	if in_room:
 		# 在房间内不允许从地图传到校园：会落到房间相机边界外、画面卡死。
 		# 房间内全屏地图本就是「房间视图（不传送）」，这里再兜一层底。
+		return
+	if _my_boat >= 0:
+		# 划船中不能从地图传送：船还停在原地，人突然回岸上会变成「幽灵划船」。
 		return
 	if Net.is_server():
 		call_deferred("_do_teleport", Net.my_id(), world_pos)
@@ -1324,6 +1837,27 @@ var _seats_campus: Array = []
 var _seats_room: Array = []
 var _near_seat: Dictionary = {}
 
+# ── 小船状态 ────────────────────────────────────────────────────────────────
+## 每艘船的服务端权威状态：[{pos: Vector2(campus 局部坐标), rider: peer id, moving: bool, dirx: float, diry: float}]
+## 服务端改 rider/pos 后广播；客户端只做表现。离线单机时本机就是服务端。
+var _boats: Array = []
+## 本地表现节点（专用服务器不建视觉，这个表为空）
+var _boat_nodes: Array = []
+## 水域掩码（1 = 水格），从 world.json 的 water 矩形生成；服务端校验与本地划船共用
+var _water_mask := PackedByteArray()
+var _water_w: int = 0
+var _water_h: int = 0
+## 本机玩家正在划的船（-1 = 不在船上）
+var _my_boat: int = -1
+## 服务端是否已确认我上船（客户端本地先上、等服务端回包；超时则撤回）
+var _boat_confirmed: bool = false
+var _boat_wait: float = 0.0
+## 上船前站的岸上位置，服务端拒绝/超时时退回去
+var _boat_return_pos := Vector2.ZERO
+## 船位回传节流
+var _boat_send_clock: float = 0.0
+var _boat_snap_at: float = 0.0
+
 # ── 多层宿舍 ────────────────────────────────────────────────────────────
 ## 楼层数。每层布局完全相同，只用一个房间实例 + 每玩家的楼层号来复用第 1 层的设计。
 const FLOOR_COUNT := 5
@@ -1389,6 +1923,10 @@ func _try_interact() -> bool:
 	if _floor_open:
 		_close_floor_panel()
 		return true
+	# 在船上：E 只有一个含义 —— 靠岸下船（找不到岸边就提示，不打断划船）
+	if _my_boat >= 0:
+		_try_disembark()
+		return true
 	if int(me.get("sit_dir")) != 0:
 		Net.sit_down(0, Vector2.ZERO)
 		return true
@@ -1420,6 +1958,12 @@ func _try_interact() -> bool:
 	if in_room and _near_door((me as Node2D).position):
 		leave_room()
 		return true
+	# 岸边小船：上船。排在宿舍之前 —— 船都停在远离宿舍楼的水边，不会打架。
+	if not in_room:
+		var boat_idx := _nearest_boat((me as Node2D).position)
+		if boat_idx >= 0:
+			_try_board(boat_idx)
+			return true
 	if _near_dorm != "":
 		enter_room("res://assets/rooms/dorm_space.json")
 		return true
@@ -1441,6 +1985,8 @@ func _face_code(face: String) -> int:
 func enter_room(path: String, floor_n: int = 1) -> bool:
 	if in_room or campus == null:
 		return false
+	if _my_boat >= 0:
+		return false                      # 划船中不能直接进宿舍（先下船）
 	var objs: Node2D = campus.get_node_or_null("Objects")
 	if objs == null:
 		return false
@@ -1892,6 +2438,16 @@ func _update_interact_hint(delta: float) -> void:
 	# 门的开合每 8Hz 定一次「该开还是该关」，动画由 RoomDoor 逐帧插值
 	_update_room_doors()
 
+	# 在船上：提示只有一个 —— 靠岸后按 E 下船。船上不参与座位/好友/宿舍优先级。
+	if _my_boat >= 0:
+		_near_seat = {}
+		_near_dorm = ""
+		_near_buddy = {}
+		_door_hint.visible = true
+		var can_land := _shore_near(_boats[_my_boat]["pos"])
+		_door_hint.text = "按 E 下船" if can_land else "靠岸后按 E 下船"
+		return
+
 	if int(me.get("sit_dir")) != 0:
 		_near_seat = {}
 		_near_dorm = ""
@@ -1955,6 +2511,19 @@ func _update_interact_hint(delta: float) -> void:
 						_door_hint.text = "%d 号房 ·「%s」的房间 · 好友可进" % [no, String(gate["name"])]
 					_:
 						_door_hint.text = "%d 号房 ·「%s」的房间 · 门锁着（E 看公告）" % [no, String(gate["name"])]
+		return
+
+	# 岸边小船：站在船边按 E 上船；被人占着就只提示、不抢。
+	var boat_idx := _nearest_boat(pos)
+	if boat_idx >= 0:
+		_near_dorm = ""
+		_near_seat = {}
+		_near_buddy = {}
+		_door_hint.visible = true
+		if int(_boats[boat_idx]["rider"]) == 0 or int(_boats[boat_idx]["rider"]) == Net.my_id():
+			_door_hint.text = "按 E 上船"
+		else:
+			_door_hint.text = "这艘小船已经有人了"
 		return
 
 	var cell: Vector2 = pos / TS

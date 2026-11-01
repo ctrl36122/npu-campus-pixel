@@ -63,6 +63,10 @@ var is_local_player: bool = false
 ## 在房间里时的楼层号（1..5）；不在房间就是 0。
 @export var room_floor: int = 0
 
+## 是否正坐在校园小船上（不上同步器：船位/占用由 Arena 的船状态广播，
+## 这里只影响本地/服务端的移动模拟：船上不做物理移动，位置由 Arena 每帧写）。
+var on_boat: bool = false
+
 const HeroDB := preload("res://scripts/sandbox/hero_db.gd")
 ## 下面三个用 preload 而不是全局类名：无头导入时 global_script_class_cache 可能为空
 const PlayerInputScript := preload("res://net/scripts/player/PlayerInput.gd")
@@ -102,7 +106,7 @@ var _occl_a: float = 1.0
 ## 进宿舍空间期间本地权威：服务器不知道你在房间里，临时冻结对自己位置的 reconcile，
 ## 否则服务器每帧把人拉回校园，而相机 limit 卡在房间内 → 你被困在房间边界外、看不到自己。
 var _room_freeze := false
-var _stand_req_at := 0.0
+
 ## 连续多少个 tick「按着方向键却一步没挪」才触发脱困（8 × 33ms ≈ 0.27s）。
 ## 正常撞墙会被切向滑动救掉，不会走到这一步；只有卡进碰撞体里才需要蹭出去。
 const STUCK_TICKS := 8
@@ -200,6 +204,30 @@ func _room_state(inside: bool, floor_n: int, pos: Vector2) -> void:
 		_publish_pose(pos)
 
 
+## 上 / 下校园小船。on = true：吸附到船位、关闭碰撞（水面是实心碰撞，人站在船上
+## 不能再被水推），后续位置由 Arena 每帧写在 position 上；
+## on = false：恢复碰撞并像起床一样先找空位（岸边可能有长椅/树/花坛，防止嵌进去）。
+func set_boat_state(on: bool, pos: Vector2) -> void:
+	on_boat = on
+	sit_dir = 0
+	_local_pose = 0
+	if sprite != null:
+		sprite.rotation = 0.0
+		sprite.offset = SPRITE_OFFSET
+	if visual != null:
+		visual.z_index = 0
+	teleport_to(pos)
+	_set_collision(not on)
+	if on:
+		velocity = Vector2.ZERO
+	else:
+		_step_out()
+	_update_visual()
+	# 服务端是权威：上/下船这次传送立刻广播一份（负 seq，远端一定认作新快照）
+	if Net.is_server():
+		_publish_pose(position)
+
+
 ## 房间内的姿态发布序号。校园里 server_state.seq 用 processed_seq（服务端每模拟
 ## 一条命令就 +1），房间内服务端不模拟命令、processed_seq 永远不动 —— 远端靠
 ## 「seq 变了」才把新位置喂给 RemoteSmoother，序号不动 = 远端永远冻在进房位置，
@@ -225,8 +253,8 @@ func _push_room_pose(pos: Vector2, dir: int) -> void:
 		return
 	if multiplayer.get_remote_sender_id() != owner_peer_id:
 		return
-	if not room_inside:
-		return                      # 没登记进房就不接受，防止乱传坐标
+	if not (room_inside or on_boat):
+		return                      # 没登记进房/上船就不接受，防止乱传坐标
 	position = pos
 	_publish_pose(pos)
 	sit_dir = clampi(dir, 0, 8)
@@ -299,17 +327,6 @@ func lay_at(pos: Vector2, dir_name: String) -> void:
 ## 是否在躺着（含，本地/远端都读这个判断）
 func is_lying() -> bool:
 	return sit_dir >= LIE_BASE
-
-
-## 坐下后按方向键 → 起身。本地立刻生效，同时告诉服务端（座位状态它说了算）。
-## 400ms 节流：起身要等广播回来，期间每一帧都会走到这里，不挡就会刷 RPC。
-func _request_stand() -> void:
-	var now := float(Time.get_ticks_msec())
-	if now - _stand_req_at < 400.0:
-		return
-	_stand_req_at = now
-	stand_up()
-	Net.sit_down(0, Vector2.ZERO)
 
 
 func _set_collision(on: bool) -> void:
@@ -524,14 +541,16 @@ func _simulate(command: Dictionary) -> void:
 ## prediction and the replay during reconciliation. If these ever differed, the
 ## client would be corrected every tick.
 func _apply_movement(command: Dictionary) -> void:
+	# 在船上：位置由 Arena 每帧贴在船位，本地输入只驱动船、不再驱动角色本身。
+	# 服务端/客户端走同一个判断，不会出现「自己看着在船上、服务端把人往水里推」。
+	if on_boat:
+		velocity = Vector2.ZERO
+		_moving = false
+		return
 	var direction: Vector2 = Vector2(float(command.get("x", 0.0)), float(command.get("y", 0.0))).limit_length()
-	# 坐着就不动。本地预测和服务端模拟都走这个函数，一处判断两边一致，
-	# 否则会出现「自己看着没动、别人看着在椅子上蹭」。
+	# 坐 / 躺状态下方向键不再响应（以前按方向键会自动起身，容易误触把刚坐下的
+	# 人带离椅子）。必须再按一次 E 站起来，起身后才能继续移动。
 	if sit_dir != 0:
-		# 按方向键 = 想走，那就站起来。不然玩家坐下后按 WASD 毫无反应，
-		# 十个里有九个会以为卡死了。本地先起，手感不用等一个 RTT。
-		if direction.length() > 0.1 and is_local_player:
-			_request_stand()
 		velocity = Vector2.ZERO
 		_moving = false
 		return
