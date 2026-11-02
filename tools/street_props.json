@@ -1,0 +1,261 @@
+[
+ {
+  "name": "快递柜·星天苑B座",
+  "sprite": "res://assets/props_locker.png",
+  "x": 87.43,
+  "baseY": 175.7,
+  "bottom": 0
+ },
+ {
+  "name": "快递柜·云天苑B座",
+  "sprite": "res://assets/props_locker.png",
+  "x": 278.48,
+  "baseY": 144.0,
+  "bottom": 0
+ },
+ {
+  "name": "快递柜·海天苑学生宿舍1号楼",
+  "sprite": "res://assets/props_locker.png",
+  "x": 40.17,
+  "baseY": 531.7,
+  "bottom": 0
+ },
+ {
+  "name": "快递柜·南山苑",
+  "sprite": "res://assets/props_locker.png",
+  "x": 344.02,
+  "baseY": 540.2,
+  "bottom": 0
+ },
+ {
+  "name": "店招·学府快餐",
+  "sprite": "res://assets/props_sign_yellow.png",
+  "x": 146.55,
+  "baseY": 176.4,
+  "bottom": 0
+ },
+ {
+  "name": "店招·宝来惠超市",
+  "sprite": "res://assets/props_sign_red.png",
+  "x": 95.85,
+  "baseY": 68.4,
+  "bottom": 0
+ },
+ {
+  "name": "售货机·翱翔体育馆",
+  "sprite": "res://assets/props_vending.png",
+  "x": 373.35,
+  "baseY": 160.4,
+  "bottom": 0
+ },
+ {
+  "name": "售货机·星天苑D座",
+  "sprite": "res://assets/props_vending.png",
+  "x": 89.2,
+  "baseY": 140.3,
+  "bottom": 0
+ },
+ {
+  "name": "售货机·教学东楼A座",
+  "sprite": "res://assets/props_vending.png",
+  "x": 286.15,
+  "baseY": 257.7,
+  "bottom": 0
+ },
+ {
+  "name": "自行车·星天苑A座-1",
+  "sprite": "res://assets/props_bike.png",
+  "x": 175.6,
+  "baseY": 180.7,
+  "bottom": 0
+ },
+ {
+  "name": "自行车·星天苑A座-2",
+  "sprite": "res://assets/props_bike.png",
+  "x": 178.65,
+  "baseY": 180.7,
+  "bottom": 0
+ },
+ {
+  "name": "自行车·星天苑A座-3",
+  "sprite": "res://assets/props_bike.png",
+  "x": 181.7,
+  "baseY": 180.7,
+  "bottom": 0
+ },
+ {
+  "name": "自行车·星天苑A座-4",
+  "sprite": "res://assets/props_bike.png",
+  "x": 184.75,
+  "baseY": 180.7,
+  "bottom": 0
+ },
+ {
+  "name": "自行车·星天苑A座-5",
+  "sprite": "res://assets/props_bike.png",
+  "x": 187.8,
+  "baseY": 180.7,
+  "bottom": 0
+ },
+ {
+  "name": "自行车·云天苑餐厅-1",
+  "sprite": "res://assets/props_bike.png",
+  "x": 283.25,
+  "baseY": 179.6,
+  "bottom": 0
+ },
+ {
+  "name": "自行车·云天苑餐厅-2",
+  "sprite": "res://assets/props_bike.png",
+  "x": 286.3,
+  "baseY": 179.6,
+  "bottom": 0
+ },
+ {
+  "name": "自行车·云天苑餐厅-3",
+  "sprite": "res://assets/props_bike.png",
+  "x": 289.35,
+  "baseY": 179.6,
+  "bottom": 0
+ },
+ {
+  "name": "自行车·云天苑餐厅-4",
+  "sprite": "res://assets/props_bike.png",
+  "x": 292.4,
+  "baseY": 179.6,
+  "bottom": 0
+ },
+ {
+  "name": "自行车·云天苑餐厅-5",
+  "sprite": "res://assets/props_bike.png",
+  "x": 295.45,
+  "baseY": 179.6,
+  "bottom": 0
+ },
+ {
+  "name": "自行车·教学西楼A座-1",
+  "sprite": "res://assets/props_bike.png",
+  "x": 152.18,
+  "baseY": 337.4,
+  "bottom": 0
+ },
+ {
+  "name": "自行车·教学西楼A座-2",
+  "sprite": "res://assets/props_bike.png",
+  "x": 155.22,
+  "baseY": 337.4,
+  "bottom": 0
+ },
+ {
+  "name": "自行车·教学西楼A座-3",
+  "sprite": "res://assets/props_bike.png",
+  "x": 158.28,
+  "baseY": 337.4,
+  "bottom": 0
+ },
+ {
+  "name": "自行车·教学西楼A座-4",
+  "sprite": "res://assets/props_bike.png",
+  "x": 161.32,
+  "baseY": 337.4,
+  "bottom": 0
+ },
+ {
+  "name": "自行车·海天苑学生食堂-1",
+  "sprite": "res://assets/props_bike.png",
+  "x": 86.48,
+  "baseY": 530.7,
+  "bottom": 0
+ },
+ {
+  "name": "自行车·海天苑学生食堂-2",
+  "sprite": "res://assets/props_bike.png",
+  "x": 89.53,
+  "baseY": 530.7,
+  "bottom": 0
+ },
+ {
+  "name": "自行车·海天苑学生食堂-3",
+  "sprite": "res://assets/props_bike.png",
+  "x": 92.58,
+  "baseY": 530.7,
+  "bottom": 0
+ },
+ {
+  "name": "自行车·海天苑学生食堂-4",
+  "sprite": "res://assets/props_bike.png",
+  "x": 95.63,
+  "baseY": 530.7,
+  "bottom": 0
+ },
+ {
+  "name": "自行车·留学生公寓-1",
+  "sprite": "res://assets/props_bike.png",
+  "x": 70.9,
+  "baseY": 468.5,
+  "bottom": 0
+ },
+ {
+  "name": "自行车·留学生公寓-2",
+  "sprite": "res://assets/props_bike.png",
+  "x": 73.95,
+  "baseY": 468.5,
+  "bottom": 0
+ },
+ {
+  "name": "自行车·留学生公寓-3",
+  "sprite": "res://assets/props_bike.png",
+  "x": 77.0,
+  "baseY": 468.5,
+  "bottom": 0
+ },
+ {
+  "name": "垃圾桶·星天苑南餐厅",
+  "sprite": "res://assets/props_bin.png",
+  "x": 128.73,
+  "baseY": 175.8,
+  "bottom": 0
+ },
+ {
+  "name": "垃圾桶·星天苑北餐厅",
+  "sprite": "res://assets/props_bin.png",
+  "x": 134.03,
+  "baseY": 66.5,
+  "bottom": 0
+ },
+ {
+  "name": "垃圾桶·云天苑餐厅",
+  "sprite": "res://assets/props_bin.png",
+  "x": 279.97,
+  "baseY": 179.5,
+  "bottom": 0
+ },
+ {
+  "name": "垃圾桶·海天苑学生宿舍2号楼",
+  "sprite": "res://assets/props_bin.png",
+  "x": 93.92,
+  "baseY": 593.0,
+  "bottom": 0
+ },
+ {
+  "name": "垃圾桶·亚洲最大水上图书馆",
+  "sprite": "res://assets/props_bin.png",
+  "x": 227.98,
+  "baseY": 380.7,
+  "bottom": 0
+ },
+ {
+  "name": "垃圾桶·翱翔学生中心",
+  "sprite": "res://assets/props_bin.png",
+  "x": 235.38,
+  "baseY": 171.9,
+  "bottom": 0
+ },
+ {
+  "name": "垃圾桶·启翔楼",
+  "sprite": "res://assets/props_bin.png",
+  "x": 232.32,
+  "baseY": 656.2,
+  "bottom": 0
+ }
+]
