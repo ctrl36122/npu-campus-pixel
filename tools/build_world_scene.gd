@@ -41,6 +41,8 @@ func _initialize() -> void:
 	_build_objects(d)
 	_build_props(d)
 	_build_water(d)
+	_build_bridges(d)
+	_build_water_surface(d)
 
 	var ps := PackedScene.new()
 	var err := ps.pack(_root)
@@ -299,16 +301,75 @@ func _build_water(d) -> void:
 	var water = d.get("water", [])
 	if water.is_empty():
 		return
+	# 桥下通道水：不生成水碰撞（玩家在桥上可步行穿越，不会被当成踩水弹开）。
+	# 船靠水域掩码（Arena._build_water_mask 读 world.json）约束，桥下仍算水，可通行。
+	var channels := _bridge_channels(d)
 	var body := StaticBody2D.new()
 	body.name = "Water"
 	_attach(_root, body)
 	for w in water:
+		var wx := float(w.get("x", 0))
+		var wy := float(w.get("y", 0))
+		var ww := float(w.get("w", 1))
+		var wh := float(w.get("h", 1))
+		if _rect_under_any(wx, wy, ww, wh, channels):
+			continue
 		var rect := RectangleShape2D.new()
-		rect.size = Vector2(float(w.get("w", 1)), float(w.get("h", 1))) * CELL
+		rect.size = Vector2(ww, wh) * CELL
 		var cs := CollisionShape2D.new()
 		cs.name = "w"
 		cs.shape = rect
-		cs.position = Vector2(
-			(float(w.get("x", 0)) + float(w.get("w", 1)) * 0.5) * CELL,
-			(float(w.get("y", 0)) + float(w.get("h", 1)) * 0.5) * CELL)
+		cs.position = Vector2((wx + ww * 0.5) * CELL, (wy + wh * 0.5) * CELL)
 		_attach(body, cs)
+
+
+# ---------------------------------------------------------------- 桥下免碰撞 + 桥体 / 通道水面
+## 取所有桥的「桥下通道」矩形（格），用来从水碰撞里剔除这些格。
+func _bridge_channels(d) -> Array:
+	var out := []
+	for b in d.get("bridges", []):
+		out.append({"x": float(b.get("cx", 0.0)), "y": float(b.get("cy", 0.0)),
+					"w": float(b.get("cw", 0.0)), "h": float(b.get("ch", 0.0))})
+	return out
+
+
+func _rect_under_any(x: float, y: float, w: float, h: float, channels: Array) -> bool:
+	for c in channels:
+		var cx := float(c["x"]); var cy := float(c["y"])
+		var cw := float(c["w"]); var ch := float(c["h"])
+		if x >= cx and y >= cy and x + w <= cx + cw and y + h <= cy + ch:
+			return true
+	return false
+
+
+## 拱桥视觉节点：挂在 Objects 层参与 y 排序（船从桥下过时被桥体挡住）。
+func _build_bridges(d) -> void:
+	var bridges = d.get("bridges", [])
+	if bridges == null or bridges.is_empty():
+		return
+	var objs := _root.get_node_or_null("Objects")
+	if objs == null:
+		return
+	var script: GDScript = load("res://net/scenes/Bridge.gd")
+	for i in bridges.size():
+		var node := Node2D.new()
+		node.name = "Bridge_%d" % i
+		node.set_script(script)
+		_attach(objs, node)
+		node.call("setup", bridges[i])
+
+
+## 运行时补画桥下新增通道水的蓝面（烘焙地面 PNG 没这几条）。放在 Ground 层，
+## 位于 Objects 之下，所以桥体/树/建筑会盖在它上面。
+func _build_water_surface(d) -> void:
+	var bridges = d.get("bridges", [])
+	if bridges == null or bridges.is_empty():
+		return
+	var ground := _root.get_node_or_null("Ground")
+	if ground == null:
+		return
+	var node := Node2D.new()
+	node.name = "BridgeWater"
+	node.set_script(load("res://net/scenes/WaterSurface.gd"))
+	_attach(ground, node)
+	node.call("setup", bridges)

@@ -128,6 +128,7 @@ func _ready() -> void:
 	#    服务端要校验船位、裁定谁在船上，只是不建任何视觉。
 	_build_water_mask()
 	_init_boats()
+	_load_bridges()
 
 	# 1) 挂校园
 	campus = CAMPUS.instantiate()
@@ -258,6 +259,43 @@ func _water_rects() -> Array:
 	if parsed is Dictionary:
 		return parsed.get("water", [])
 	return []
+
+
+## 载入桥甲板足迹（格）。玩家站在甲板上时由 _update_bridge_z 临时抬升 z_index，
+## 否则桥体（原点在甲板南缘）按 y 排序会盖住玩家、让人"消失在桥里"。
+func _load_bridges() -> void:
+	_bridge_decks.clear()
+	var f := FileAccess.open("res://assets/world.json", FileAccess.READ)
+	if f == null:
+		return
+	var parsed = JSON.parse_string(f.get_as_text())
+	if not (parsed is Dictionary):
+		return
+	for b in parsed.get("bridges", []):
+		_bridge_decks.append(Rect2(float(b.get("x", 0.0)), float(b.get("y", 0.0)),
+			float(b.get("w", 0.0)), float(b.get("h", 0.0))))
+
+
+## 玩家（校园局部像素坐标）是否落在某座桥的甲板上。
+func _on_bridge_deck(local: Vector2) -> bool:
+	var c := local / TS
+	for r in _bridge_decks:
+		if c.x >= r.position.x and c.x < r.position.x + r.size.x \
+				and c.y >= r.position.y and c.y < r.position.y + r.size.y:
+			return true
+	return false
+
+
+## 每帧：站在桥甲板上的玩家临时抬到高 z（桥体/楼/船都压在下面），
+## 离开桥恢复 0（回到正常 y 排序）。只用纯视觉、无需同步。
+func _update_bridge_z() -> void:
+	if players == null:
+		return
+	for a in players.get_children():
+		if not (a is Node2D):
+			continue
+		var on := _on_bridge_deck((a as Node2D).position)
+		(a as Node2D).z_index = 100 if on else 0
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1340,6 +1378,7 @@ func _update_daynight() -> void:
 func _process(delta: float) -> void:
 	_update_boat_control(delta)
 	_update_boats()
+	_update_bridge_z()
 	_update_xray(delta)
 	_update_daynight()
 	_update_interact_hint(delta)
@@ -1898,6 +1937,9 @@ var _boat_return_pos := Vector2.ZERO
 ## 船位回传节流
 var _boat_send_clock: float = 0.0
 var _boat_snap_at: float = 0.0
+## 桥甲板足迹（格），用于判断玩家是否站在桥上。站在桥上要临时抬升 z_index，
+## 否则会被桥体（原点在甲板南缘、y 排序比玩家脚底更靠南）盖住，看不到自己。
+var _bridge_decks: Array = []
 
 # ── 多层宿舍 ────────────────────────────────────────────────────────────
 ## 楼层数。每层布局完全相同，只用一个房间实例 + 每玩家的楼层号来复用第 1 层的设计。
