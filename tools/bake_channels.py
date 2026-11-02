@@ -42,10 +42,13 @@ CELL = 8
 CHUNK = 1024                      # 每块 1024×1024 像素（末列/末行是补边的小块）
 
 # 水面调色板（从烘焙图里采样得到）
-WATER_BASE = (94, 169, 201)
-WATER_LIGHT = (104, 179, 209)
-WATER_DARK = (79, 155, 187)
-WATER_SPARK = (118, 193, 223)
+# 水面 4 色（2026-11-02 之后是"浑绿"版，见 tools/bake_water_road.py）。
+# 改水色时必须同步这里，否则本脚本认不出水面、河道会漏烘。
+_WATER_OLD = {(94, 169, 201), (104, 179, 209), (79, 155, 187), (118, 193, 223)}
+WATER_BASE = (104, 146, 132)
+WATER_LIGHT = (120, 164, 146)
+WATER_DARK = (88, 128, 116)
+WATER_SPARK = (142, 188, 164)
 WATER_COLORS = {WATER_BASE, WATER_LIGHT, WATER_DARK, WATER_SPARK}
 
 SAND = (201, 187, 150)

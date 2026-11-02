@@ -88,7 +88,7 @@ const MINI_PXP: int = 4
 ## 校园局部像素尺寸（8px/格）
 const LOCAL_PX: Vector2 = Vector2(3392, 6400)
 ## 小地图缓存（首次启动烘焙，之后直接读；分辨率变了要换文件名）
-const MINIMAP_CACHE: String = "user://minimap_cache_v20.png"
+const MINIMAP_CACHE: String = "user://minimap_cache_v21.png"
 
 @onready var players: Node2D = $Players
 @onready var spawner: MultiplayerSpawner = $PlayerSpawner

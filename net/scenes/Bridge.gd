@@ -33,7 +33,7 @@ const PAVE_DK  := Color(0.71, 0.67, 0.56)
 const TUNNEL   := Color(0.07, 0.12, 0.16)      # 拱洞深处
 const RAIL     := Color(0.90, 0.88, 0.84)      # 栏杆石（受光顶面）
 const RAIL_DK  := Color(0.47, 0.45, 0.43)      # 栏杆立柱
-const WATER    := Color(0.345, 0.659, 0.784)   # 拱洞里透出的水色
+const WATER    := Color(0.408, 0.573, 0.518)   # 拱洞里透出的水色（跟地面图的新水色对齐）
 const SHADOW   := Color(0.0, 0.0, 0.0, 0.20)   # 投在水面上的影
 
 
