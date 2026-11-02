@@ -14,6 +14,24 @@ const WATER_LT := Color(0.408, 0.690, 0.816)   # 受光高光 (104,176,208)
 var _rects: Array = []
 
 
+## 自己读 world.json，不依赖生成器写进来的数据 —— Array/Rect2 这类成员存不进
+## world.tscn（和 Bridge.deck_w 同一个坑），场景一加载就空，蓝面全丢。
+func _ready() -> void:
+	if _rects.is_empty():
+		_load_from_world()
+
+
+func _load_from_world() -> void:
+	var f := FileAccess.open("res://assets/world.json", FileAccess.READ)
+	if f == null:
+		return
+	var parsed: Variant = JSON.parse_string(f.get_as_text())
+	f.close()
+	if not (parsed is Dictionary):
+		return
+	setup((parsed as Dictionary).get("bridges", []))
+
+
 func setup(bridges: Array) -> void:
 	_rects.clear()
 	for b in bridges:

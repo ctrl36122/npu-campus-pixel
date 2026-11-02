@@ -219,6 +219,10 @@ func _ready() -> void:
 	# 联机时出生点由服务端说了算，XGD_SPAWN 只对单机/首次连接有效，截图用这个。
 	if OS.has_environment("XGD_FORCE_SPAWN"):
 		_force_spawn_debug()
+	# 调试：XGD_TEST_BOAT="船号,x,y"（格）—— 把某艘船摆到指定水域并让本地玩家上船，
+	# 用来核对「小船从拱桥底下穿过」时的遮挡与水面衔接（截图用，正常玩无效）。
+	if OS.has_environment("XGD_TEST_BOAT"):
+		_boat_debug()
 
 
 ## 生成校园 NPC。挂在 Objects 下是为了和建筑/树共用 y 排序（走到树后面会被遮住）。
@@ -288,14 +292,17 @@ func _on_bridge_deck(local: Vector2) -> bool:
 
 ## 每帧：站在桥甲板上的玩家临时抬到高 z（桥体/楼/船都压在下面），
 ## 离开桥恢复 0（回到正常 y 排序）。只用纯视觉、无需同步。
+## 划船时不抬 —— 船在桥洞底下，人必须跟着船一起被桥体挡住，否则「人穿桥而过」。
 func _update_bridge_z() -> void:
 	if players == null:
 		return
 	for a in players.get_children():
 		if not (a is Node2D):
 			continue
-		var on := _on_bridge_deck((a as Node2D).position)
-		(a as Node2D).z_index = 100 if on else 0
+		var lifted := false
+		if not bool(a.get("on_boat")):
+			lifted = _on_bridge_deck((a as Node2D).position)
+		(a as Node2D).z_index = 100 if lifted else 0
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -2250,6 +2257,29 @@ func _force_spawn_debug() -> void:
 	var p: Vector2 = Vector2(float(raw[0]), float(raw[1])) * TS
 	(me as Node2D).call("teleport_to", p)
 	print("[dbg] 强制传送到 ", p)
+
+
+## 调试：XGD_TEST_BOAT="船号,x,y"（格）。把船摆到指定水域、本地玩家上船，
+## 用来核对小船钻拱桥时的 y 排序遮挡（正常玩无效）。
+func _boat_debug() -> void:
+	await get_tree().create_timer(3.2).timeout
+	var raw := OS.get_environment("XGD_TEST_BOAT").split(",")
+	if raw.size() != 3:
+		return
+	var idx := int(raw[0])
+	var cell := Vector2(float(raw[1]), float(raw[2]))
+	if idx < 0 or idx >= _boats.size():
+		return
+	var me: Node = _local_avatar()
+	if me == null:
+		return
+	var p: Vector2 = cell * TS
+	_boats[idx]["pos"] = p
+	(me as Node2D).position = p
+	if idx < _boat_nodes.size():
+		_boat_nodes[idx].call("set_net", p, false, 0.0, 0.0)
+	var ok := _try_board(idx)
+	print("[dbg] XGD_TEST_BOAT 船 ", idx, " 摆到 ", cell, " 上船=", ok)
 
 
 ## 调试：进房间后一路往南走，应该踩到门垫就自动出去。

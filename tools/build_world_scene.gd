@@ -301,9 +301,10 @@ func _build_water(d) -> void:
 	var water = d.get("water", [])
 	if water.is_empty():
 		return
-	# 桥下通道水：不生成水碰撞（玩家在桥上可步行穿越，不会被当成踩水弹开）。
+	# 桥面足迹：这些格不生成水碰撞（玩家在桥上走得过去，不会被当成踩水弹开），
+	# 但桥外两侧的水照旧挡人 —— 所以是「从水矩形里抠掉桥面」而不是整条水道都放开。
 	# 船靠水域掩码（Arena._build_water_mask 读 world.json）约束，桥下仍算水，可通行。
-	var channels := _bridge_channels(d)
+	var decks := _bridge_decks(d)
 	var body := StaticBody2D.new()
 	body.name = "Water"
 	_attach(_root, body)
@@ -312,34 +313,80 @@ func _build_water(d) -> void:
 		var wy := float(w.get("y", 0))
 		var ww := float(w.get("w", 1))
 		var wh := float(w.get("h", 1))
-		if _rect_under_any(wx, wy, ww, wh, channels):
-			continue
-		var rect := RectangleShape2D.new()
-		rect.size = Vector2(ww, wh) * CELL
-		var cs := CollisionShape2D.new()
-		cs.name = "w"
-		cs.shape = rect
-		cs.position = Vector2((wx + ww * 0.5) * CELL, (wy + wh * 0.5) * CELL)
-		_attach(body, cs)
+		for piece in _cut_rects(wx, wy, ww, wh, decks):
+			var rect := RectangleShape2D.new()
+			rect.size = Vector2(piece[2], piece[3]) * CELL
+			var cs := CollisionShape2D.new()
+			cs.name = "w"
+			cs.shape = rect
+			cs.position = Vector2((piece[0] + piece[2] * 0.5) * CELL,
+								  (piece[1] + piece[3] * 0.5) * CELL)
+			_attach(body, cs)
 
 
 # ---------------------------------------------------------------- 桥下免碰撞 + 桥体 / 通道水面
-## 取所有桥的「桥下通道」矩形（格），用来从水碰撞里剔除这些格。
-func _bridge_channels(d) -> Array:
+## 桥面（可步行）足迹（格）—— 水碰撞要从这些格上让开。
+func _bridge_decks(d) -> Array:
 	var out := []
 	for b in d.get("bridges", []):
-		out.append({"x": float(b.get("cx", 0.0)), "y": float(b.get("cy", 0.0)),
-					"w": float(b.get("cw", 0.0)), "h": float(b.get("ch", 0.0))})
+		out.append({"x": float(b.get("x", 0.0)), "y": float(b.get("y", 0.0)),
+					"w": float(b.get("w", 0.0)), "h": float(b.get("h", 0.0))})
 	return out
 
 
-func _rect_under_any(x: float, y: float, w: float, h: float, channels: Array) -> bool:
-	for c in channels:
-		var cx := float(c["x"]); var cy := float(c["y"])
-		var cw := float(c["w"]); var ch := float(c["h"])
-		if x >= cx and y >= cy and x + w <= cx + cw and y + h <= cy + ch:
-			return true
-	return false
+## 把矩形 r 扣掉若干遮挡矩形，返回剩下的 [x, y, w, h] 列表（逐行扫描，同宽的相邻行合并）。
+## 只处理轴对齐矩形，够用了；桥面都远小于水矩形，拆出来的块数很少。
+func _cut_rects(x: float, y: float, w: float, h: float, holes: Array) -> Array:
+	var hit := false
+	for o in holes:
+		if x < float(o["x"]) + float(o["w"]) and float(o["x"]) < x + w \
+				and y < float(o["y"]) + float(o["h"]) and float(o["y"]) < y + h:
+			hit = true
+			break
+	if not hit:
+		return [[x, y, w, h]]
+	var out := []
+	var run: Array = []          # [x, y0, w, 行数]
+	var row := 0
+	while row < int(h):
+		var ry := y + float(row)
+		var spans: Array = [[x, x + w]]
+		for o in holes:
+			var ox := float(o["x"]); var oy := float(o["y"])
+			var ow := float(o["w"]); var oh := float(o["h"])
+			if ry < oy or ry >= oy + oh:
+				continue
+			var next: Array = []
+			for s in spans:
+				var a: float = s[0]; var b: float = s[1]
+				if ox >= b or ox + ow <= a:
+					next.append([a, b])
+					continue
+				if ox > a:
+					next.append([a, minf(ox, b)])
+				if ox + ow < b:
+					next.append([maxf(ox + ow, a), b])
+			spans = next
+		for s in spans:
+			var a: float = s[0]; var b: float = s[1]
+			if b - a <= 0.0:
+				continue
+			# 只有「紧挨着上一行、x 和宽都一样」才能并进同一块；
+			# 中间整行被桥面吃掉的必须断开，否则南北两半会被并成一块（桥面白抠了）。
+			var join: bool = run.size() > 0 \
+					and is_equal_approx(float(run[1]) + float(run[3]), ry) \
+					and is_equal_approx(float(run[0]), a) \
+					and is_equal_approx(float(run[2]), b - a)
+			if join:
+				run[3] = int(run[3]) + 1
+			else:
+				if run.size() > 0:
+					out.append([run[0], run[1], run[2], float(run[3])])
+				run = [a, ry, b - a, 1]
+		row += 1
+	if run.size() > 0:
+		out.append([run[0], run[1], run[2], float(run[3])])
+	return out
 
 
 ## 拱桥视觉节点：挂在 Objects 层参与 y 排序（船从桥下过时被桥体挡住）。
