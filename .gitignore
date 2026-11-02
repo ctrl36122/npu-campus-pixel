@@ -48,3 +48,6 @@ desktop.ini
 .vscode/
 .idea/
 shot_*.png
+
+# 地面图烘焙前的自动备份（tools/bake_channels.py 生成）
+assets/ground_bak/

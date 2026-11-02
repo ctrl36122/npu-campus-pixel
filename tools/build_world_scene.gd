@@ -42,7 +42,6 @@ func _initialize() -> void:
 	_build_props(d)
 	_build_water(d)
 	_build_bridges(d)
-	_build_water_surface(d)
 
 	var ps := PackedScene.new()
 	var err := ps.pack(_root)
@@ -404,19 +403,3 @@ func _build_bridges(d) -> void:
 		node.set_script(script)
 		_attach(objs, node)
 		node.call("setup", bridges[i])
-
-
-## 运行时补画桥下新增通道水的蓝面（烘焙地面 PNG 没这几条）。放在 Ground 层，
-## 位于 Objects 之下，所以桥体/树/建筑会盖在它上面。
-func _build_water_surface(d) -> void:
-	var bridges = d.get("bridges", [])
-	if bridges == null or bridges.is_empty():
-		return
-	var ground := _root.get_node_or_null("Ground")
-	if ground == null:
-		return
-	var node := Node2D.new()
-	node.name = "BridgeWater"
-	node.set_script(load("res://net/scenes/WaterSurface.gd"))
-	_attach(ground, node)
-	node.call("setup", bridges)
