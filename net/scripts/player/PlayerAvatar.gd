@@ -310,7 +310,16 @@ func stand_up() -> void:
 	# 往哪个方向都推不动，玩家会觉得一起来就卡死、只能重开。
 	# 所以起身时先找一个能站人的空位挪过去。
 	_step_out()
+	# ⚠️ 关键修复：把「起身落点」同步进权威快照，并让服务端广播给所有人。
+	# 否则联机时服务端那份 server_state 仍停在座位中心，而 position 又是 ALWAYS
+	# 复制（每帧从服务端覆盖到客户端）——客户端这边刚 _step_out 挪出来，下一帧
+	# 就被服务端那份旧坐标按回去、再被本地预测挪出来，反复拉扯 = 抽搐。
+	# 和 set_boat_state(false) 的退出处理保持一致：teleport_to 清掉旧预测缓冲、
+	# 把 server_state 指向新落点，服务端再 _publish_pose 广播出去。
+	teleport_to(position)
 	_update_visual()
+	if Net.is_server():
+		_publish_pose(position)
 
 
 ## 躺到床上。pos 是床上的落点（人物中心），dir_name 是躺的方向。
