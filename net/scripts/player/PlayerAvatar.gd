@@ -27,10 +27,17 @@ const OCCL_ALPHA: float = 0.55
 ## 相机缩放：1.2 是 Player.tscn 里的默认视距。
 ## 0.55 时一屏约 145 格（和网页版默认视野一致），3.0 时能看清单栋楼的窗户。
 ## 显示调试：XGD_ZOOM=0.8 可指定初始缩放（截图用），正常玩走 ZOOM_BASE。
-const ZOOM_BASE: float = 1.2
+const ZOOM_BASE: float = 1.05
 const ZOOM_MIN: float = 0.55
 const ZOOM_MAX: float = 3.0
 const ZOOM_STEP: float = 1.14
+## 角色缩放——「人和楼的比例」唯一的旋钮。
+## 角色挂在校园层下面，屏幕尺寸 = ACTOR_SCALE × CAMPUS_SCALE × zoom，
+## 所以这个值越小，人越矮、楼越显宽（校园本身不动，只是相对尺度变了）。
+## 0.375 ≈ 2.2 格高（偏大）；0.27 ≈ 1.5 格高（站在楼前比例接近真实）。
+## 调太小（<0.2）五官会糊，因为原画只有 32×48。
+## 调试：XGD_ACTOR_SCALE=0.22 / 0.3 可临时指定（截图对尺度用）。
+const ACTOR_SCALE: float = 0.27
 ## One colour per roster slot. The roster is the same on every machine, so every
 ## window agrees on who is who.
 const COLORS: Array[Color] = [Color("5b8cff"), Color("ff9f43"), Color("2ed573"), Color("ff6b9d")]
@@ -126,9 +133,16 @@ func _enter_tree() -> void:
 func _ready() -> void:
 	if OS.has_environment("XGD_ZOOM"):
 		_cam_zoom_target = clampf(OS.get_environment("XGD_ZOOM").to_float(), ZOOM_MIN, ZOOM_MAX)
-	scale = Vector2(0.375, 0.375)
-	$Name.add_theme_font_size_override("font_size", 11)
-	bubble.add_theme_font_size_override("font_size", 12)
+	# 角色在校园层里的缩放（校园层再乘 CAMPUS_SCALE，所以 0.375 × 2 = 屏幕上 0.75 倍原画）
+	var actor_sc := ACTOR_SCALE
+	if OS.has_environment("XGD_ACTOR_SCALE"):
+		actor_sc = clampf(OS.get_environment("XGD_ACTOR_SCALE").to_float(), 0.08, 1.0)
+	scale = Vector2(actor_sc, actor_sc)
+	# 名牌/气泡跟着节点一起被缩放，人越小字越小 —— 这里按比例把字号补回去，
+	# 保证不管 ACTOR_SCALE 调到多少，字在屏幕上始终是 11/12 号那么大。
+	var font_k := 0.375 / actor_sc
+	$Name.add_theme_font_size_override("font_size", int(round(11.0 * font_k)))
+	bubble.add_theme_font_size_override("font_size", int(round(12.0 * font_k)))
 	is_local_player = owner_peer_id == Net.my_id()
 	SessionFlow.configure_sync($Sync)
 	_update_name()
@@ -140,8 +154,12 @@ func _ready() -> void:
 		var cam: Camera2D = $Camera
 		cam.limit_left = 0
 		cam.limit_top = 0
-		cam.limit_right = 6784           # ⚠️ limit 用全局坐标（世界全局 = 局部×2），别改成局部值
-		cam.limit_bottom = 12800
+		# ⚠️ limit 用全局坐标（世界全局 = 局部 × CAMPUS_SCALE），别改成局部值
+		var cs := 2.0
+		if OS.has_environment("XGD_CAMPUS_SCALE"):
+			cs = clampf(OS.get_environment("XGD_CAMPUS_SCALE").to_float(), 1.0, 8.0)
+		cam.limit_right = int(3392.0 * cs)
+		cam.limit_bottom = int(6400.0 * cs)
 	NetTick.network_tick.connect(_on_tick)
 
 

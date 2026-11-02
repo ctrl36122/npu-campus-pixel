@@ -133,7 +133,12 @@ func _ready() -> void:
 	# 1) 挂校园
 	campus = CAMPUS.instantiate()
 	campus.name = "Campus"
-	campus.scale = Vector2(CAMPUS_SCALE, CAMPUS_SCALE)
+	# 校园整体放大倍数：决定「一格在屏幕上多大」，配合 PlayerAvatar.ACTOR_SCALE 决定人物与楼的比例。
+	# 调试：XGD_CAMPUS_SCALE=2.6 可临时指定（截图对比用）。改大 → 楼更宽更气派、草地像素更粗。
+	var cs := CAMPUS_SCALE
+	if OS.has_environment("XGD_CAMPUS_SCALE"):
+		cs = clampf(OS.get_environment("XGD_CAMPUS_SCALE").to_float(), 1.0, 8.0)
+	campus.scale = Vector2(cs, cs)
 	add_child(campus)
 
 	# 2) 把玩家容器挪进校园的 Objects 层。
@@ -1888,7 +1893,7 @@ const DOOR_CHECK_HZ := 8.0
 ## 用校园那档 1.2 进去，整间房缩在屏幕中间、四周露黑，人也只有几个像素。
 ## 1.9 让房间填满屏幕，人物约 34px 高，坐着/站着一眼能分清。
 const ROOM_ZOOM := 2.1
-const CAMPUS_ZOOM := 1.2
+const CAMPUS_ZOOM := 1.05
 ## 离座位多近才能坐（像素，campus/Objects 局部空间 = 8px/格）。
 ## 这个值必须**小于「椅子中心到隔间开口」的距离**（约 25px），否则站在隔间里
 ## 任何位置按 E 都是「坐下」，走出去也一直在坐下 —— 表现就是「人被卡在宿舍空间里」。

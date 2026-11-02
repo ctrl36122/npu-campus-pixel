@@ -7,6 +7,8 @@ extends Node2D
 ## 名字用淡黄色（玩家是白色），一眼能分清谁是真人。
 
 const HeroDB := preload("res://scripts/sandbox/hero_db.gd")
+## 只为拿 ACTOR_SCALE，保证 NPC 和玩家同高（改一处两边一起变）
+const PlayerScript := preload("res://net/scripts/player/PlayerAvatar.gd")
 
 @export var display_name: String = "路人"
 @export var hero_id: String = "adam"
@@ -31,8 +33,17 @@ func _ready() -> void:
 	# Godot 会自动补偿出 scale 0.5，NPC 是直接挂进去的，所以要自己补一个。
 	_label = get_node_or_null("Visual/Name")
 	_sprite = get_node_or_null("Visual/Sprite")
+	# 和玩家同一个旋钮：XGD_ACTOR_SCALE / PlayerAvatar.ACTOR_SCALE，保证人和 NPC 一样高
+	var sc: float = PlayerScript.ACTOR_SCALE
+	if OS.has_environment("XGD_ACTOR_SCALE"):
+		sc = clampf(OS.get_environment("XGD_ACTOR_SCALE").to_float(), 0.08, 1.0)
+	var vis := get_node_or_null("Visual") as Node2D
+	if vis != null:
+		vis.scale = Vector2(sc, sc)
 	if _label != null:
 		_label.text = display_name
+		# 名牌在 Visual 里跟着缩放，字小了看不清 → 按比例补回去（和玩家同一套）
+		_label.add_theme_font_size_override("font_size", int(round(11.0 * 0.375 / sc)))
 	_apply_hero()
 	_origin = position
 	_t = phase_seed
