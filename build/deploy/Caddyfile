@@ -5,7 +5,7 @@
 #   http://你的服务器地址/dl/   下载页（纯静态，几 KB）
 #
 # 2026-10-31：安装包迁走。三端 zip 改由 GitHub Releases 托管
-# （ctrl36122/npu-campus-pixel，tag v1.2.3），本页只负责给链接。
+# （ctrl36122/npu-campus-pixel，tag v1.2.4），本页只负责给链接。
 # 原因：这条 100Mbps 出口要和 WebSocket 共用，被人用 curl+Range 刷包时
 # 在线玩家会跟着卡。老链接由下面的 302 兜底，不会失效。
 # 发布命令见 tools/_publish_release.py。
@@ -93,10 +93,10 @@
 			# 下面四条是给「已经发出去的老链接」兜底的 302，
 			# 不要再把 zip 放回 /opt/xgd/web/dl/，否则又占这条 100Mbps 出口。
 			# ------------------------------------------------------------------
-			redir /dl/XGD-Campus-win64.zip  https://ghfast.top/https://github.com/ctrl36122/npu-campus-pixel/releases/download/v1.2.3/XGD-Campus-win64.zip  302
-			redir /dl/XGD-Campus-macos.zip  https://ghfast.top/https://github.com/ctrl36122/npu-campus-pixel/releases/download/v1.2.3/XGD-Campus-macos.zip  302
-			redir /dl/XGD-Campus-android.zip https://ghfast.top/https://github.com/ctrl36122/npu-campus-pixel/releases/download/v1.2.3/XGD-Campus-android.zip 302
-			redir /dl/SHA256SUMS.txt        https://ghfast.top/https://github.com/ctrl36122/npu-campus-pixel/releases/download/v1.2.3/SHA256SUMS.txt 302
+			redir /dl/XGD-Campus-win64.zip  https://ghfast.top/https://github.com/ctrl36122/npu-campus-pixel/releases/download/v1.2.4/XGD-Campus-win64.zip  302
+			redir /dl/XGD-Campus-macos.zip  https://ghfast.top/https://github.com/ctrl36122/npu-campus-pixel/releases/download/v1.2.4/XGD-Campus-macos.zip  302
+			redir /dl/XGD-Campus-android.zip https://ghfast.top/https://github.com/ctrl36122/npu-campus-pixel/releases/download/v1.2.4/XGD-Campus-android.zip 302
+			redir /dl/SHA256SUMS.txt        https://ghfast.top/https://github.com/ctrl36122/npu-campus-pixel/releases/download/v1.2.4/SHA256SUMS.txt 302
 
 			root * /opt/xgd/web
 			file_server {
