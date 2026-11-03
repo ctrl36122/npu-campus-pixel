@@ -10,6 +10,7 @@
 生成后：godot --headless --import
 """
 import os
+import random
 
 from PIL import Image, ImageDraw
 
@@ -79,7 +80,12 @@ def car_art(body, dark, light):
 
 
 def lot_art(row_stalls=8, aisle=26):
-    """停车场地面：两排车位 + 中间车道。回车位图，尺寸随车位数量变。"""
+    """停车场地面：两排车位 + 中间车道。回车位图，尺寸随车位数量变。
+
+    边缘处理要和烘焙进地面图的路面（tools/bake_road_edge.py）保持一致：
+    最外 1px 深接缝 → 向内 1px 亮路缘石 → 沥青底 + 碎石颗粒。
+    少了这层，停车场在画面里就比旁边的路「薄」一截，像贴上去的。
+    """
     stall_w, stall_d = 15, 19
     pad = 4
     w = row_stalls * stall_w + pad * 2
@@ -87,16 +93,22 @@ def lot_art(row_stalls=8, aisle=26):
     im = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(im)
     asphalt = (100, 106, 112, 255)
-    asphalt_d = (92, 98, 104, 255)
+    seam = (70, 76, 82, 255)
+    curb = (150, 154, 158, 255)
     line = (228, 232, 236, 255)
-    curb = (168, 172, 176, 255)
-    # 沥青底 + 一条细噪点，避免死平
+
+    # 沥青底
     d.rectangle([0, 0, w - 1, h - 1], fill=asphalt)
-    for i in range(0, w, 7):
-        d.point([(i, (i * 5) % h), ((i * 3) % w, (i * 11) % h)], fill=asphalt_d)
-    # 路缘
-    d.rectangle([0, 0, w - 1, 0], fill=curb)
-    d.rectangle([0, h - 1, w - 1, h - 1], fill=curb)
+    # 碎石颗粒：2px 见方的稀疏点，跟地面上的路面同一套观感
+    rnd = random.Random(424242)
+    for _ in range((w * h) // 62):
+        gx = rnd.randrange(1, w - 2)
+        gy = rnd.randrange(1, h - 2)
+        v = rnd.choice((94, 98, 104, 110, 114))
+        d.rectangle([gx, gy, gx + 1, gy + 1], fill=(v - 2, v + 2, v + 6, 255))
+    # 外圈深接缝 + 内侧亮路缘
+    d.rectangle([0, 0, w - 1, h - 1], outline=seam)
+    d.rectangle([1, 1, w - 2, h - 2], outline=curb)
     # 两排车位线
     for r in (0, 1):
         y0 = pad + r * (stall_d + aisle)

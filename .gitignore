@@ -51,3 +51,11 @@ shot_*.png
 
 # 地面图烘焙前的自动备份（tools/bake_channels.py 生成）
 assets/ground_bak/
+
+# 路面倒角烘焙的源图（tools/bake_road_edge.py 生成，需入库才能重算）
+# 注意：不建议忽略 —— 丢了的话重跑会把已经烘过边的地面再烘一遍
+road_edge_preview.png
+road_edge_zoom.png
+shot_*.png.import
+road_edge_preview.png.import
+road_edge_zoom.png.import
