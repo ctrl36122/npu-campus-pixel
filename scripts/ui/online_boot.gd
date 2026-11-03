@@ -609,10 +609,13 @@ func _build_settings(layer: CanvasLayer) -> void:
 	save_btn.pressed.connect(_apply_nick)
 	nr.add_child(save_btn)
 
-	# 外观
+	# 外观：12 个可选外观用网格排（每行 6 个，两行），
+	# 单排 HBox 会撑到 ~690px、溢出 400px 宽的设置面板（手机上尤其明显）
 	col.add_child(_label("外观", 12, "#8a99a6"))
-	var hr := HBoxContainer.new()
-	hr.add_theme_constant_override("separation", 6)
+	var hr := GridContainer.new()
+	hr.columns = 6
+	hr.add_theme_constant_override("h_separation", 6)
+	hr.add_theme_constant_override("v_separation", 6)
 	col.add_child(hr)
 	var HeroDB := preload("res://scripts/sandbox/hero_db.gd")
 	for i in HeroDB.HEROES.size():

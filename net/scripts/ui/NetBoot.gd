@@ -117,9 +117,11 @@ func _build_ui() -> void:
 	_name_edit.add_theme_font_override("font", f)
 	r1.add_child(_name_edit)
 
-	# 外观
-	var r2 := HBoxContainer.new()
-	r2.add_theme_constant_override("separation", 6)
+	# 外观：12 个外观用网格排（每行 6 个），单排会溢出 330px 宽的面板
+	var r2 := GridContainer.new()
+	r2.columns = 6
+	r2.add_theme_constant_override("h_separation", 6)
+	r2.add_theme_constant_override("v_separation", 6)
 	col.add_child(r2)
 	for i in HeroDB.HEROES.size():
 		var hero = HeroDB.HEROES[i]

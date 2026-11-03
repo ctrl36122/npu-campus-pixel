@@ -121,8 +121,11 @@ func _build() -> void:
 	pick_lbl.add_theme_color_override("font_color", Color(0.78, 0.82, 0.78))
 	right.add_child(pick_lbl)
 
-	var bar := HBoxContainer.new()
-	bar.add_theme_constant_override("separation", 8)
+	# 12 个外观装进网格（每行 6 个、两行），单排 72px 的卡会撑到 ~950px 溢出面板
+	var bar := GridContainer.new()
+	bar.columns = 6
+	bar.add_theme_constant_override("h_separation", 8)
+	bar.add_theme_constant_override("v_separation", 8)
 	right.add_child(bar)
 
 	for i in HeroDB.HEROES.size():
