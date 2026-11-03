@@ -40,9 +40,11 @@ WORLD_W, WORLD_H = 3392, 6400          # 424×8, 800×8
 # ---- 强度（亮度倍率，1.0 = 不变）----
 SHOULDER = 0.72        # 路肩：草地被踩出来的土，向 DIRT 混色的比例
 DIRT = (163, 150, 118)  # 土色
-SHADOW = 0.90          # 紧贴路缘的接触影（只打在背光侧 下/右）
-INNER_RIM = 0.82       # 路面最外 1px 压暗 = 与地面的接缝
-LIP = 1.10             # 受光侧（上/左）内侧倒角
+BEVEL_N = 1.22         # 受光侧（上/左）最外 1px：路沿的高光边
+BEVEL_W = 1.12
+BEVEL_S = 0.78         # 背光侧（下/右）最外 1px：路沿的立面
+BEVEL_E = 0.90
+SHADOW = 0.82          # 背光侧路肩上再压一道（土也要有影子）
 DOT_LIGHT = 1.05       # 路面碎石高光点
 DOT_DARK = 0.95        # 路面碎石暗点
 
@@ -119,10 +121,8 @@ def build(im):
     W, H = im.size
     R = road_mask(im)
     inner1 = erode(R, 1)
-    inner2 = erode(R, 2)
 
     ring0 = and_not(R, inner1)          # 路面最外 1px
-    ring1 = and_not(inner1, inner2)     # 向内第 2px
 
     out = im
 
@@ -133,15 +133,20 @@ def build(im):
     dirt = Image.new("RGB", (W, H), DIRT)
     out = Image.composite(Image.blend(out, dirt, SHOULDER), out, shoulder)
 
-    # ② 接触影：只打在背光侧（下/右），1px 压深
+    # ② 背光侧（下/右）的路肩再压暗一层，土也要有影子
     shadow = ImageChops.lighter(and_not(shift(R, 0, 1), R), and_not(shift(R, 1, 0), R))
     out = paint(out, SHADOW, shadow)
 
-    # ③ 内圈：接缝压暗 + 受光侧倒角
-    out = paint(out, INNER_RIM, ring0)
-    lip = and_not(ring1, shift(R, 0, 1))                     # 上邻是草地
-    lip = ImageChops.lighter(lip, and_not(ring1, shift(R, 1, 0)))
-    out = paint(out, LIP, lip)
+    # ③ 方向性倒角：路面最外 1px，受光侧亮、背光侧暗 —— 这条是「厚度」的主要来源，
+    #    1 格宽的小路全靠它才不像贴纸
+    n_edge = and_not(ring0, shift(R, 0, 1))    # 上邻是草地
+    s_edge = and_not(ring0, shift(R, 0, -1))
+    w_edge = and_not(ring0, shift(R, 1, 0))
+    e_edge = and_not(ring0, shift(R, -1, 0))
+    out = paint(out, BEVEL_N, n_edge)
+    out = paint(out, BEVEL_W, w_edge)
+    out = paint(out, BEVEL_S, s_edge)
+    out = paint(out, BEVEL_E, e_edge)
 
     # ④ 路面碎石纹理：现在是纯色平涂，放大看是一块死灰
     dot_n = Image.effect_noise((W // 2, H // 2), 26).resize((W, H), Image.NEAREST)
