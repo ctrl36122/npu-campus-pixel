@@ -2,9 +2,12 @@
 # -*- coding: utf-8 -*-
 """给路面烘一层「路缘石 + 倒角」，让它从贴纸变成有厚度的铺装。
 
-背景：路面是烘死在 assets/ground/g{cx}_{cy}.png 里的平涂灰色（8px/格），
-和草地之间是硬切的 —— 远看就像在草坪上刷了块灰漆。这里不动路的位置，
-只在**路面内侧**加一圈 1~2px 的边：
+⚠️ 这个脚本现在只管**边缘**这一段。整条流程（按 OSM 中心线分级加宽 + 重铺材质 +
+路缘石 + 标线 + 边缘）走 `tools/bake_roads.py`，它会 import 本文件的 `build(im, R)`。
+单独跑本文件 = 只做倒角，没有矢量加宽。
+
+背景：路面是烘死在 assets/ground/g{cx}_{cy}.png 里的（8px/格），最初是平涂灰、
+和草地硬切 —— 远看就像在草坪上刷了块灰漆。这里不动路的位置，只在**路面内侧**加一圈边：
 
     最外 1px   ：压暗（路缘石背光的那一道竖面）
     向内 1px    ：提亮（路缘石顶面，受光）
@@ -117,9 +120,12 @@ def paint(base, factor, mask):
     return Image.composite(adj, base, mask)
 
 
-def build(im):
+def build(im, R=None):
+    """R：路面掩码。给 None 时从图里认（只做边缘）；由 bake_roads.py 传入的
+    是「矢量分级加宽后」的掩码 —— 边缘必须贴着新形状走，不能自己再认一遍。"""
     W, H = im.size
-    R = road_mask(im)
+    if R is None:
+        R = road_mask(im)
     inner1 = erode(R, 1)
 
     ring0 = and_not(R, inner1)          # 路面最外 1px

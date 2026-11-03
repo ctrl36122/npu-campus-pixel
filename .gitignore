@@ -61,3 +61,7 @@ road_edge_preview.png.import
 road_edge_zoom.png.import
 *_zoom.png.import
 before_after.png.import
+# 路面改造的中间对比图
+cmp_*.png.import
+road_mask_full.png.import
+road_before_after.png.import
