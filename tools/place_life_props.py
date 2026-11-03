@@ -91,6 +91,50 @@ def grass_mask():
     return grid
 
 
+def pitch_mask(world):
+    """运动场禁停掩码：足球/篮球/排球/网球/操场等球场地面 sprite。
+
+    这些场地在 world.json 里是 Ground 层 props（sprite 在 assets/pitches/ 下），
+    **不是建筑多边形** —— grass_mask 会把它当普通草地放行，near_building 又满足
+    （挨着宿舍），于是停车场被铺到球场正中央（用户原话「星天苑操场怎么有个停车场纯胡扯」）。
+    这里单独建一张禁停掩码，选址时直接跳过。"""
+    grid = [[0] * W for _ in range(H)]
+    for p in world.get("props", []):
+        sp = str(p.get("sprite", ""))
+        if "pitches/" not in sp:
+            continue
+        x = int(round(float(p["x"])))
+        by = float(p.get("baseY", 0))
+        ww = hh = 1
+        try:
+            im = Image.open(os.path.join(ROOT, sp.replace("res://", "")))
+            ww = max(1, int(round(im.width / CELL)))
+            hh = max(1, int(round(im.height / CELL)))
+        except Exception:
+            pass
+        y0 = int(round(by - hh))
+        for yy in range(y0, int(round(by))):
+            for xx in range(x, x + ww):
+                if 0 <= xx < W and 0 <= yy < H:
+                    grid[yy][xx] = 1
+    return grid
+
+
+def _dilate(grid, pad):
+    if pad <= 0:
+        return grid
+    out = [[0] * W for _ in range(H)]
+    for y in range(H):
+        for x in range(W):
+            if grid[y][x]:
+                for dy in range(-pad, pad + 1):
+                    for dx in range(-pad, pad + 1):
+                        nx, ny = x + dx, y + dy
+                        if 0 <= nx < W and 0 <= ny < H:
+                            out[ny][nx] = 1
+    return out
+
+
 def poly_fill(polys):
     from PIL import ImageDraw
     m = Image.new("L", (W, H), 0)
@@ -121,6 +165,8 @@ def main():
 
     roads = road_mask()
     grass = grass_mask()
+    # 运动场（pitches/ sprite）一律禁停，外扩 2 格避免紧贴球场边线
+    pitch = _dilate(pitch_mask(w), 2)
     bpoly = poly_fill([b.get("poly", []) for b in w.get("buildings", [])])
 
     water = [[0] * W for _ in range(H)]
@@ -180,7 +226,7 @@ def main():
             return False
         for y in range(y0, y0 + hh):
             for x in range(x0, x0 + ww):
-                if busy[y][x] or roads[y][x] or not grass[y][x]:
+                if busy[y][x] or roads[y][x] or pitch[y][x] or not grass[y][x]:
                     return False
         return True
 
