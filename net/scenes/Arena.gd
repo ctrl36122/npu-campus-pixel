@@ -19,12 +19,14 @@ const MapData := preload("res://scripts/ui/map_data.gd")
 ## 校园里的 NPC。位置取自 world.json 的 npc 出生点，两个压在楼里的已就近挪开
 ## （用 Python 遍历建筑多边形和水面验证过）。
 const NPC_SPAWNS: Array = [
-	{"name": "早八人", "cell": Vector2(230, 270), "hero": "adam", "radius": 26.0, "speed": 1.0},
-	{"name": "阅览常客", "cell": Vector2(247, 392), "hero": "lucy", "radius": 20.0, "speed": 0.6},
-	{"name": "散步党", "cell": Vector2(266, 305), "hero": "ash", "radius": 44.0, "speed": 1.15},
-	{"name": "干饭人", "cell": Vector2(285, 184), "hero": "nancy", "radius": 30.0, "speed": 1.3},
-	{"name": "夜跑选手", "cell": Vector2(88, 270), "hero": "ash", "radius": 52.0, "speed": 1.6},
-	{"name": "考研人", "cell": Vector2(157, 344), "hero": "lucy", "radius": 22.0, "speed": 0.75},
+	# hero 用换装变体（见 scripts/sandbox/hero_db.gd），让闲逛 NPC 也展示新可选外观；
+	# 四个基础角色（adam/ash/lucy/nancy）仍保留给玩家在选角面板里挑。
+	{"name": "早八人", "cell": Vector2(230, 270), "hero": "adam_r", "radius": 26.0, "speed": 1.0},
+	{"name": "阅览常客", "cell": Vector2(247, 392), "hero": "lucy_b", "radius": 20.0, "speed": 0.6},
+	{"name": "散步党", "cell": Vector2(266, 305), "hero": "ash_g", "radius": 44.0, "speed": 1.15},
+	{"name": "干饭人", "cell": Vector2(285, 184), "hero": "nancy_v", "radius": 30.0, "speed": 1.3},
+	{"name": "夜跑选手", "cell": Vector2(88, 270), "hero": "ash_o", "radius": 52.0, "speed": 1.6},
+	{"name": "考研人", "cell": Vector2(157, 344), "hero": "lucy_t", "radius": 22.0, "speed": 0.75},
 ]
 
 const CAMPUS_SCALE: float = 2.0

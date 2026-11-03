@@ -27,6 +27,23 @@ const HEROES := [
 	 "frames": "res://assets/sandbox/frames_lucy.tres"},
 	{"id": "nancy", "name": "南希", "sheet": "res://assets/sandbox/heroes/nancy.png",
 	 "frames": "res://assets/sandbox/frames_nancy.tres"},
+	# 换装变体（同底图、仅服装色相旋转，见 tools/make_hero_variants.py）
+	{"id": "adam_r", "name": "亚当·蓝", "sheet": "res://assets/sandbox/heroes/adam_r.png",
+	 "frames": "res://assets/sandbox/frames_adam_r.tres"},
+	{"id": "adam_p", "name": "亚当·紫", "sheet": "res://assets/sandbox/heroes/adam_p.png",
+	 "frames": "res://assets/sandbox/frames_adam_p.tres"},
+	{"id": "ash_g", "name": "艾什·青", "sheet": "res://assets/sandbox/heroes/ash_g.png",
+	 "frames": "res://assets/sandbox/frames_ash_g.tres"},
+	{"id": "ash_o", "name": "艾什·橙", "sheet": "res://assets/sandbox/heroes/ash_o.png",
+	 "frames": "res://assets/sandbox/frames_ash_o.tres"},
+	{"id": "lucy_b", "name": "露西·粉", "sheet": "res://assets/sandbox/heroes/lucy_b.png",
+	 "frames": "res://assets/sandbox/frames_lucy_b.tres"},
+	{"id": "lucy_t", "name": "露西·金", "sheet": "res://assets/sandbox/heroes/lucy_t.png",
+	 "frames": "res://assets/sandbox/frames_lucy_t.tres"},
+	{"id": "nancy_v", "name": "南希·堇", "sheet": "res://assets/sandbox/heroes/nancy_v.png",
+	 "frames": "res://assets/sandbox/frames_nancy_v.tres"},
+	{"id": "nancy_c", "name": "南希·红", "sheet": "res://assets/sandbox/heroes/nancy_c.png",
+	 "frames": "res://assets/sandbox/frames_nancy_c.tres"},
 ]
 
 
