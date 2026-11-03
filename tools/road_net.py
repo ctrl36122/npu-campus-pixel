@@ -33,7 +33,7 @@ WORLD_W, WORLD_H = 3392, 6400
 #      highway=primary 这类标签可用，只能拿长度当重要性代理。
 MAIN_LEN = 300          # ≥300 格（≈840 m）→ 主干道
 SEC_LEN = 120           # ≥120 格 → 次干道，其余步道
-W_MAIN, W_SEC, W_PATH = 32, 22, 16     # 铺装宽度（px），8 px = 1 格
+W_MAIN, W_SEC, W_PATH = 40, 22, 16     # 铺装宽度（px），8 px = 1 格；主干道 5 格 ≈ 14 m
 
 
 def _parse_js(path):
