@@ -31,10 +31,12 @@ import place_life_props as plp  # road_mask / pitch_mask / poly_fill（复用同
 
 W, H, CELL = 424, 800, 8
 
-# 每类道路的「站距」（格）：两站之间左右各来一盏，所以同侧间距 = 站距
-STEP = {2: 20, 1: 26, 0: 36}      # 2=主干 1=次干 0=步道（同侧间距 = 站距）
-OFF_EXTRA = 1.3                   # 在路面半宽之外再外扩多少格（落到路边草沿）
-MIN_SEP = 6.0                     # 灯与灯最小间距（格）
+# 每类道路的「站距」（格）：两站之间左右各来一盏，所以同侧间距 = 站距。
+# 光照图有效照明半径≈10 格（LM_FALLOFF=2 / LAMP_LEVEL≈15，7 单元=14 格，亮部≈10 格），
+# 站距必须明显小于 2×半径 才能首尾相接不出现暗段；之前 36 格的步道中间大片黑就是这原因。
+STEP = {2: 14, 1: 16, 0: 18}      # 2=主干 1=次干 0=步道（同侧间距 = 站距）
+OFF_EXTRA = 0.6                   # 在路面半宽之外再外扩多少格（贴着路缘，别骑到路面上）
+MIN_SEP = 5.0                     # 灯与灯最小间距（格）
 LAMP_PX_OFF = 4                   # 杆底取格中心（+4px）
 
 
@@ -90,6 +92,25 @@ def _walk_stations(road):
     return out
 
 
+def _avg_normal(pts):
+    """折线整体走向的单位法线（用于短路中点补灯）。"""
+    sx = sy = 0.0
+    n = 0
+    for k in range(len(pts) - 1):
+        (x0, y0), (x1, y1) = pts[k], pts[k + 1]
+        seg = math.dist((x0, y0), (x1, y1))
+        if seg < 1e-6:
+            continue
+        tx, ty = (x1 - x0) / seg, (y1 - y0) / seg
+        sx += -ty
+        sy += tx
+        n += 1
+    if n == 0:
+        return 1.0, 0.0
+    L = math.hypot(sx, sy) or 1.0
+    return sx / L, sy / L
+
+
 def main():
     dry = "--dry" in sys.argv
     world = json.load(open(os.path.join(ROOT, "assets/world.json"), encoding="utf-8"))
@@ -130,10 +151,19 @@ def main():
     roads = road_net.load()
     for road in roads:
         half = road["w"] / 16.0 + OFF_EXTRA          # 路面半宽(格) + 外扩
-        for (x, y, tx, ty) in _walk_stations(road):
+        stations = _walk_stations(road)
+        for (x, y, tx, ty) in stations:
             nx, ny = -ty, tx                          # 法线
             for side in (1.0, -1.0):
                 add(x + nx * side * half, y + ny * side * half)
+        # 短路（整条不够放一个站距）：在中点两侧各补一盏，避免整条黑
+        if len(stations) == 0 and road["len"] >= 6.0:
+            pts = road["pts"]
+            mx = sum(p[0] for p in pts) / len(pts)
+            my = sum(p[1] for p in pts) / len(pts)
+            nx, ny = _avg_normal(pts)
+            for side in (1.0, -1.0):
+                add(mx + nx * side * half, my + ny * side * half)
 
     n_road = len(placed)
 
@@ -147,11 +177,20 @@ def main():
 
     n_poi = len(placed) - n_road
 
-    # ---- 3) 每栋楼南侧入口前放一盏 ----
+    # ---- 3) 每栋楼南侧入口前放一盏（只在附近无道路灯时才补，避免沿路楼重复堆灯）----
+    def covered(cx, cy, r):
+        for (px, py) in placed:
+            if (px - cx) ** 2 + (py - cy) ** 2 < r * r:
+                return True
+        return False
+
     for b in world.get("buildings", []):
         cx = float(b.get("cx", b.get("x", 0)))
         by = float(b.get("baseY", b.get("y", 0)))
-        add(cx, by + 2.4)
+        ex, ey = cx, by + 2.4
+        if covered(ex, ey, 9.0):     # 9 格内已有灯（多半是路缘灯）→ 不重复
+            continue
+        add(ex, ey)
 
     n_bld = len(placed) - n_road - n_poi
 

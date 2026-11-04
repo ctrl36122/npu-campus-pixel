@@ -995,7 +995,7 @@ func _setup_daynight() -> void:
 ## 「一个光照单元 = 一个像素」的光照图（LM_UNIT 格合成一单元，省 4 倍开销）。
 ## 夜幕 shader 采样它：有光 → 夜幕变薄 → 砖路/草地露出本色，就是"路灯点亮了附近"；
 ## 没光 → 照常压暗成夜色。结果缓存到 user://，改灯位或调参记得升 LIGHTMAP_VER。
-const LM_CACHE := "user://lightmap_v6.png"
+const LM_CACHE := "user://lightmap_v7.png"
 const LM_UNIT := 2        # 一个光照单元 = 2 格（16 校园像素）
 const LAMP_LEVEL := 14    # 路灯亮度等级（= MC 火把 14），灯与灯的光会连成一条光带
 const LM_FALLOFF := 2     # 每传播一单元衰减的等级 → 有效半径 ≈ 7 单元 = 14 格
