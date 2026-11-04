@@ -248,12 +248,12 @@ func _setup_wildlife() -> void:
 	var objs: Node2D = campus.get_node_or_null("Objects")
 	if objs != null:
 		campus.move_child(fx, objs.get_index())
-		# 猫：挂进 Objects 参与 y 排序，走到楼后会被挡住
+		# 猫/狗/兔/鸭：挂进 Objects 参与 y 排序，走到楼后会被挡住
 		var ground: Node2D = wf.new()
 		ground.name = "WildlifeGround"
 		ground.set("mode", "ground")
 		objs.add_child(ground)
-		ground.call("setup", anchors)
+		ground.call("setup", anchors, _water_rects())
 	# 鸟 + 蝴蝶：空中层，永远在人/楼上面
 	var air: Node2D = wf.new()
 	air.name = "WildlifeAir"
@@ -843,6 +843,7 @@ func _spawn_npcs() -> void:
 	var objs := campus.get_node_or_null("Objects")
 	if objs == null:
 		return
+	var nav_grid: NavGrid = _build_nav_grid()
 	for i in NPC_SPAWNS.size():
 		var info: Dictionary = NPC_SPAWNS[i]
 		var n: Node2D = NPC.instantiate()
@@ -853,7 +854,21 @@ func _spawn_npcs() -> void:
 		n.set("radius", float(info["radius"]))
 		n.set("move_scale", float(info["speed"]))
 		n.set("phase_seed", float(i) * 1.9)
+		n.set("nav", nav_grid)
 		objs.add_child(n)
+
+
+## 从 world.json 的几何（建筑 footprint+阴影、水面，桥面挖空）构建可走网格 + A* 寻路。
+func _build_nav_grid() -> NavGrid:
+	var f := FileAccess.open("res://assets/world.json", FileAccess.READ)
+	if f == null:
+		return null
+	var parsed = JSON.parse_string(f.get_as_text())
+	if not (parsed is Dictionary):
+		return null
+	var ng := NavGrid.new()
+	ng.build(parsed, TS)
+	return ng
 
 
 ## 收集可透视的建筑。全部用**全局坐标**记录：

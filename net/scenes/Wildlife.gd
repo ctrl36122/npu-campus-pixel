@@ -5,6 +5,11 @@ extends Node2D
 ## 坐标是校园局部像素（campus scale=2 后翻倍显示）。
 
 const CatScript := preload("res://net/scenes/Cat.gd")
+const DogScript := preload("res://net/scenes/Dog.gd")
+const DuckScript := preload("res://net/scenes/Duck.gd")
+const BunnyScript := preload("res://net/scenes/Bunny.gd")
+
+const TS := 8.0   # 格→像素（锚点转换用，与 Arena 里一致）
 
 @export var mode: String = "ground"
 
@@ -16,6 +21,22 @@ const CAT_COLORS := [
 	Color("9a9a9a"),   # 灰猫
 	Color("e8e3da"),   # 白猫
 	Color("4a3826"),   # 深棕
+]
+const DOG_COLORS := [
+	Color("6b4a2b"),   # 棕
+	Color("3a3a3a"),   # 黑
+	Color("caa472"),   # 黄
+	Color("e8e3da"),   # 白
+]
+const BUNNY_COLORS := [
+	Color("e8e3da"),   # 白
+	Color("9a9a9a"),   # 灰
+	Color("c98a5a"),   # 棕
+]
+const DUCK_COLORS := [
+	Color("f2f0e8"),   # 白鸭
+	Color("d9b44a"),   # 麻鸭
+	Color("8a8f55"),   # 绿头鸭（暗羽）
 ]
 
 var _rng := RandomNumberGenerator.new()
@@ -29,20 +50,36 @@ var _player: Node2D = null               # 本地玩家（让鸟贴着玩家视�
 
 
 ## anchors: NPC 出生点等「确定可走」的位置 ×8
-func setup(anchors: Array) -> void:
+## water_rects: world.json 的 water 数组（格坐标），给鸭子当活动锚点
+func setup(anchors: Array, water_rects: Array = []) -> void:
 	_rng.seed = 424242 if mode == "ground" else 909090
 	_anchors = anchors.duplicate()
-	if _anchors.is_empty():
+	if _anchors.is_empty() and mode == "ground" and water_rects.is_empty():
 		set_process(false)
 		return
 	if mode == "ground":
 		y_sort_enabled = true
+		var idx := 0
+		var seed := 1000
+		# 猫 6 只（原样保留）
 		for i in 6:
-			var cat := Node2D.new()
-			cat.set_script(CatScript)
-			add_child(cat)
-			cat.call("setup", _anchors[i % _anchors.size()],
-				CAT_COLORS[i % CAT_COLORS.size()], 1000 + i * 77)
+			_spawn_animal(CatScript, _anchors, CAT_COLORS, idx, seed)
+			idx += 1; seed += 77
+		# 狗 4 只
+		for i in 4:
+			_spawn_animal(DogScript, _anchors, DOG_COLORS, idx, seed)
+			idx += 1; seed += 91
+		# 兔 4 只
+		for i in 4:
+			_spawn_animal(BunnyScript, _anchors, BUNNY_COLORS, idx, seed)
+			idx += 1; seed += 53
+		# 鸭子：沿水缘撒（最多 8 只，避免湖里挤爆）
+		var duck_anchors := _water_edge_anchors(water_rects)
+		for i in duck_anchors.size():
+			var dk := Node2D.new()
+			dk.set_script(DuckScript)
+			add_child(dk)
+			dk.call("setup", duck_anchors[i], DUCK_COLORS[i % DUCK_COLORS.size()], 7000 + i * 131)
 	else:
 		z_index = 15
 		for i in 6:
@@ -57,6 +94,35 @@ func setup(anchors: Array) -> void:
 
 
 # ---------------------------------------------------------------- 鸟（天空）
+
+# ---------------------------------------------------------------- 地面动物生成
+
+func _spawn_animal(script: Script, anchors: Array, colors: Array, idx: int, seed: int) -> void:
+	var a := Node2D.new()
+	a.set_script(script)
+	add_child(a)
+	a.call("setup", anchors[idx % anchors.size()], colors[idx % colors.size()], seed)
+
+
+## 从 water 矩形（格坐标）取四边贴边点作为鸭子活动锚点（×TS 转像素），最多 8 只
+func _water_edge_anchors(water_rects: Array) -> Array:
+	var out: Array = []
+	for r in water_rects:
+		var x0 := float(r.get("x", 0.0))
+		var y0 := float(r.get("y", 0.0))
+		var w := float(r.get("w", 0.0))
+		var h := float(r.get("h", 0.0))
+		if w < 2.0 or h < 2.0:
+			continue
+		out.append(Vector2((x0 + w * 0.25) * TS, (y0 + 1.0) * TS))
+		out.append(Vector2((x0 + w * 0.75) * TS, (y0 + 1.0) * TS))
+		out.append(Vector2((x0 + 1.0) * TS, (y0 + h * 0.5) * TS))
+		out.append(Vector2((x0 + w - 1.0) * TS, (y0 + h * 0.5) * TS))
+	out.shuffle()
+	if out.size() > 8:
+		out = out.slice(0, 8)
+	return out
+
 
 func _spawn_bird() -> void:
 	# 优先在本地玩家附近屏幕外生成，这样鸟总是从玩家眼前掠过

@@ -29,6 +29,7 @@ RNG = random.Random(20261103)
 CATALOG = [
     # —— 已有校园素材（风格一致）多撒一些 ——
     ("res://assets/props_planter.png",      12, "road",  False),
+    ("res://assets/props_flowerbed.png",    16, "road",  False),   # 小花坛 / 花境（贴路边草地）
     ("res://assets/props_bench.png",         8, "front", True),
     ("res://assets/props_bike.png",          8, "front", True),
     ("res://assets/props_vending.png",       3, "front", True),
@@ -36,6 +37,7 @@ CATALOG = [
     ("res://assets/props_sign_blue.png",     4, "road",  False),
     ("res://assets/props_sign_red.png",      2, "road",  False),
     ("res://assets/props_flag.png",          4, "front", False),
+    ("res://assets/props_stonetable.png",     8, "front", True),    # 石桌石凳（楼前 / 广场休憩）
     # —— PixelSRPG-Forge（MIT）里挑出来的、不像地牢的杂物 ——
     ("res://assets/props_forge/decor_85.png", 3, "util",  True),   # 木箱堆
     ("res://assets/props_forge/decor_86.png", 3, "util",  True),   # 油桶堆
