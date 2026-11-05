@@ -2505,7 +2505,7 @@ func _try_auto_room() -> void:
 		# 调试：XGD_OOPZ_DEMO=1 自己是队长、=2 是别人的队（验语音按钮/编辑框用）
 		if OS.has_environment("XGD_OOPZ_DEMO"):
 			var demo := OS.get_environment("XGD_OOPZ_DEMO")
-			var demo_note := OOPZ_TAG + "https://oopz.cn/demo\n来打排位，缺 2 人，开麦"
+			var demo_note := OOPZ_TAG + "https://oopz.cn/i/demo01\n来打排位，缺 2 人，开麦"
 			if demo == "2":
 				Net.room_claims["%d:0" % BASEMENT_FLOOR] = {
 					"name": "别人的队", "uid": "demo-other", "note": demo_note}
@@ -3526,6 +3526,9 @@ func _team_seated_count(idx: int) -> int:
 ## OOPZ 没有开放平台（官方无 API/SDK，社区那套是逆向的私有协议），
 ## 所以做不到「坐下就被拉进语音」。能做的是：房主把自己的语音频道分享链接
 ## 贴在组队板上，队员坐下时右下角出现「进语音」，点一下唤起 OOPZ 落到频道。
+## **只接受「语音频道」邀请，不接受「域」邀请**（用户明确要求）：域邀请点开只到
+## 域首页，用户还得自己找频道点进去，等于没生效。两者 URL 形态一样（oopz.cn/i/xxxx），
+## 程序无法分辨，只能靠面板文案 + 打开后那句提示引导自查。
 ## 链接存在公告首行、带 @oopz: 前缀 —— room_claims 本来就是个自由文本 note，
 ## 这样不用动服务端 schema，老版本客户端也不会 checksum failed。
 const OOPZ_TAG := "@oopz:"
@@ -3560,6 +3563,18 @@ func _safe_voice_link(s: String) -> String:
 	if low.begins_with("https://") or low.begins_with("http://") or low.begins_with("oopz://"):
 		return t
 	return ""
+
+
+## 粗判「像不像 OOPZ 邀请」。注意：域邀请和语音频道邀请的 URL 形态完全一样
+## （都是 oopz.cn/i/xxxxxx，网页渲染也一模一样），程序**没法**区分两者，
+## 这里只能挡掉明显不是邀请的东西（别的网站、oopz 主站首页），剩下的靠面板文案约束。
+func _looks_oopz_invite(s: String) -> bool:
+	var low := s.to_lower()
+	if low.begins_with("oopz://"):
+		return true
+	if not low.contains("oopz.cn"):
+		return false
+	return low.contains("/i/")
 
 
 ## 某个单间的组队板上留的语音链接（没有就返回空串）
@@ -3599,7 +3614,12 @@ func _open_voice(link: String) -> void:
 		DisplayServer.clipboard_set(safe)
 		_notice("没能唤起 OOPZ（没装客户端？）· 链接已复制：%s" % safe.left(46))
 		return
-	_notice("正在打开 OOPZ · 进频道后点开麦就好")
+	if _looks_oopz_invite(safe):
+		# 链接本身是邀请，但域/频道邀请长得一样，只能用「应该直进频道」这个
+		# 预期去引导用户自查：停在域首页就说明贴错了。
+		_notice("正在打开 OOPZ · 应直接进语音频道；若停在域首页，说明房主贴的是域邀请")
+	else:
+		_notice("已在系统里打开，但这链接不像语音频道邀请 · 可能进不去频道")
 
 
 func _on_note_view_voice_pressed() -> void:
@@ -3698,16 +3718,27 @@ func _build_note_panel() -> PanelContainer:
 	_oopz_box.visible = false
 	vb.add_child(_oopz_box)
 	var ol := Label.new()
-	ol.text = "OOPZ 语音频道 · 选填"
+	ol.text = "OOPZ 语音频道邀请 · 选填（只认语音频道的邀请）"
 	ol.add_theme_font_size_override("font_size", 12)
 	ol.add_theme_color_override("font_color", Color(0.55, 0.86, 0.72))
 	_oopz_box.add_child(ol)
 	_oopz_edit = LineEdit.new()
-	_oopz_edit.placeholder_text = "粘贴 OOPZ 语音频道分享链接，队员坐下就会看到「进语音」"
+	_oopz_edit.placeholder_text = "粘贴「语音频道」的邀请链接（不是域的邀请）"
 	_oopz_edit.custom_minimum_size = Vector2(460, 38)
 	_oopz_edit.add_theme_font_size_override("font_size", 14)
 	_oopz_edit.add_theme_color_override("font_color", Color("#dff5e8"))
 	_oopz_box.add_child(_oopz_edit)
+	# 这一行是重点：域邀请和频道邀请的 URL 长得一模一样，程序分辨不出来，
+	# 只能靠文案把「必须是语音频道」讲清楚，否则房主随手贴域的邀请，队员点进去
+	# 停在域首页、还以为游戏坏了。
+	var oh := Label.new()
+	oh.text = "在 OOPZ 里点开要用的那个语音频道 → 复制邀请 → 粘到这里。\n" \
+		+ "别贴「域」的邀请：那只能进到域首页，队员还得自己找频道，点了也听不到人。"
+	oh.add_theme_font_size_override("font_size", 11)
+	oh.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	oh.custom_minimum_size = Vector2(460, 0)
+	oh.add_theme_color_override("font_color", Color(0.58, 0.66, 0.74))
+	_oopz_box.add_child(oh)
 
 	_note_edit = TextEdit.new()
 	_note_edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
@@ -3951,8 +3982,10 @@ func _save_note_board() -> void:
 			_notice("组队招募已撤下")
 		elif link.is_empty():
 			_notice("组队招募已发布 · B1 的同学都能看到")
+		elif not _looks_oopz_invite(link):
+			_notice("已发布，但这链接不像语音频道邀请（应为 oopz.cn/i/…）· 队员可能进不去")
 		else:
-			_notice("组队招募已发布（含语音频道）· 队员坐下就能一键进语音")
+			_notice("组队招募已发布（含语音频道）· 队员坐下按 V 直接进语音频道")
 	else:
 		_notice("门口公告已擦掉" if txt.strip_edges().is_empty() else "门口公告已更新")
 
