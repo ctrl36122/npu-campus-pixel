@@ -2141,7 +2141,7 @@ func _try_interact() -> bool:
 	if _my_boat >= 0:
 		_try_disembark()
 		return true
-	if int(me.get("sit_dir")) != 0:
+	if _pose_of(me) != 0:
 		Net.sit_down(0, Vector2.ZERO)
 		return true
 	if not _near_seat.is_empty():
@@ -2530,7 +2530,7 @@ func enter_room(path: String, floor_n: int = 1) -> bool:
 	# 房间内是「本地姿势权威」（_hold_local_pose 每帧把 _local_pose 贴回 sit_dir），
 	# 带着非 0 的姿势进房会被一路钉在坐姿上 —— 人站在房间里却一步也走不动。
 	# 校园里坐着是能走到门口的（起身才能走），但电梯/门口交互不排除这种顺序。
-	if int(me.get("sit_dir")) != 0:
+	if _pose_of(me) != 0:
 		me.call("stand_up")
 	me.call("teleport_to", target)
 	me.set("_room_freeze", true)
@@ -2575,7 +2575,7 @@ func leave_room() -> void:
 	in_room = false
 	# 房间会被隐藏，人还坐在椅子上就悬空了 —— 出门前先站起来
 	var me: Node = _local_avatar()
-	if me != null and int(me.get("sit_dir")) != 0:
+	if me != null and _pose_of(me) != 0:
 		Net.sit_down(0, Vector2.ZERO)
 	_seats_room.clear()
 	_near_seat = {}
@@ -3114,11 +3114,14 @@ func _update_interact_hint(delta: float) -> void:
 		_door_hint.text = "按 E 下船" if can_land else "靠岸后按 E 下船"
 		return
 
-	if int(me.get("sit_dir")) != 0:
+	if _pose_of(me) != 0:
 		_near_seat = {}
 		_near_dorm = ""
 		_near_buddy = {}
 		_door_hint.visible = true
+		# 姿势一律问 pose_now()，不要读同步属性 sit_dir：那是每 33ms 被服务器盖回来的
+		# 一份旧值，本地权威姿势要等玩家自己的 _process 才贴回，而 Arena 是父节点、
+		# 先跑一步 —— 提示条采样到窗口里那一帧，就会在「起床 / 躺到床上」之间反复跳。
 		_door_hint.text = "按 E %s" % ("起床" if bool(me.call("is_lying")) else "站起来")
 		# 坐在 B1 某个单间里、且队里留了 OOPZ 链接 → 右下角亮「进语音」
 		_refresh_voice_btn(pos)
@@ -3494,6 +3497,15 @@ func _local_avatar() -> Node:
 		if c != null and c.get("is_local_player") == true:
 			return c
 	return null
+
+
+## 这个 avatar 现在实际摆着的姿势（0 = 站着）。**别直接读 sit_dir 做交互判定** ——
+## 那是同步属性，服务器每 33ms 盖回来一次，而本地权威姿势要等玩家的 _process 才贴回，
+## Arena 是父节点、跑在前面，正好卡在那一帧里读到旧值（提示条就是这么抖起来的）。
+func _pose_of(n: Node) -> int:
+	if n == null or not is_instance_valid(n) or not n.has_method("pose_now"):
+		return 0
+	return int(n.call("pose_now"))
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -3923,7 +3935,7 @@ func _team_seated_count(idx: int) -> int:
 	for c in players.get_children():
 		if c == null or not is_instance_valid(c):
 			continue
-		if int(c.get("sit_dir")) == 0:
+		if _pose_of(c) == 0:
 			continue
 		if int(c.get("room_floor")) != BASEMENT_FLOOR:
 			continue

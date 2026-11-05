@@ -412,9 +412,25 @@ func lay_at(pos: Vector2, dir_name: String) -> void:
 	_apply_sit_anim()
 
 
-## 是否在躺着（含，本地/远端都读这个判断）
+## 现在实际摆着的姿势（0 = 站着）。**交互判定 / 提示条一律读这个，别直接读 sit_dir。**
+##
+## sit_dir 是走属性同步的，Player.tscn 里是 ALWAYS —— 服务器那份每 33ms 无条件盖回来，
+## 而它推进得很慢（房间里靠 _push_room_pose，天然落后一个 RTT，丢包时干脆停在旧值）。
+## 本机真正的姿势存在 _local_pose 里，由 _hold_local_pose 在「玩家的 _process」里贴回，
+## 但 Arena 是父节点，_process 比玩家先跑 —— 同步包刚落下来、还没贴回的那一帧，
+## Arena 读到的是旧值。提示条 8Hz 采样，就这么在「按 E 起床 / 按 E 躺到床上」之间抖。
+## （2026-11-05 复现：每 2 帧抹一次 sit_dir，4 秒里文字来回跳 12 次。）
+##
+## 本机以 _local_pose 为准（它就是玩家眼里看到的那个姿势）；远端没有本地权威，读 sit_dir。
+func pose_now() -> int:
+	if is_local_player and _local_pose != 0:
+		return _local_pose
+	return sit_dir
+
+
+## 是否在躺着（本地读 pose_now，远端读同步下来的 sit_dir）
 func is_lying() -> bool:
-	return sit_dir >= LIE_BASE
+	return pose_now() >= LIE_BASE
 
 
 func _set_collision(on: bool) -> void:
