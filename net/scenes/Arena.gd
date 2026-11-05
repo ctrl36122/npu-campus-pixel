@@ -2514,6 +2514,17 @@ func _try_auto_room() -> void:
 				Net.claim_room(BASEMENT_FLOOR, 0, "演示队")
 				Net.set_room_note(0, demo_note)
 			print("[dbg] 演示组队板=", Net.room_claims.get("%d:0" % BASEMENT_FLOOR, {}))
+		# 自测：XGD_TEST_VOICE="<邀请链接>" 走完整链路 —— 写进 0 号板 → 读回来 →
+		# 过白名单 → 唤起系统，把每一步结果打出来（验「链接到底能不能用」用）。
+		if OS.has_environment("XGD_TEST_VOICE"):
+			var tst := OS.get_environment("XGD_TEST_VOICE").strip_edges()
+			Net.claim_room(BASEMENT_FLOOR, 0, "自测队")
+			Net.set_room_note(0, OOPZ_TAG + tst + "\n自测")
+			var back := _room_voice_link(0)
+			print("[test-voice] 输入=", tst)
+			print("[test-voice] 白名单过=", _safe_voice_link(tst))
+			print("[test-voice] 读回=", back, " 像邀请=", _looks_oopz_invite(back))
+			_open_voice(back)
 
 
 ## 进出房间时放开/恢复相机边界。只动本地玩家的相机，远端玩家不影响视角。
@@ -3615,9 +3626,9 @@ func _open_voice(link: String) -> void:
 		_notice("没能唤起 OOPZ（没装客户端？）· 链接已复制：%s" % safe.left(46))
 		return
 	if _looks_oopz_invite(safe):
-		# 链接本身是邀请，但域/频道邀请长得一样，只能用「应该直进频道」这个
-		# 预期去引导用户自查：停在域首页就说明贴错了。
-		_notice("正在打开 OOPZ · 应直接进语音频道；若停在域首页，说明房主贴的是域邀请")
+		# 实测（2026-11-05）：系统里没有注册任何 oopz 协议，客户端只能托盘常驻，
+		# 链接一律落到浏览器（web.oopz.cn）。所以文案写实际会发生的事，别骗用户。
+		_notice("已打开 OOPZ 邀请页 · 点「进入」后再选语音频道（不会自动进麦）")
 	else:
 		_notice("已在系统里打开，但这链接不像语音频道邀请 · 可能进不去频道")
 
@@ -3733,7 +3744,8 @@ func _build_note_panel() -> PanelContainer:
 	# 停在域首页、还以为游戏坏了。
 	var oh := Label.new()
 	oh.text = "在 OOPZ 里点开要用的那个语音频道 → 复制邀请 → 粘到这里。\n" \
-		+ "别贴「域」的邀请：那只能进到域首页，队员还得自己找频道，点了也听不到人。"
+		+ "别贴「域」的邀请：打开后卡片写「你收到了一个域邀请」就是贴错了，\n" \
+		+ "那样只能进到域首页，队员还得自己找频道、点了也听不到人。"
 	oh.add_theme_font_size_override("font_size", 11)
 	oh.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	oh.custom_minimum_size = Vector2(460, 0)
@@ -3985,7 +3997,7 @@ func _save_note_board() -> void:
 		elif not _looks_oopz_invite(link):
 			_notice("已发布，但这链接不像语音频道邀请（应为 oopz.cn/i/…）· 队员可能进不去")
 		else:
-			_notice("组队招募已发布（含语音频道）· 队员坐下按 V 直接进语音频道")
+			_notice("组队招募已发布（含语音频道）· 队员坐下按 V 唤起 OOPZ")
 	else:
 		_notice("门口公告已擦掉" if txt.strip_edges().is_empty() else "门口公告已更新")
 
