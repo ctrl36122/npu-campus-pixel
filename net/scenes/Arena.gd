@@ -2186,6 +2186,11 @@ func enter_room(path: String, floor_n: int = 1) -> bool:
 
 	var sp: Vector2 = room.get("spawn_px")
 	var target: Vector2 = room.position + sp
+	# 房间内是「本地姿势权威」（_hold_local_pose 每帧把 _local_pose 贴回 sit_dir），
+	# 带着非 0 的姿势进房会被一路钉在坐姿上 —— 人站在房间里却一步也走不动。
+	# 校园里坐着是能走到门口的（起身才能走），但电梯/门口交互不排除这种顺序。
+	if int(me.get("sit_dir")) != 0:
+		me.call("stand_up")
 	me.call("teleport_to", target)
 	me.set("_room_freeze", true)
 	# 进房前校园那边可能还有没被服务器确认的预测命令，房间期间又不发包，

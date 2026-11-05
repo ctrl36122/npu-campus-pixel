@@ -336,11 +336,32 @@ var _local_pose: int = 0
 
 
 ## 每帧把本机自己摆的姿势贴回 sit_dir（同步包改回去就再改回来）
+##
+## ⚠️ 「起身」也必须管。房间/船上（_room_freeze）本地是唯一权威，位置不走属性同步
+## （Player.tscn 里 position 的 replication_mode = NEVER），姿势 sit_dir 却是 ALWAYS
+## —— 每 33ms 无条件从服务器覆盖回来，而服务器那份由 _push_room_pose（unreliable）
+## 推进，天然落后一个 RTT，丢包时干脆停在旧姿势。
+## 以前这里 `_local_pose == 0` 就早退，于是唯一的「归零」动作完全不设防：
+## 人刚站起来就被旧包按回坐姿 → _apply_movement 见 sit_dir != 0 把速度清零 →
+## 下一 tick 又站回来 → 走走停停，看着就是抽搐卡顿。
+## 校园里不犯，是因为起身走 Net.sit_down 的 reliable RPC，服务器会立刻归零。
 func _hold_local_pose() -> void:
-	if _local_pose == 0 or not is_local_player:
+	if not is_local_player:
 		return
-	if sit_dir != _local_pose:
-		sit_dir = _local_pose
+	var want: int = _local_pose
+	# 校园里起身交给服务器裁决，本地不抢权威（否则会和服务端回包打架）
+	if want == 0 and not _room_freeze:
+		return
+	if sit_dir == want:
+		return
+	sit_dir = want
+	if want == 0:
+		# 起身：躺姿把整个精灵转过来了，得转回去；站/走帧交给随后的 _update_visual
+		if sprite != null:
+			sprite.rotation = 0.0
+			sprite.offset = SPRITE_OFFSET
+		_update_visual()
+	else:
 		_apply_sit_anim()
 
 
@@ -529,7 +550,9 @@ func _on_tick(tick: int) -> void:
 			if Net.is_server():
 				_publish_pose(position)
 			elif Net.has_session():
-				Net.send_to(1, self, &"_push_room_pose", [position, sit_dir])
+				# 上报本地权威姿势（_local_pose），不要用 sit_dir —— 后者可能刚被
+				# 服务器的旧包覆盖，拿它回传等于把错值又推回服务器，形成自我维持的锁死。
+				Net.send_to(1, self, &"_push_room_pose", [position, _local_pose])
 		elif buffer.entries.size() < InputBufferScript.CAPACITY:
 			var command: Dictionary = input.sample(self, next_seq, tick)
 			if ui_blocked:                       # 设置面板打开时冻结移动
