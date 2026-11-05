@@ -1211,6 +1211,11 @@ var my_room_cache: Dictionary = {}
 ## 刚主动退掉的房间 "楼层:房号"。服务器快照里可能还留着它（旧版服务端不认退房请求），
 ## 记下来别再把那间当成「我的房间」，否则退房后又会被存档写回去。
 var void_claim: String = ""
+## 本机开的 B1 组队板镜像：{"index", "name", "note"}。
+## 公共服上的旧服务端仍按**裸 uid** 记 6:idx，而它那套「一个人同时只能占一间房」
+## 的清理会在换宿舍（认领新的 1..5 层房间）时把 6:idx 一起 erase 掉 ——
+## 客户端只收到一份没有队伍的快照，牌子就变空队了。拍快照前先用这份镜像补回来。
+var my_team_cache: Dictionary = {}
 
 
 ## 队伍记录用的 uid（和裸 local_uid 不同命名空间）。
@@ -1277,6 +1282,9 @@ func _write_claim(uid: String, n: int, r: int, nm: String) -> bool:
 	if not cur.is_empty() and String(cur.get("uid", "")) != uid:
 		return false                   # 是别人的房间，不允许覆盖
 	if nm.is_empty():
+		# 主动撤队：镜像一起清掉，否则下一条服务端快照又会把它补回来
+		if uid == team_uid() and n == TEAM_FLOOR:
+			my_team_cache = {}
 		if cur.is_empty():
 			return false
 		room_claims.erase(key)
@@ -1305,6 +1313,13 @@ func _write_claim(uid: String, n: int, r: int, nm: String) -> bool:
 				"note": String(my_room_cache.get("note", "")),
 			}
 			void_claim = ""
+		elif uid == team_uid() and n == TEAM_FLOOR:
+			# 组队板镜像：换板子时旧的招募不能跟着搬过去，同板才保留
+			var same_board := int(my_team_cache.get("index", -1)) == r
+			my_team_cache = {
+				"index": r, "name": nm,
+				"note": String(my_team_cache.get("note", "")) if same_board else "",
+			}
 	room_claims_changed.emit()
 	return true
 
@@ -1395,6 +1410,30 @@ func _normalize_legacy_team_claims() -> void:
 		room_claims[tk] = rec2
 
 
+## 用本地镜像兜底自己的 B1 组队板：公共服旧服务端把 6:idx 当成「我占的房间」，
+## 换宿舍时按「一人一间」把它 erase 掉了，快照里就没有我的队 —— 牌子变回空队。
+## 这里补回去（含招募正文）。板子已经被别人占了就以服务端为准，不硬抢。
+func _restore_cached_team() -> void:
+	if local_uid.is_empty() or my_team_cache.is_empty():
+		return
+	var idx := int(my_team_cache.get("index", -1))
+	if idx < 0:
+		return
+	var key := "%d:%d" % [TEAM_FLOOR, idx]
+	var cur: Dictionary = room_claims.get(key, {})
+	var owner := String(cur.get("uid", ""))
+	if not owner.is_empty() and owner != team_uid() and owner != local_uid:
+		my_team_cache = {}                 # 被别人顶了：镜像作废，别再抢
+		return
+	var rec := {"name": String(my_team_cache.get("name", local_name)), "uid": team_uid()}
+	var note := String(my_team_cache.get("note", ""))
+	if note.is_empty():
+		note = String(cur.get("note", ""))     # 快照里还留着招募就用它
+	if not note.is_empty():
+		rec["note"] = note
+	room_claims[key] = rec
+
+
 ## 用本地镜像兜底：服务端快照里没有「我的房间」时把它补回去。
 ## 旧版服务端根本不认认领请求，每收到一次快照就会把本地刚贴的公告冲掉 ——
 ## 补回来之后，牌子/公告正文至少在本机是对的。房间被别人占了则以服务端为准。
@@ -1402,6 +1441,7 @@ func _restore_cached_claim() -> void:
 	# 主动退掉的房不该再从服务器旧快照里冒出来（门牌上会挂着我的名字）
 	if not void_claim.is_empty() and String(Dictionary(room_claims.get(void_claim, {})).get("uid", "")) == local_uid:
 		room_claims.erase(void_claim)
+	_restore_cached_team()
 	if my_room_cache.is_empty() or local_uid.is_empty():
 		return
 	var key := "%d:%d" % [int(my_room_cache.get("floor", 0)), int(my_room_cache.get("index", -1))]
@@ -1542,6 +1582,10 @@ func _apply_team_note(uid: String, idx: int, note: String) -> void:
 	else:
 		cur["note"] = note
 	room_claims[key] = cur
+	# 招募正文跟着镜像走：换宿舍被服务端清掉 6:idx 后补回来时不能只剩一个空队
+	if uid == local_uid and not my_team_cache.is_empty() \
+		and int(my_team_cache.get("index", -1)) == idx:
+		my_team_cache["note"] = note
 	room_claims_changed.emit()
 
 
