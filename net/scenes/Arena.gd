@@ -2850,14 +2850,14 @@ func _try_auto_room() -> void:
 				Net.room_claims_changed.emit()
 			else:
 				Net.claim_room(BASEMENT_FLOOR, 0, "演示队")
-				Net.set_room_note(0, demo_note)
+				Net.set_team_note(0, demo_note)
 			print("[dbg] 演示组队板=", Net.room_claims.get("%d:0" % BASEMENT_FLOOR, {}))
 		# 自测：XGD_TEST_VOICE="<邀请链接>" 走完整链路 —— 写进 0 号板 → 读回来 →
 		# 过白名单 → 唤起系统，把每一步结果打出来（验「链接到底能不能用」用）。
 		if OS.has_environment("XGD_TEST_VOICE"):
 			var tst := OS.get_environment("XGD_TEST_VOICE").strip_edges()
 			Net.claim_room(BASEMENT_FLOOR, 0, "自测队")
-			Net.set_room_note(0, OOPZ_TAG + tst + "\n自测")
+			Net.set_team_note(0, OOPZ_TAG + tst + "\n自测")
 			var back := _room_voice_link(0)
 			print("[test-voice] 输入=", tst)
 			print("[test-voice] 白名单过=", _safe_voice_link(tst))
@@ -3173,7 +3173,7 @@ func _update_interact_hint(delta: float) -> void:
 					_door_hint.visible = true
 					if cur.is_empty():
 						_door_hint.text = "%s · 空队 · 按 E 开队" % _team_board_name(bi)
-					elif String(cur.get("uid", "")) == Net.local_uid:
+					elif Net.is_my_team_board(cur):
 						_door_hint.text = "%s · 我的队 · 按 E 编辑招募" % _team_board_name(bi)
 					else:
 						_door_hint.text = "%s ·「%s」的队 · 按 E 看招募" % [
@@ -3438,6 +3438,10 @@ func _load_my_room() -> Vector2i:
 		return Vector2i(-1, -1)
 	var f: int = int(cfg.get_value("room", "floor", 0))
 	var r: int = int(cfg.get_value("room", "index", -1))
+	# 旧版把 B1 组队板当成「我的房间」写进了存档（开队即退宿舍）。这份存档
+	# 不能用来决定出生点，也不能灌进 Net.my_room_cache —— 一律当作没认领。
+	if f == Net.TEAM_FLOOR:
+		return Vector2i(-1, -1)
 	return Vector2i(f, r)
 
 
@@ -3469,6 +3473,13 @@ func _save_my_room(floor_n: int, idx: int, note: String = "") -> void:
 func _restore_my_room() -> void:
 	var saved := _load_my_room()
 	if saved.x < 1:
+		# 迁移：旧版开 B1 队伍时把 6:idx 写成了「我的房间」，清掉这份坏存档，
+		# 否则下次上线又会被灌回 Net，宿舍照样丢。
+		var cfg := ConfigFile.new()
+		if cfg.load(MY_ROOM_CFG) == OK \
+			and int(cfg.get_value("room", "floor", 0)) == Net.TEAM_FLOOR:
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(MY_ROOM_CFG))
+			Net.my_room_cache = {}
 		return
 	Net.set_cached_room(saved.x, saved.y, Net.local_name, _load_my_room_note())
 
@@ -4230,7 +4241,10 @@ func _leave_my_room() -> void:
 		_notice(("没能撤掉 %s 的队伍（服务器没接受请求）" % _team_board_name(idx)) if is_b1 else \
 			("没能退掉 %d 层 %d 号房（服务器没接受请求）" % [current_floor, idx + 1]))
 		return
-	_clear_my_room()
+	# 撤队只撤组队板，绝不能清「我的宿舍」存档 —— 以前这里连 _clear_my_room()
+	# 一起调，房主撤个队，宿舍就没了。
+	if not is_b1:
+		_clear_my_room()
 	if is_b1:
 		_notice("已撤下 %s 的组队招募" % _team_board_name(idx))
 	else:
@@ -4329,7 +4343,10 @@ func _open_note_board(idx: int) -> void:
 		if cur.is_empty():
 			_notice("这块组队板刚被别人开了，稍等一下再看")
 			return
-	if String(cur.get("uid", "")) != Net.local_uid:
+	# 组队板归 team uid 管，宿舍归裸 uid 管；两边别再混着比
+	var mine_board := Net.is_my_team_board(cur) if is_b1 else \
+		(String(cur.get("uid", "")) == Net.local_uid)
+	if not mine_board:
 		_note_view_title.text = ("%s ·「%s」的队伍" % [label, String(cur.get("name", "?"))]) if is_b1 else \
 			("%d 号房 ·「%s」" % [idx + 1, String(cur.get("name", "?"))])
 		var note_raw := String(cur.get("note", ""))
@@ -4412,10 +4429,14 @@ func _save_note_board() -> void:
 	if not link.is_empty():
 		txt = OOPZ_TAG + link + ("\n" + body if not body.is_empty() else "")
 	_close_note_board()
-	Net.set_room_note(idx, txt)
-	# 同步落本地存档：服务端只把认领/公告存在内存里，重启就没了，
-	# 而旧版服务端连请求都收不到 —— 不存本地就是「退出之后公告没保存」。
-	_save_my_room(current_floor, idx, txt.strip_edges().left(160))
+	if current_floor == BASEMENT_FLOOR:
+		# 组队板的招募走 team note 通道：不写宿舍公告、不写 my_room.cfg
+		Net.set_team_note(idx, txt)
+	else:
+		Net.set_room_note(idx, txt)
+		# 同步落本地存档：服务端只把认领/公告存在内存里，重启就没了，
+		# 而旧版服务端连请求都收不到 —— 不存本地就是「退出之后公告没保存」。
+		_save_my_room(current_floor, idx, txt.strip_edges().left(160))
 	if current_floor == BASEMENT_FLOOR:
 		if txt.strip_edges().is_empty():
 			_notice("组队招募已撤下")
@@ -4484,7 +4505,7 @@ func _refresh_team_plates() -> void:
 			pc.modulate = Color(0.72, 0.74, 0.78, 0.90)
 			if sb != null:
 				sb.border_color = Color(0.55, 0.62, 0.72, 0.85)
-		elif String(cur.get("uid", "")) == Net.local_uid:
+		elif Net.is_my_team_board(cur):
 			lb.text = "%s · 我的队 %d/6" % [label, seated]
 			lb.add_theme_color_override("font_color", Color("#ffe9a8"))
 			pc.modulate = Color(1, 1, 1, 1)
@@ -4620,7 +4641,8 @@ func _save_my_room_keep_note(floor_n: int, idx: int) -> void:
 
 
 func _try_claim_room() -> bool:
-	if not in_room or _floor_open:
+	# B1 的板子是「开队」不是「认领宿舍」，F 键不该走宿舍认领 / 存档这条链
+	if not in_room or _floor_open or current_floor == BASEMENT_FLOOR:
 		return false
 	var me: Node = _local_avatar()
 	if me == null:

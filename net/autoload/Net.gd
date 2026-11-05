@@ -1187,6 +1187,21 @@ func floor_of(id: int) -> int:
 # --- 房间认领公告 -------------------------------------------------------
 ## "floor:room" -> {"name": String, "uid": String, "note": String}。
 ## 服务端权威，客户端只发请求；note 是房主写的门口公告（自我介绍），可缺省。
+##
+## ⚠️ B1 活动室的组队板是 "6:idx"，它**不是宿舍**：一块板只表示「谁开了队」，
+## 不能算进「一个人同时只能有一间房」。以前两边共用裸 local_uid，开队时
+## _write_claim 会把同 uid 的宿舍认领 erase 掉，my_room_cache / my_room.cfg 也被
+## 写成 6 层 —— 房主一开队，自己的宿舍就没了。现在给队伍记录换独立 uid
+## （local_uid + "@team"），清理循环只会命中同命名空间的记录。RPC 签名一个没改，
+## 只是服务端/客户端共用代码里的归属判定变了。
+const TEAM_FLOOR := 6
+const TEAM_UID_SUFFIX := "@team"
+## set_room_note 的 room_idx 高位标记：>= 它表示「写 B1 组队板的招募」。
+## 旧服务端忽略 room_idx，会把带 @teamN: 的正文写到宿舍公告上；客户端收到
+## 快照后在 _normalize_legacy_team_claims() 里把它搬回组队板，不污染宿舍。
+const TEAM_NOTE_BASE := 1000
+const TEAM_NOTE_TAG := "@team%d:"
+
 signal room_claims_changed
 var room_claims: Dictionary = {}
 ## 本机自己那间房的本地镜像（含公告正文）：{"floor", "index", "name", "note"}。
@@ -1198,20 +1213,41 @@ var my_room_cache: Dictionary = {}
 var void_claim: String = ""
 
 
-## 认领 / 取消某间房（name 为空 = 取消）。
+## 队伍记录用的 uid（和裸 local_uid 不同命名空间）。
+func team_uid(uid: String = "") -> String:
+	return (local_uid if uid.is_empty() else uid) + TEAM_UID_SUFFIX
+
+
+func _claim_uid(uid: String, floor_n: int) -> String:
+	return team_uid(uid) if floor_n == TEAM_FLOOR else uid
+
+
+## 这条组队板记录是不是「我开的队」。旧服务端广播的队伍 uid 是裸 uid，
+## _sync_claims 会先归一化，这里两种都认，免得换服瞬间牌子闪一下。
+func is_my_team_board(rec: Dictionary) -> bool:
+	var u := String(rec.get("uid", ""))
+	return not u.is_empty() and (u == team_uid() or u == local_uid)
+
+
+func team_board(idx: int) -> Dictionary:
+	return room_claims.get("%d:%d" % [TEAM_FLOOR, idx], {})
+
+
+## 认领 / 取消某间房（name 为空 = 取消）。floor_n == 6 表示开/撤 B1 组队板。
 ## **客户端也先本地落地**：等服务端回包才改界面，一旦对面是旧版服务端（这个 RPC
 ## 它不认识，包直接被丢掉），就会变成「提示说认领成功、牌子上还是空房」。
 ## 先写本地再发请求，界面永远和操作一致；服务端随后广播的全量快照会覆盖它。
 func claim_room(floor_n: int, room_idx: int, display_name: String) -> void:
 	var nm: String = display_name.strip_edges().left(24)
+	var owner := _claim_uid(local_uid, floor_n)
 	if not has_session():
-		_write_claim(local_uid, floor_n, room_idx, nm)
+		_write_claim(owner, floor_n, room_idx, nm)
 		return
 	if is_server():
-		_write_claim(local_uid, floor_n, room_idx, nm)
+		_write_claim(owner, floor_n, room_idx, nm)
 		_sync_claims.rpc(room_claims)
 		return
-	_write_claim(local_uid, floor_n, room_idx, nm)
+	_write_claim(owner, floor_n, room_idx, nm)
 	_request_claim.rpc_id(1, floor_n, room_idx, nm)
 
 
@@ -1227,7 +1263,7 @@ func _request_claim(n: int, r: int, nm: String) -> void:
 ## 已被别人的 uid 认领的房不抢；name 为空则取消。
 func _apply_claim(peer_id: int, n: int, r: int, nm: String) -> void:
 	var uid := local_uid if peer_id <= 1 else str(peers.get(peer_id, {}).get("uid", ""))
-	_write_claim(uid, n, r, nm)
+	_write_claim(_claim_uid(uid, n), n, r, nm)
 
 
 ## 真正改 room_claims 的地方（服务端裁定和客户端本地预写共用一套规则）。
@@ -1248,13 +1284,20 @@ func _write_claim(uid: String, n: int, r: int, nm: String) -> bool:
 			my_room_cache = {}
 			void_claim = key              # 别让服务器的旧快照把它当成我的房
 	else:
-		# 退掉同一 uid 名下的其它房间（「每个人只能同时占有一个房间」）
+		# 退掉同一 uid 名下的其它房间（「每个人只能同时占有一个房间」）。
+		# 队伍记录的 uid 带 @team 后缀，只会清掉同一个人开过的**其它组队板**，
+		# 宿舍那条 uid 是裸 uid，不会被碰。
 		for k in room_claims.keys():
 			if String(k) == key:
 				continue
 			if String(Dictionary(room_claims[k]).get("uid", "")) == uid:
 				room_claims.erase(k)
-		room_claims[key] = {"name": nm, "uid": uid}
+		var rec := {"name": nm, "uid": uid}
+		# 重新开队 / 重新认领时别把已写好的招募 / 门口公告冲掉
+		var old_note := String(Dictionary(room_claims.get(key, {})).get("note", ""))
+		if not old_note.is_empty():
+			rec["note"] = old_note
+		room_claims[key] = rec
 		if uid == local_uid:
 			# 记进本地镜像（公告正文跟着走），退出重进还能贴回来
 			my_room_cache = {
@@ -1271,6 +1314,10 @@ func claim_of_uid(uid: String) -> String:
 	if uid.is_empty():
 		return ""
 	for k in room_claims.keys():
+		# 组队板不是宿舍：旧服务端快照里 6:idx 也挂着裸 uid，别让 my_claim()
+		# 把它当成「我的房间」，否则出生点会落到 B1。
+		if String(k).begins_with("%d:" % TEAM_FLOOR):
+			continue
 		if String(Dictionary(room_claims[k]).get("uid", "")) == uid:
 			return String(k)
 	return ""
@@ -1294,8 +1341,58 @@ func my_claim() -> String:
 @rpc("authority", "call_remote", "reliable", 0)
 func _sync_claims(snapshot: Dictionary) -> void:
 	room_claims = snapshot.duplicate(true)
+	_normalize_legacy_team_claims()
 	_restore_cached_claim()
 	room_claims_changed.emit()
+
+
+## 兼容公共服上的旧服务端：它还按「一人一间」写 6:idx（uid 是裸 uid，并且顺手
+## 把我的宿舍认领 erase 了），也看不懂 B1 公告的高位路由，会把招募正文写进宿舍
+## 公告。这里把快照修回「队伍归队伍、宿舍归宿舍」；宿舍那份由随后的
+## _restore_cached_claim() 从本地镜像补回来，本机看出生点/门牌都不受影响。
+func _normalize_legacy_team_claims() -> void:
+	if local_uid.is_empty():
+		return
+	var team_prefix := "%d:" % TEAM_FLOOR
+	var moved: Dictionary = {}
+	for k in room_claims.keys():
+		var key := String(k)
+		var rec: Dictionary = room_claims[k]
+		if key.begins_with(team_prefix):
+			if String(rec.get("uid", "")) == local_uid:
+				rec["uid"] = team_uid()
+				room_claims[key] = rec
+			continue
+		# 旧服务端把 B1 招募误写进了宿舍公告（首行 @teamN:）
+		var note := String(rec.get("note", ""))
+		var lines := note.split("\n", true)
+		if lines.is_empty():
+			continue
+		var head := String(lines[0]).strip_edges()
+		if not head.begins_with("@team") or not head.ends_with(":") or head.length() < 7:
+			continue
+		var idx := head.substr(5, head.length() - 6).to_int()
+		var rest := PackedStringArray()
+		for i in range(1, lines.size()):
+			rest.append(String(lines[i]))
+		var body := "\n".join(rest).strip_edges()
+		moved[idx] = body
+		if body.is_empty():
+			rec.erase("note")
+		else:
+			rec["note"] = body
+		room_claims[key] = rec
+	for idx in moved.keys():
+		var tk := "%d:%d" % [TEAM_FLOOR, int(idx)]
+		var rec2: Dictionary = room_claims.get(tk, {})
+		if rec2.is_empty():
+			continue
+		var body2 := String(moved[idx])
+		if body2.is_empty():
+			rec2.erase("note")
+		else:
+			rec2["note"] = body2
+		room_claims[tk] = rec2
 
 
 ## 用本地镜像兜底：服务端快照里没有「我的房间」时把它补回去。
@@ -1321,8 +1418,8 @@ func _restore_cached_claim() -> void:
 	# 一人一间：服务器的旧快照里可能还留着我以前占的房间（旧版服务端不认新请求），
 	# 不清掉的话门牌上会同时挂着我两个名字，my_claim 也可能取到旧的那间。
 	for k in room_claims.keys():
-		if String(k) == key:
-			continue
+		if String(k) == key or String(k).begins_with("%d:" % TEAM_FLOOR):
+			continue                       # 组队板不参与「一人一间」的清理
 		if String(Dictionary(room_claims[k]).get("uid", "")) == local_uid:
 			room_claims.erase(k)
 
@@ -1332,7 +1429,8 @@ func _restore_cached_claim() -> void:
 ## _save_my_room → set_cached_room → room_claims_changed → _refresh_door_plates
 ## → _remember_my_home → _save_my_room …，不挡住就是无限递归（踩过栈溢出）。
 func set_cached_room(floor_n: int, idx: int, name: String, note: String) -> void:
-	if floor_n < 1 or idx < 0:
+	# B1 组队板不是宿舍，绝不能进「我的房间」本地镜像
+	if floor_n < 1 or floor_n == TEAM_FLOOR or idx < 0:
 		return
 	var clean := _clean_note(note)
 	var same: bool = int(my_room_cache.get("floor", 0)) == floor_n \
@@ -1361,13 +1459,45 @@ func set_room_note(room_idx: int, note: String) -> void:
 	_request_note.rpc_id(1, room_idx, txt)
 
 
+## B1 组队板的招募正文（首行可带 @oopz: 语音链接）。
+## 复用已有的 _request_note RPC，只是把 room_idx 加上高位标记告诉服务端
+## 「这是组队板，别写进宿舍门口公告」。旧服务端忽略这个参数，会写到宿舍
+## note 上，客户端 _normalize_legacy_team_claims() 会把它搬回来。
+func set_team_note(board_idx: int, note: String) -> void:
+	var txt := _clean_note(note)
+	if not has_session():
+		_apply_team_note(local_uid, board_idx, txt)
+		return
+	if is_server():
+		_apply_team_note(local_uid, board_idx, txt)
+		_sync_claims.rpc(room_claims)
+		return
+	_apply_team_note(local_uid, board_idx, txt)
+	_request_note.rpc_id(1, TEAM_NOTE_BASE + board_idx,
+		TEAM_NOTE_TAG % board_idx + txt)
+
+
 @rpc("any_peer", "call_remote", "reliable", 0)
 func _request_note(r: int, note: String) -> void:
 	if not is_server():
 		return
 	var uid := str(peers.get(multiplayer.get_remote_sender_id(), {}).get("uid", ""))
-	_apply_note(uid, r, _clean_note(note))
+	if r >= TEAM_NOTE_BASE:
+		_apply_team_note(uid, r - TEAM_NOTE_BASE, _strip_team_tag(_clean_note(note)))
+	else:
+		_apply_note(uid, r, _clean_note(note))
 	_sync_claims.rpc(room_claims)
+
+
+## 剥掉给旧服务端兜底用的 @teamN: 路由首行
+func _strip_team_tag(txt: String) -> String:
+	var lines := txt.split("\n", true)
+	if lines.is_empty() or not String(lines[0]).strip_edges().begins_with("@team"):
+		return txt
+	var rest := PackedStringArray()
+	for i in range(1, lines.size()):
+		rest.append(String(lines[i]))
+	return "\n".join(rest).strip_edges()
 
 
 ## 公告正文清洗：多行保留换行（面板里本来就按多行展示），去掉首尾空白，
@@ -1391,6 +1521,27 @@ func _apply_note(uid: String, r: int, note: String) -> void:
 	room_claims[key] = cur
 	if uid == local_uid and not my_room_cache.is_empty():
 		my_room_cache["note"] = note        # 本地镜像同步更新，退出重进还能读回来
+	room_claims_changed.emit()
+
+
+## 只写自己名下那块组队板的招募；板子还没开、或已经归别人，直接忽略。
+## 绝不碰 my_room_cache / my_room.cfg —— 这是「开队会退宿舍」的关键隔离点。
+func _apply_team_note(uid: String, idx: int, note: String) -> void:
+	if uid.is_empty() or idx < 0:
+		return
+	var key := "%d:%d" % [TEAM_FLOOR, idx]
+	var cur: Dictionary = room_claims.get(key, {})
+	if cur.is_empty():
+		return
+	var owner := String(cur.get("uid", ""))
+	# 新服务端写的是 uid@team；旧服务端快照里可能还是裸 uid
+	if owner != team_uid(uid) and owner != uid:
+		return
+	if note.is_empty():
+		cur.erase("note")
+	else:
+		cur["note"] = note
+	room_claims[key] = cur
 	room_claims_changed.emit()
 
 
