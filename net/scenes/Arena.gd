@@ -192,6 +192,7 @@ func _ready() -> void:
 	_collect_dorms()
 	_collect_campus_seats()
 	_build_door_hint()
+	_build_voice_btn()
 	Net.seat_changed.connect(_on_seat_changed)
 	# 别人的认领公告一到（或自己认领成功）立刻刷新门牌；名单变化会影响「谁跟你同层」
 	Net.room_claims_changed.connect(_refresh_door_plates)
@@ -1940,8 +1941,10 @@ var _near_dorm := ""
 var _near_buddy: Dictionary = {}
 var _room_title := ""
 var _door_hint: Button          # 提示兼交互按钮（手机上点它就是按 E）
+var _voice_btn: Button          # 坐着时右下角的「进语音」按钮（只在 B1 组队房间里出现）
+var _voice_link_now := ""       # _voice_btn 当前指向的 OOPZ 链接（V 键用它）
 var _door_clock := 0.0
-## 座位：[{pos: Vector2(campus 局部坐标), face: String, kind: String}]
+## 座位：[{pos: Vector2(campus 局部坐标), face: String, kind: String, room: int}]
 var _seats_campus: Array = []
 var _seats_room: Array = []
 var _near_seat: Dictionary = {}
@@ -2001,9 +2004,15 @@ var _note_count: Label
 ## 组队板复用同一套公告面板，只是把提示语和「退房」按钮换成组队措辞
 var _note_hint: Label
 var _note_bye_btn: Button
+## OOPZ 语音链接那一格（只有 B1 组队板显示，宿舍公告不会出现）
+var _oopz_box: VBoxContainer
+var _oopz_edit: LineEdit
 var _note_view: PanelContainer
 var _note_view_title: Label
 var _note_view_body: Label
+## 只读面板里的「加入语音」按钮（房主留了链接才显示）
+var _note_view_voice: Button
+var _note_view_link: String = ""
 var _note_room_idx: int = -1
 ## 上一次量到的软键盘高度（只在手机上非 0），用来在键盘弹出时重新摆面板
 var _vk_last: float = 0.0
@@ -2019,6 +2028,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if k.keycode == KEY_F and _try_claim_room():
+		get_viewport().set_input_as_handled()
+		return
+	# V = 进 OOPZ 语音（只在右下角那个按钮亮着时有效，坐下才会亮）
+	if k.keycode == KEY_V and not _voice_link_now.is_empty() and _voice_btn != null and _voice_btn.visible:
+		_open_voice(_voice_link_now)
 		get_viewport().set_input_as_handled()
 		return
 	if k.keycode == KEY_ESCAPE and _note_open():
@@ -2488,6 +2502,18 @@ func _try_auto_room() -> void:
 					(a as Node2D).call("teleport_to",
 						room.position + Vector2(float(raw[0]), float(raw[1])) * TS)
 					print("[dbg] 房内落点=", (a as Node2D).position)
+		# 调试：XGD_OOPZ_DEMO=1 自己是队长、=2 是别人的队（验语音按钮/编辑框用）
+		if OS.has_environment("XGD_OOPZ_DEMO"):
+			var demo := OS.get_environment("XGD_OOPZ_DEMO")
+			var demo_note := OOPZ_TAG + "https://oopz.cn/demo\n来打排位，缺 2 人，开麦"
+			if demo == "2":
+				Net.room_claims["%d:0" % BASEMENT_FLOOR] = {
+					"name": "别人的队", "uid": "demo-other", "note": demo_note}
+				Net.room_claims_changed.emit()
+			else:
+				Net.claim_room(BASEMENT_FLOOR, 0, "演示队")
+				Net.set_room_note(0, demo_note)
+			print("[dbg] 演示组队板=", Net.room_claims.get("%d:0" % BASEMENT_FLOOR, {}))
 
 
 ## 进出房间时放开/恢复相机边界。只动本地玩家的相机，远端玩家不影响视角。
@@ -2611,6 +2637,70 @@ func _build_door_hint() -> void:
 	layer.add_child(_door_hint)
 
 
+## 坐着时的「进语音」按钮（右下角）。手机上点它、桌面上按 V，都是唤起 OOPZ。
+## 只在 B1 活动室、且坐进的单间填了语音链接时才出现 —— 宿舍不涉及。
+func _build_voice_btn() -> void:
+	_voice_btn = Button.new()
+	_voice_btn.focus_mode = Control.FOCUS_NONE
+	_voice_btn.mouse_filter = Control.MOUSE_FILTER_STOP
+	_voice_btn.add_theme_font_size_override("font_size", 17)
+	_voice_btn.add_theme_color_override("font_color", Color("#d8ffe8"))
+	_voice_btn.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
+	_voice_btn.add_theme_constant_override("outline_size", 3)
+	# 跟项目其余 UI 一致：2px 实线边框 + 深底，不用圆角/模糊
+	for st in ["normal", "hover", "pressed", "focus"]:
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = Color(0.07, 0.16, 0.12, 0.94) if st == "normal" else Color(0.10, 0.22, 0.16, 0.97)
+		sb.border_color = Color(0.42, 0.90, 0.66, 0.95)
+		sb.set_border_width_all(2)
+		sb.content_margin_left = 14
+		sb.content_margin_right = 14
+		sb.content_margin_top = 8
+		sb.content_margin_bottom = 8
+		_voice_btn.add_theme_stylebox_override(st, sb)
+	_voice_btn.pressed.connect(_on_voice_btn_pressed)
+	_voice_btn.visible = false
+	var layer := CanvasLayer.new()
+	layer.name = "VoiceBtn"
+	layer.layer = 5
+	add_child(layer)
+	layer.add_child(_voice_btn)
+
+
+func _on_voice_btn_pressed() -> void:
+	_open_voice(_voice_link_now)
+
+
+## 右下角摆位（换分辨率/窗口缩放都要重算，所以每次显示前调一次）
+func _place_voice_btn() -> void:
+	if _voice_btn == null:
+		return
+	var vs := get_viewport().get_visible_rect().size
+	var sz := _voice_btn.get_combined_minimum_size()
+	_voice_btn.size = sz
+	_voice_btn.position = Vector2(vs.x - sz.x - 18.0, vs.y - sz.y - 18.0)
+
+
+## 坐着的时候每 8Hz 调一次：坐的单间有语音链接就亮按钮，没有就藏起来。
+func _refresh_voice_btn(pos: Vector2) -> void:
+	if _voice_btn == null:
+		return
+	var link := ""
+	var idx := -1
+	if current_floor == BASEMENT_FLOOR and in_room:
+		idx = _seat_room_at(pos)
+		if idx >= 0:
+			link = _room_voice_link(idx)
+	_voice_link_now = link
+	if link.is_empty():
+		_voice_btn.visible = false
+		return
+	_voice_btn.text = "%s · 按 V 进语音" % _team_board_name(idx)
+	_voice_btn.visible = true
+	_place_voice_btn()
+
+
+
 ## 每隔一小段时间看一次：人在哪栋宿舍旁 / 是否已经在房间里。
 ## 不每帧扫是有原因的 —— 20 栋楼 × 每帧，在一台老机器上就是白烧的 CPU。
 ## 每隔一小段时间看一次：坐着 / 旁边有椅子 / 在房间里 / 站在哪栋宿舍旁。
@@ -2629,9 +2719,15 @@ func _update_interact_hint(delta: float) -> void:
 		_near_dorm = ""
 		_near_seat = {}
 		_door_hint.visible = false
+		if _voice_btn != null:
+			_voice_btn.visible = false
 		return
 
 	var pos: Vector2 = (me as Node2D).position
+	# 「进语音」按钮只有坐着的时候才该出现，先无条件藏掉，坐着那一支再按需点亮
+	if _voice_btn != null:
+		_voice_btn.visible = false
+		_voice_link_now = ""
 
 	# 门的开合每 8Hz 定一次「该开还是该关」，动画由 RoomDoor 逐帧插值
 	_update_room_doors()
@@ -2652,6 +2748,8 @@ func _update_interact_hint(delta: float) -> void:
 		_near_buddy = {}
 		_door_hint.visible = true
 		_door_hint.text = "按 E %s" % ("起床" if bool(me.call("is_lying")) else "站起来")
+		# 坐在 B1 某个单间里、且队里留了 OOPZ 链接 → 右下角亮「进语音」
+		_refresh_voice_btn(pos)
 		return
 
 	# 身边站着人：E 优先做「加好友」。比座椅/门牌都具体 —— 人都贴脸了，
@@ -2818,6 +2916,7 @@ func _collect_room_seats() -> void:
 			"pos": (room as Node2D).position + (s["pos"] as Vector2),
 			"face": String(s["face"]),
 			"kind": "chair",
+			"room": int(s.get("room", -1)),
 		})
 	# 每张床也是一个「座位」（kind=bed），躺在床上是躺姿而不是坐姿
 	for b in room.get("data").get("beds", []):
@@ -3423,6 +3522,91 @@ func _team_seated_count(idx: int) -> int:
 	return n
 
 
+# ── OOPZ 语音 ────────────────────────────────────────────────────────────
+## OOPZ 没有开放平台（官方无 API/SDK，社区那套是逆向的私有协议），
+## 所以做不到「坐下就被拉进语音」。能做的是：房主把自己的语音频道分享链接
+## 贴在组队板上，队员坐下时右下角出现「进语音」，点一下唤起 OOPZ 落到频道。
+## 链接存在公告首行、带 @oopz: 前缀 —— room_claims 本来就是个自由文本 note，
+## 这样不用动服务端 schema，老版本客户端也不会 checksum failed。
+const OOPZ_TAG := "@oopz:"
+
+## 把公告拆成 [语音链接, 正文]。链接只在首行、靠前缀标记，展示时剥掉。
+func _note_split(note: String) -> Array:
+	var link := ""
+	var body := PackedStringArray()
+	for ln in note.split("\n", true):
+		var t: String = ln.strip_edges()
+		if link.is_empty() and t.to_lower().begins_with(OOPZ_TAG):
+			link = t.substr(OOPZ_TAG.length()).strip_edges()
+			continue
+		body.append(ln)
+	return [link, "\n".join(body).strip_edges()]
+
+
+## 只放行 http/https/oopz 三种 scheme。OS.shell_open 是把字符串直接丢给系统，
+## 任意 scheme（file://、ms-msdt: 之类）都可能被当成可执行协议，必须白名单。
+## 没写 scheme 的（房主直接粘 oopz.cn/xxx）按 https 补上。
+func _safe_voice_link(s: String) -> String:
+	var t: String = s.replace("\r", "").replace("\n", "").strip_edges()
+	if t.is_empty():
+		return ""
+	var low := t.to_lower()
+	if not low.contains("://"):
+		# 没写 scheme 的（房主直接粘 oopz.cn/xxx）按 https 补，但先挡掉
+		# javascript:/data:/file: 这类「有冒号没双斜杠」的伪协议
+		if low.contains(":") or not low.contains("."):
+			return ""
+		return "https://" + t
+	if low.begins_with("https://") or low.begins_with("http://") or low.begins_with("oopz://"):
+		return t
+	return ""
+
+
+## 某个单间的组队板上留的语音链接（没有就返回空串）
+func _room_voice_link(room_idx: int) -> String:
+	var cur: Dictionary = Net.room_claims.get("%d:%d" % [BASEMENT_FLOOR, room_idx], {})
+	if cur.is_empty():
+		return ""
+	var parts := _note_split(String(cur.get("note", "")))
+	return _safe_voice_link(String(parts[0]))
+
+
+## 坐着的人在哪个单间：找脚下最近的那把椅子，读它数据里的 room。
+func _seat_room_at(pos: Vector2) -> int:
+	var best := -1
+	var best_d := 4.0 * TS          # 4 格内都算「坐在这把椅子上」
+	for item in _seats_room:
+		var s: Dictionary = item
+		if String(s.get("kind", "")) != "chair":
+			continue
+		if int(s.get("room", -1)) < 0:
+			continue
+		var d: float = pos.distance_to(s["pos"])
+		if d < best_d:
+			best_d = d
+			best = int(s["room"])
+	return best
+
+
+## 唤起 OOPZ。打不开就把链接塞剪贴板，至少用户还能自己粘。
+func _open_voice(link: String) -> void:
+	var safe := _safe_voice_link(link)
+	if safe.is_empty():
+		_notice("这支队还没留 OOPZ 语音频道链接")
+		return
+	var err := OS.shell_open(safe)
+	if err != OK:
+		DisplayServer.clipboard_set(safe)
+		_notice("没能唤起 OOPZ（没装客户端？）· 链接已复制：%s" % safe.left(46))
+		return
+	_notice("正在打开 OOPZ · 进频道后点开麦就好")
+
+
+func _on_note_view_voice_pressed() -> void:
+	_open_voice(_note_view_link)
+
+
+
 # ── 门口公告 ─────────────────────────────────────────────────────────────
 ## 每间宿舍门口一块牌子（世界坐标锚定，跟着相机走）。
 ## 没被认领时显示淡色房号；被认领后显示「某某的房间」亮字。
@@ -3506,6 +3690,25 @@ func _build_note_panel() -> PanelContainer:
 	_note_hint.add_theme_font_size_override("font_size", 12)
 	_note_hint.add_theme_color_override("font_color", Color(0.62, 0.70, 0.80))
 	vb.add_child(_note_hint)
+
+	# OOPZ 语音链接（只有 B1 组队板显示）。OOPZ 没开放平台，做不到游戏内直接连麦，
+	# 但把频道分享链接存在板子上，队员坐下就能一键唤起客户端进同一个频道。
+	_oopz_box = VBoxContainer.new()
+	_oopz_box.add_theme_constant_override("separation", 4)
+	_oopz_box.visible = false
+	vb.add_child(_oopz_box)
+	var ol := Label.new()
+	ol.text = "OOPZ 语音频道 · 选填"
+	ol.add_theme_font_size_override("font_size", 12)
+	ol.add_theme_color_override("font_color", Color(0.55, 0.86, 0.72))
+	_oopz_box.add_child(ol)
+	_oopz_edit = LineEdit.new()
+	_oopz_edit.placeholder_text = "粘贴 OOPZ 语音频道分享链接，队员坐下就会看到「进语音」"
+	_oopz_edit.custom_minimum_size = Vector2(460, 38)
+	_oopz_edit.add_theme_font_size_override("font_size", 14)
+	_oopz_edit.add_theme_color_override("font_color", Color("#dff5e8"))
+	_oopz_box.add_child(_oopz_edit)
+
 	_note_edit = TextEdit.new()
 	_note_edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
 	_note_edit.custom_minimum_size = Vector2(460, 150)
@@ -3596,6 +3799,26 @@ func _build_note_view() -> PanelContainer:
 	_note_view_body.add_theme_font_size_override("font_size", 15)
 	_note_view_body.add_theme_color_override("font_color", Color("#dbe7f5"))
 	vb.add_child(_note_view_body)
+	# 队长留了 OOPZ 频道才显示：站在板前就能直接进语音（不用先坐下）
+	_note_view_voice = Button.new()
+	_note_view_voice.text = "加入 OOPZ 语音频道"
+	_note_view_voice.custom_minimum_size = Vector2(0, 48)
+	_note_view_voice.focus_mode = Control.FOCUS_NONE
+	_note_view_voice.add_theme_font_size_override("font_size", 16)
+	_note_view_voice.add_theme_color_override("font_color", Color("#d8ffe8"))
+	for st in ["normal", "hover", "pressed", "focus"]:
+		var vsb := StyleBoxFlat.new()
+		vsb.bg_color = Color(0.07, 0.16, 0.12, 0.95) if st == "normal" else Color(0.10, 0.22, 0.16, 0.98)
+		vsb.border_color = Color(0.42, 0.90, 0.66, 0.95)
+		vsb.set_border_width_all(2)
+		vsb.content_margin_left = 12
+		vsb.content_margin_right = 12
+		vsb.content_margin_top = 8
+		vsb.content_margin_bottom = 8
+		_note_view_voice.add_theme_stylebox_override(st, vsb)
+	_note_view_voice.visible = false
+	_note_view_voice.pressed.connect(_on_note_view_voice_pressed)
+	vb.add_child(_note_view_voice)
 	var foot_row := HBoxContainer.new()
 	vb.add_child(foot_row)
 	var foot := Label.new()
@@ -3639,13 +3862,17 @@ func _open_note_board(idx: int) -> void:
 	if String(cur.get("uid", "")) != Net.local_uid:
 		_note_view_title.text = ("%s ·「%s」的队伍" % [label, String(cur.get("name", "?"))]) if is_b1 else \
 			("%d 号房 ·「%s」" % [idx + 1, String(cur.get("name", "?"))])
-		var note := String(cur.get("note", ""))
+		var note_raw := String(cur.get("note", ""))
+		var parts := _note_split(note_raw)
+		_note_view_link = _safe_voice_link(String(parts[0])) if is_b1 else ""
+		var note := String(parts[1])
 		if is_b1:
 			var body := note if not note.is_empty() else "队长还没写招募内容。"
 			body += "\n\n已入座 %d / 6 人 · 进去找空位坐下就算加入" % _team_seated_count(idx)
 			_note_view_body.text = body
 		else:
 			_note_view_body.text = note if not note.is_empty() else "这间房的房主还没写公告。"
+		_note_view_voice.visible = not _note_view_link.is_empty()
 		_note_view_body.add_theme_color_override("font_color",
 			Color("#e6effb") if not note.is_empty() else Color(0.60, 0.66, 0.74))
 		_note_view.visible = true
@@ -3654,7 +3881,10 @@ func _open_note_board(idx: int) -> void:
 	_note_room_idx = idx
 	_note_title.text = ("发布 %s 组队招募" % label) if is_b1 else \
 		("编写 %d 号房的门口公告" % (idx + 1))
-	_note_edit.text = String(cur.get("note", ""))
+	var mine := _note_split(String(cur.get("note", "")))
+	_oopz_box.visible = is_b1
+	_oopz_edit.text = _safe_voice_link(String(mine[0])) if is_b1 else ""
+	_note_edit.text = String(mine[1])
 	_update_note_count()
 	_note_panel.visible = true
 	_center_panel(_note_panel)
@@ -3704,20 +3934,32 @@ func _save_note_board() -> void:
 	if _note_room_idx < 0:
 		return
 	var idx := _note_room_idx
-	var txt := _note_edit.text
+	var body := _note_edit.text.strip_edges()
+	# 语音链接存在公告首行（@oopz: 前缀）—— 服务端只认 note 一个字符串，
+	# 这样加功能不用改协议，老版本客户端看到的就是一段多了一行前缀的文字。
+	var link := _safe_voice_link(_oopz_edit.text) if current_floor == BASEMENT_FLOOR else ""
+	var txt := body
+	if not link.is_empty():
+		txt = OOPZ_TAG + link + ("\n" + body if not body.is_empty() else "")
 	_close_note_board()
 	Net.set_room_note(idx, txt)
 	# 同步落本地存档：服务端只把认领/公告存在内存里，重启就没了，
 	# 而旧版服务端连请求都收不到 —— 不存本地就是「退出之后公告没保存」。
 	_save_my_room(current_floor, idx, txt.strip_edges().left(160))
 	if current_floor == BASEMENT_FLOOR:
-		_notice("组队招募已撤下" if txt.strip_edges().is_empty() else "组队招募已发布 · B1 的同学都能看到")
+		if txt.strip_edges().is_empty():
+			_notice("组队招募已撤下")
+		elif link.is_empty():
+			_notice("组队招募已发布 · B1 的同学都能看到")
+		else:
+			_notice("组队招募已发布（含语音频道）· 队员坐下就能一键进语音")
 	else:
 		_notice("门口公告已擦掉" if txt.strip_edges().is_empty() else "门口公告已更新")
 
 
 func _clear_note_board() -> void:
 	_note_edit.text = ""
+	_oopz_edit.text = ""
 	_save_note_board()
 
 

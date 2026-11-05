@@ -109,7 +109,9 @@ func _build_seats() -> void:
 				pos = Vector2(cx, sr.end.y * TS - 6.0)
 			"left", "right":
 				pos = Vector2(cx, sr.position.y * TS + 6.0)
-		seats.append({"pos": pos, "face": face})
+		# room：这把椅子属于哪个单间。B1 活动室靠它判断「坐下的人该进哪个语音频道」，
+		# 好让组队板上的 OOPZ 链接跟着座位走。宿舍的座位没有这个字段，默认 -1。
+		seats.append({"pos": pos, "face": face, "room": int(s.get("room", -1))})
 
 
 ## 玩家应该挂到哪个节点下
