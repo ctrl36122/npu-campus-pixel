@@ -109,21 +109,6 @@ func _build_ground(d) -> void:
 			s.position = Vector2(cx * chunk, cy * chunk)
 			_attach(holder, s)
 
-	# 水缘绿化带 + 水面凹陷叠加层（与地面图同网格，透明 PNG 叠在最上）
-	for cy in int(g.get("rows", 0)):
-		for cx in int(g.get("cols", 0)):
-			var spath := "res://assets/shore/g%d_%d.png" % [cx, cy]
-			if not ResourceLoader.exists(spath):
-				continue
-			var ss := Sprite2D.new()
-			ss.name = "shore_%d_%d" % [cx, cy]
-			ss.texture = load(spath)
-			ss.centered = false
-			ss.texture_filter = NEAREST
-			ss.position = Vector2(cx * chunk, cy * chunk)
-			ss.z_index = 1
-			_attach(holder, ss)
-
 	# 海天苑大楼中央庭院（草地 + 步道）：放在 Ground 层，楼体的投影/墙面自然盖住边缘
 	var lawn_path := "res://assets/haitian_courtyard.png"
 	if ResourceLoader.exists(lawn_path):
