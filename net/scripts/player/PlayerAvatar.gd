@@ -106,6 +106,10 @@ var ui_blocked: bool = false
 var _cam_zoom_target: float = ZOOM_BASE
 ## 精灵/相机相对物理位置的滞后量（tick 阶跃的平滑缓冲）
 var _render_lag: Vector2 = Vector2.ZERO
+## 上一次 _apply_movement 实际挪了多远（像素）。渲染时按这个长度线性追平滞后，
+## 保证视觉在一个 tick 内匀速追上物理位置 —— 只靠指数 lerp 永远差一截，
+## 稳态滞后 + 每 tick 补一次 = 走起来一抖一抖（活动室里最明显）。
+var _step_len: float = 0.0
 ## 被楼挡住时为 true（Arena 每帧设置）：楼和人都变半透明，经典 RPG 做法
 var _occluded: bool = false
 ## 当前不透明度，向目标平滑逼近（走过楼边不该「啪」一下变透）
@@ -188,6 +192,7 @@ func teleport_to(pos: Vector2) -> void:
 	buffer.entries.clear()
 	correction_offset = Vector2.ZERO
 	_render_lag = Vector2.ZERO
+	_step_len = 0.0
 
 
 ## 进 / 出房间、换层时调用：把「我在房间里 + 第几层 + 落在哪」告诉服务端。
@@ -278,6 +283,32 @@ func _push_room_pose(pos: Vector2, dir: int) -> void:
 	sit_dir = clampi(dir, 0, 8)
 
 
+## 客户端 -> 服务端：起身落点。
+##
+## 起身时客户端会做 _step_out（从床/椅子/长椅的碰撞体里找最近的空地），这个结果
+## 服务端算不出来 —— 它手里的副本没跟着挪过，物理状态也不完全等于客户端那一刻的。
+## 不接这一步的后果：服务端 position 停在座位中心，而它每模拟一条命令就广播一份
+## 新快照；客户端被拉回座位、本地预测再挪出去，每 tick 来回 = 抽搐。
+## （2026-11-05 实测：只有纯客户端会抽，房主自己起身不抽，就是因为这条链路断了。）
+@rpc("any_peer", "call_remote", "reliable", 0)
+func _report_standup(pos: Vector2) -> void:
+	if not Net.is_server():
+		return
+	if multiplayer.get_remote_sender_id() != owner_peer_id:
+		return
+	if room_inside or on_boat:
+		return                      # 房间 / 船上各走各的同步通道，别串味
+	if not pos.is_finite():
+		return
+	# 起身前那几条还没被模拟的旧命令是从座位出发的位移，从新落点再走一遍
+	# 会凭空多走一段；客户端那边 buffer 已经在 teleport_to 里清空了，这里对称清掉。
+	commands.clear()
+	position = pos
+	server_position = pos
+	teleport_to(pos)
+	_publish_pose(pos)
+
+
 ## 坐到椅子上。pos 是座位点（人物脚底），dir_name 取 down/left/right/up。
 ## 会先 teleport 吸附过去，再切坐姿动画。
 ##
@@ -327,17 +358,26 @@ func stand_up() -> void:
 	# 控制权交回去，人就是「嵌在床里」的状态 —— move_and_collide 从重叠出发
 	# 往哪个方向都推不动，玩家会觉得一起来就卡死、只能重开。
 	# 所以起身时先找一个能站人的空位挪过去。
-	_step_out()
-	# ⚠️ 关键修复：把「起身落点」同步进权威快照，并让服务端广播给所有人。
-	# 否则联机时服务端那份 server_state 仍停在座位中心，而 position 又是 ALWAYS
-	# 复制（每帧从服务端覆盖到客户端）——客户端这边刚 _step_out 挪出来，下一帧
-	# 就被服务端那份旧坐标按回去、再被本地预测挪出来，反复拉扯 = 抽搐。
-	# 和 set_boat_state(false) 的退出处理保持一致：teleport_to 清掉旧预测缓冲、
-	# 把 server_state 指向新落点，服务端再 _publish_pose 广播出去。
-	teleport_to(position)
+	#
+	# 落点只由「操作这个人的那一端」决定。服务端手里那份远端 avatar 是纯模拟副本，
+	# 它既不知道客户端当时的碰撞状态，也从没跟着做过 _step_out —— 在这儿再挑一次
+	# 只会挑出另一个点，广播回去就是左右拉扯（这正是「一起身就抽搐」的第二种成因）。
+	var authoritative_here := is_local_player or not Net.is_server()
+	if authoritative_here:
+		_step_out()
+		# 清掉预测缓冲、把 server_state 指向新落点：起身这一下位置是跳变的，
+		# 旧缓冲里的指令是从座位出发的，留着会被重放成人往前冲一段。
+		teleport_to(position)
 	_update_visual()
 	if Net.is_server():
-		_publish_pose(position)
+		# 房主自己起身：本地就是权威，直接发布一份新快照。
+		if is_local_player:
+			_publish_pose(position)
+	elif Net.has_session():
+		# ⚠️ 客户端必须把落点报给服务端。少了这一步，服务端那份 position 还停在
+		# 座位中心，而它每模拟一条命令就广播一次快照 —— 客户端刚挪出来就被拉回、
+		# 本地预测又挪出去，反复拉扯 = 抽搐（2026-11-05 复现，纯客户端才出现）。
+		Net.send_to(1, self, &"_report_standup", [position])
 
 
 ## 躺到床上。pos 是床上的落点（人物中心），dir_name 是躺的方向。
@@ -573,6 +613,7 @@ func _apply_movement(command: Dictionary) -> void:
 	if on_boat:
 		velocity = Vector2.ZERO
 		_moving = false
+		_step_len = 0.0
 		return
 	var direction: Vector2 = Vector2(float(command.get("x", 0.0)), float(command.get("y", 0.0))).limit_length()
 	# 坐 / 躺状态下方向键不再响应（以前按方向键会自动起身，容易误触把刚坐下的
@@ -580,6 +621,7 @@ func _apply_movement(command: Dictionary) -> void:
 	if sit_dir != 0:
 		velocity = Vector2.ZERO
 		_moving = false
+		_step_len = 0.0
 		return
 	var speed: float = SPEED
 	if bool(command.get("sprint", false)):
@@ -603,6 +645,16 @@ func _apply_movement(command: Dictionary) -> void:
 	# 物理位置已经前移，视觉位置留在原处（_render_lag 抵消掉这一步），
 	# 再由 _process 平滑追上去 —— 30Hz 的阶跃就变成了连续移动。
 	_render_lag -= moved
+	# 记下这一步的实际长度：_process 拿它当「这一 tick 要追多少」的基准，
+	# 正好在一个 tick 内匀速追平（斜率恒定 = 视觉匀速，不会被指数 lerp 拖出锯齿）。
+	_step_len = moved.length()
+	# ⚠️ 必须在这里立刻把视觉位置也挪回去。
+	# 物理位置是这一 tick 一次性跳过去的，补偿量 _render_lag 也是同一步到位；
+	# 如果只等下一个渲染帧再写 visual.position，就会出现「这一帧人物猛地前进
+	# 1.8px、下一帧又退回来」——每 tick 一次，就是玩家说的抽搐。
+	# 写完 visual 之后，帧间再由 _process 线性追平，位置才是连续单调的。
+	if visual != null:
+		visual.position = correction_offset + _render_lag
 	# 视觉方向跟着实际输入走（服务端模拟时同样会更新，保证远端看到的朝向一致）
 	if direction.length() > 0.01:
 		_face_dir = direction.normalized()
@@ -627,6 +679,7 @@ func _apply_movement(command: Dictionary) -> void:
 	else:
 		_moving = false
 		_stuck_ticks = 0
+		_step_len = 0.0
 
 
 ## 人物碰撞体是否正和房间/建筑的实体重叠（被挤进家具里了）。
@@ -692,7 +745,19 @@ func _process(delta: float) -> void:
 		correction_offset = correction_offset.lerp(Vector2.ZERO, minf(delta * 12.0, 1.0))
 	# 视觉平滑：主机自己也要走这段（原来 Net.is_server() 直接 return，
 	# 于是开房间的那个人看到的自己反而是最抖的）。
-	_render_lag = _render_lag.lerp(Vector2.ZERO, minf(delta * RENDER_CHASE, 1.0))
+	#
+	# 用「线性追平」而不是指数 lerp。物理位置每 tick（30Hz）跳一次，指数衰减
+	# 每帧只追一部分，永远追不平：稳态滞后 + 每 tick 补跳一次 = 走起来一缩一缩
+	# （在活动室这种空旷地面走直线时最明显，宿舍里老撞家具反而不容易看出来）。
+	# 这里按上一步的实际长度算「这一 tick 该追多少」，视觉速度恒定，
+	# 位移阶跃被填成连续匀速 —— 位置对得上，画面也不抖。
+	var _chase: float = 0.0
+	if _step_len > 0.001:
+		_chase = (_step_len / maxf(NetTick.DELTA, 0.001)) * delta
+		_render_lag = _render_lag.move_toward(Vector2.ZERO, _chase)
+	else:
+		# 站住了：残余滞后指数收回，别一下子吸过去
+		_render_lag = _render_lag.lerp(Vector2.ZERO, minf(delta * RENDER_CHASE, 1.0))
 	visual.position = correction_offset + _render_lag
 	# 被楼挡住时自己也淡到 0.55：楼 0.45 + 人 0.55 叠起来能看清轮廓和位置
 	_occl_a = move_toward(_occl_a, OCCL_ALPHA if _occluded else 1.0, delta * 4.0)

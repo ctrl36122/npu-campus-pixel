@@ -2197,16 +2197,7 @@ func enter_room(path: String, floor_n: int = 1) -> bool:
 	if stale_commands is Dictionary:
 		(stale_commands as Dictionary).clear()
 	_set_cam_limit(me, true)
-	# 视距只按「竖向」适配：让南北两排房间刚好一屏看全（镜头高度固定），
-	# 横向靠拉长的走廊去滚动 —— 走起来才有沉浸感。
-	# 不按宽度缩，否则 14 间这种长条楼层会被人为缩成一条、走廊的"长"也就白拉了。
-	if OS.has_environment("XGD_ZOOM"):
-		me.set("_cam_zoom_target", clampf(OS.get_environment("XGD_ZOOM").to_float(), 0.55, 3.0))
-	else:
-		var vp: Vector2 = get_viewport().get_visible_rect().size
-		var rw: Vector2 = (room as Node2D).get("size_px") * (room as Node2D).global_scale
-		var fit_h: float = vp.y / maxf(rw.y, 1.0) * 0.94
-		me.set("_cam_zoom_target", clampf(minf(ROOM_ZOOM, fit_h), 0.55, ROOM_ZOOM))
+	_fit_room_zoom(me)
 	in_room = true
 
 	# 房间没有烘焙光照图，全屏夜幕会把它压成一片黑
@@ -2559,6 +2550,25 @@ func _set_cam_limit(avatar: Node, free_it: bool) -> void:
 		_cam_limit.clear()
 	cam.call("reset_smoothing")
 	cam.call("force_update_scroll")
+
+
+## 视距只按「竖向」适配：让南北两排房间刚好一屏看全（镜头高度固定），
+## 横向靠拉长的走廊去滚动 —— 走起来才有沉浸感。
+## 不按宽度缩，否则 14 间这种长条楼层会被人为缩成一条、走廊的"长"也就白拉了。
+##
+## ⚠️ 换层时也必须重算：宿舍（高 14 格）算出 2.1 倍，B1 活动室（高 42 格）
+## 要 ~1.0 倍才装得下。漏了这步，从宿舍坐电梯下 B1 后还停在 2.1 倍，
+## 视野只有六百多像素、房间宽 1056 —— 屏幕上只看得见一小块地板。
+func _fit_room_zoom(avatar: Node) -> void:
+	if avatar == null or room == null or not is_instance_valid(room):
+		return
+	if OS.has_environment("XGD_ZOOM"):
+		avatar.set("_cam_zoom_target", clampf(OS.get_environment("XGD_ZOOM").to_float(), 0.55, 3.0))
+		return
+	var vp: Vector2 = get_viewport().get_visible_rect().size
+	var rw: Vector2 = (room as Node2D).get("size_px") * (room as Node2D).global_scale
+	var fit_h: float = vp.y / maxf(rw.y, 1.0) * 0.94
+	avatar.set("_cam_zoom_target", clampf(minf(ROOM_ZOOM, fit_h), 0.55, ROOM_ZOOM))
 
 
 ## 只有真·宿舍楼能进：星天苑 A~H、云天苑 A~F、海天苑 1/2 号楼。
@@ -3277,6 +3287,13 @@ func _go_floor(n: int) -> void:
 		_update_room_doors()
 	var me: Node = _local_avatar()
 	if me != null:
+		# 跨布局换层时房间是整份重建的，相机边界必须重新按新房间矩形算一遍。
+		# 漏了这一步的话：从宿舍（窄）切到 B1 活动室（132 格宽）后，limit_right 还
+		# 停在旧房间的右墙 —— 人走过那道看不见的线，相机就顶死不动，角色一路走出
+		# 屏幕，表现就是「活动室右半边视角不跟随、看不到人」。
+		if is_basement != was_basement:
+			_set_cam_limit(me, true)
+			_fit_room_zoom(me)
 		var spot: Vector2 = _elevator_step_out()
 		me.call("teleport_to", spot)
 		# 换层 = 房间里换一个「层号」：同层才互相可见，位置也一起同步过去
