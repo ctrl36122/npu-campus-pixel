@@ -2007,7 +2007,7 @@ var _near_seat: Dictionary = {}
 # ── 猫咪互动 ────────────────────────────────────────────────────────────────
 const CAT_PET_R := 26.0        # 能摸到猫的距离（校园局部像素）
 const ADOPT_PATH := "user://adopted_cats.json"
-const ADOPT_MAX := 4           # 猫窝最多养几只
+const ADOPT_MAX := 2           # 宿舍猫窝最多养几只
 const ADOPT_PETS := 3          # 摸满几次可以领养（与 Cat.gd 的 can_adopt() 一致）
 var _wildlife_ground: Node2D = null   # campus/Objects/WildlifeGround，猫都在它下面
 var _cat_nav: NavGrid = null          # 撒锚点 + 给猫做漫游碰撞判定
@@ -2254,6 +2254,11 @@ func _ensure_adopted() -> Array:
 			f.close()
 			if parsed is Array:
 				_adopted = parsed
+	# 上限是后来才收窄的（曾经允许 4 只），旧存档要按当前上限裁掉多余的，
+	# 否则房间里会多出猫、提示条却一直在说「猫窝已满」。
+	if _adopted.size() > ADOPT_MAX:
+		_adopted = _adopted.slice(0, ADOPT_MAX)
+		_save_adopted()
 	return _adopted
 
 
@@ -2446,7 +2451,7 @@ func _setup_room_cats() -> void:
 			c.name = "RoomCat_%d" % i
 			c.set_script(cat_script)
 			host.add_child(c)
-			# 2 只并排蹲在垫子旁，第 3/4 只挪到窝前地板，别叠成一坨
+			# 最多 ADOPT_MAX(2) 只，并排蹲在垫子旁，间距 15px 不会叠成一坨
 			var cat_at := at + Vector2(-8.0 + float(i % 2) * 15.0,
 				float(int(i / 2)) * 10.0)
 			c.call("setup", cat_at, skins[int(cd.get("skin", 0)) % skins.size()], 9000 + i * 71)
@@ -2457,7 +2462,7 @@ func _setup_room_cats() -> void:
 			c.position = cat_at
 			# 猫的脚底 y 比窝小，纯 y-sort 会被垫子盖住；抬一级让它蹲在垫子上
 			c.z_index = 1
-			# 每只猫的初始状态错开，一进门不会像四只复制粘贴的标本
+			# 每只猫的初始状态错开，一进门不会像复制粘贴的标本
 			var seed_i := 9000 + i * 71
 			var roll := float((seed_i * 37) % 100) / 100.0
 			if roll < 0.34:
