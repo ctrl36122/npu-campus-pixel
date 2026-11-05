@@ -2098,7 +2098,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if k.keycode == KEY_E and _try_interact():
 		get_viewport().set_input_as_handled()
 		return
-	if k.keycode == KEY_F and _try_claim_room():
+	if k.keycode == KEY_F and (_try_leash_cat() or _try_claim_room()):
 		get_viewport().set_input_as_handled()
 		return
 	# V = 进 OOPZ 语音（只在右下角那个按钮亮着时有效，坐下才会亮）
@@ -2153,6 +2153,12 @@ func _try_interact() -> bool:
 	if in_room and _near_elevator((me as Node2D).position):
 		_open_floor_panel()
 		return true
+	# 自己房间里的猫：E 摸它（F 牵出门遛，走 _try_leash_cat）
+	if in_room:
+		var room_cat := _nearest_room_cat((me as Node2D).position)
+		if room_cat != null:
+			_pet_room_cat(room_cat)
+			return true
 	# 身边有人：E 是加好友。必须排在「门口公告」之前 —— 两个人贴着门站着的时候，
 	# 按 E 想加的显然是眼前这个人，不是墙上那块牌子。
 	if not _near_buddy.is_empty():
@@ -2202,10 +2208,16 @@ func _try_interact() -> bool:
 
 ## 校园里离玩家最近、且摸得到的猫（房间里没有 WildlifeGround，自然返回 null）
 func _nearest_cat(pos: Vector2) -> Node2D:
-	if _wildlife_ground == null or not is_instance_valid(_wildlife_ground):
-		return null
 	var best: Node2D = null
 	var best_d := CAT_PET_R
+	# 牵着的那只不在 WildlifeGround 里（它挂在 campus/Objects 上直接参与 y 排序）
+	if _leash_cat != null and is_instance_valid(_leash_cat):
+		var dl: float = pos.distance_to(_leash_cat.position)
+		if dl < best_d:
+			best_d = dl
+			best = _leash_cat
+	if _wildlife_ground == null or not is_instance_valid(_wildlife_ground):
+		return best
 	for c in _wildlife_ground.get_children():
 		if not (c is Node2D) or not String(c.name).begins_with("Cat"):
 			continue
@@ -2411,6 +2423,15 @@ func _setup_room_cats() -> void:
 		host.add_child(bed)
 		if idx != my_idx:
 			continue
+		# 这块地板是这间房能走的地方（避开床/书桌/门洞那道墙），猫只在里面活动
+		var roam := Rect2(at + Vector2(-26.0, -26.0), Vector2(52.0, 36.0))
+		if north:
+			roam.position.y = maxf(roam.position.y, 4.6 * TS)
+			roam.end.y = minf(roam.end.y, 9.2 * TS)
+		else:
+			roam.position.y = maxf(roam.position.y, 18.6 * TS)
+			roam.end.y = minf(roam.end.y, 27.2 * TS)
+		var owner_avatar: Node2D = _local_avatar() as Node2D
 		# 自己的窝：摆上领养的猫，加名牌
 		var name_text := ""
 		for i in cats.size():
@@ -2425,31 +2446,194 @@ func _setup_room_cats() -> void:
 			c.name = "RoomCat_%d" % i
 			c.set_script(cat_script)
 			host.add_child(c)
-			# 2 只并排趴垫子，第 3/4 只挪到窝前地板上，别叠成一坨
+			# 2 只并排蹲在垫子旁，第 3/4 只挪到窝前地板，别叠成一坨
 			var cat_at := at + Vector2(-8.0 + float(i % 2) * 15.0,
 				float(int(i / 2)) * 10.0)
 			c.call("setup", cat_at, skins[int(cd.get("skin", 0)) % skins.size()], 9000 + i * 71)
 			c.set("pos", cat_at)
 			c.set("home", cat_at)
+			c.set("roam_rect", roam)
+			c.set("companion", owner_avatar)   # 闲着会自己走过来蹭腿
 			c.position = cat_at
-			# 猫的脚底 y 比窝小，纯 y-sort 会被垫子盖住；抬一级让它趴在垫子上
+			# 猫的脚底 y 比窝小，纯 y-sort 会被垫子盖住；抬一级让它蹲在垫子上
 			c.z_index = 1
-			c.set_process(false)                # 房里不漫游，坐姿比蜷成一团更好认
-			c.call("_play", "sit", true)
+			# 每只猫的初始状态错开，一进门不会像四只复制粘贴的标本
+			var seed_i := 9000 + i * 71
+			var roll := float((seed_i * 37) % 100) / 100.0
+			if roll < 0.34:
+				c.call("_play", "sleep_down", false, "sleep")
+				c.set("wait", 4.0 + float(i) * 1.7)
+			elif roll < 0.6:
+				c.call("_play", "sit_down", false, "sit")
+				c.set("wait", 2.0 + float(i) * 1.3)
+			else:
+				c.call("_play", "stand", true)
+				c.set("wait", 0.8 + float(i) * 0.6)
 		if name_text != "":
 			var lb := Label.new()
 			lb.name = "CatName_%d" % idx
 			lb.text = name_text
-			# 贴着窝上方，往左偏开椅子；描边+投影保证压在深色地板上也读得清
-			lb.position = at + Vector2(-34.0, -19.0)
-			lb.scale = Vector2(0.5, 0.5)
-			lb.add_theme_font_size_override("font_size", 14)
-			lb.add_theme_color_override("font_color", Color("fff0cf"))
-			lb.add_theme_color_override("font_outline_color", Color("1a1410"))
-			lb.add_theme_constant_override("outline_size", 4)
-			lb.add_theme_color_override("font_shadow_color", Color("1a1410"))
+			# 名牌做得小而克制：贴着窝上方一行，字号/缩放都收一半，
+			# 免得名字比猫还显眼（之前 14px×0.5 在 2.1 倍房间视距下又粗又大）
+			lb.position = at + Vector2(-30.0, -21.0)
+			lb.scale = Vector2(0.4, 0.4)
+			lb.add_theme_font_size_override("font_size", 11)
+			lb.add_theme_color_override("font_color", Color("f1e6d2cc"))
+			lb.add_theme_color_override("font_outline_color", Color("1a1410a6"))
+			lb.add_theme_constant_override("outline_size", 3)
+			lb.add_theme_color_override("font_shadow_color", Color("1a1410a6"))
 			lb.z_index = 60
 			host.add_child(lb)
+
+
+# ── 带猫出门遛 ───────────────────────────────────────────────────────────
+## 自己房间里的猫：E 是摸它，F 是牵绳。牵着出门 → 校园里会一直跟在脚边；
+## 走进宿舍/电梯它就跟你回家，出门又跟出来。状态存在领养存档的 "walk" 字段里。
+var _leash_idx := -1            # 牵着的猫在 _adopted 里的下标（-1 = 没牵）
+var _leash_cat: Node2D = null   # 校园里跟着你的那只（房间里不生成）
+
+## 房间里离玩家最近、摸得到的自己的猫
+func _nearest_room_cat(pos: Vector2) -> Node2D:
+	if room == null or not is_instance_valid(room):
+		return null
+	var host: Node2D = room.call("anchor") as Node2D
+	if host == null:
+		return null
+	var best: Node2D = null
+	var best_d := CAT_PET_R
+	for c in host.get_children():
+		if not (c is Node2D) or not String(c.name).begins_with("RoomCat_"):
+			continue
+		var d: float = pos.distance_to((c as Node2D).position)
+		if d < best_d:
+			best_d = d
+			best = c as Node2D
+	return best
+
+
+## RoomCat_3 → 3
+func _room_cat_index(cat: Node2D) -> int:
+	var nm := String(cat.name)
+	if not nm.begins_with("RoomCat_"):
+		return -1
+	return int(nm.substr(8))
+
+
+## 从存档里恢复牵绳状态（只有一个 "walk": true）
+func _restore_leash() -> void:
+	var cats := _ensure_adopted()
+	_leash_idx = -1
+	for i in cats.size():
+		if cats[i] is Dictionary and bool((cats[i] as Dictionary).get("walk", false)):
+			_leash_idx = i
+			return
+
+
+## 房间内按 F：牵上 / 放开自己的猫。返回 true 表示这次 F 已经用掉了。
+func _try_leash_cat() -> bool:
+	if not in_room:
+		return false
+	var me: Node = _local_avatar()
+	if me == null:
+		return false
+	var cat := _nearest_room_cat((me as Node2D).position)
+	if cat == null:
+		return false
+	var i := _room_cat_index(cat)
+	if i < 0:
+		return false
+	_restore_leash()
+	_set_leash(-1 if _leash_idx == i else i)
+	return true
+
+
+func _set_leash(i: int) -> void:
+	var cats := _ensure_adopted()
+	_leash_idx = i if i >= 0 and i < cats.size() else -1
+	var named := ""
+	for k in cats.size():
+		if not (cats[k] is Dictionary):
+			continue
+		var cd: Dictionary = cats[k]
+		if k == _leash_idx:
+			cd["walk"] = true
+			named = str(cd.get("name", "猫"))
+		else:
+			cd.erase("walk")
+	_save_adopted()
+	if _leash_idx >= 0:
+		_cat_msg = "牵好「%s」了 · 出门会跟着你" % named
+		_spawn_leash_cat()
+	else:
+		_cat_msg = "放开啦，它自己回窝玩"
+		_despawn_leash_cat()
+	_cat_msg_t = 2.2
+	_notice(_cat_msg)
+	if in_room:
+		_setup_room_cats()
+
+
+## 校园里生成「牵着的那只」：挂在 campus/Objects 直接子节点，正常参与 y 排序
+func _spawn_leash_cat() -> void:
+	_despawn_leash_cat()
+	_restore_leash()
+	if _leash_idx < 0 or in_room:
+		return
+	var cats := _ensure_adopted()
+	if _leash_idx >= cats.size() or not (cats[_leash_idx] is Dictionary):
+		return
+	var cat_script: Script = load("res://net/scenes/Cat.gd")
+	if cat_script == null:
+		return
+	if not ResourceLoader.exists("res://assets/cats/oreo_cat_sheet.png"):
+		return      # 素材没随仓库分发时，别凭空造一只没有贴图的猫
+	var objs: Node2D = campus.get_node_or_null("Objects")
+	var me: Node2D = _local_avatar() as Node2D
+	if objs == null or me == null:
+		return
+	var cd: Dictionary = cats[_leash_idx]
+	var skins: Array = cat_script.SKINS
+	var cat := Node2D.new()
+	cat.name = "LeashCat"
+	cat.set_script(cat_script)
+	objs.add_child(cat)
+	var at: Vector2 = me.position + Vector2(-12.0, 8.0)
+	if _cat_nav != null and not _cat_nav.is_walkable(
+			Vector2i(int(floor(at.x / TS)), int(floor(at.y / TS)))):
+		at = me.position
+	cat.call("setup", at, skins[int(cd.get("skin", 0)) % skins.size()], 7777, _cat_nav)
+	# 提示条上要显示你给它起的名字，而不是花色名
+	cat.set("_skin_name", str(cd.get("name", "猫咪")))
+	cat.call("start_follow", me)
+	_leash_cat = cat
+
+
+func _despawn_leash_cat() -> void:
+	if _leash_cat != null and is_instance_valid(_leash_cat):
+		var p := _leash_cat.get_parent()
+		if p != null:
+			p.remove_child(_leash_cat)
+		_leash_cat.queue_free()
+	_leash_cat = null
+
+
+## 房间里摸自己的猫：冒爱心 + 记一次亲密
+func _pet_room_cat(cat: Node2D) -> void:
+	var me: Node = _local_avatar()
+	var reply := "喵～"
+	if cat.has_method("pet"):
+		reply = str(cat.call("pet", me))
+	var i := _room_cat_index(cat)
+	var cats := _ensure_adopted()
+	var n := 0
+	if i >= 0 and i < cats.size() and cats[i] is Dictionary:
+		var cd: Dictionary = cats[i]
+		n = int(cd.get("pets", 0)) + 1
+		cd["pets"] = n
+		_save_adopted()
+	var nm := str(cat.call("cat_name"))
+	_cat_msg = "「%s」%s" % [nm, reply] if n <= 0 else "「%s」%s · 亲密 %d" % [nm, reply, n]
+	_cat_msg_t = 1.8
 
 
 ## 朝向名 → sit_dir 的编号（1..4，和 SIT_DIRS 一致）
@@ -2565,6 +2749,8 @@ func enter_room(path: String, floor_n: int = 1) -> bool:
 	_update_floor_label()
 	_update_floor_visibility()
 	_setup_room_cats()
+	# 进了楼，牵着的猫跟你回家（房间里由 RoomCat_* 顶上，校园那只先收起来）
+	_despawn_leash_cat()
 	room_changed.emit(true)
 	return true
 
@@ -2600,6 +2786,8 @@ func leave_room() -> void:
 	if _floor_label != null:
 		_floor_label.visible = false
 	_update_floor_visibility()
+	# 出楼了：牵着的那只跟到校园里（贴在脚边小跑，会绕开楼和水）
+	_spawn_leash_cat()
 	room_changed.emit(false)
 
 
@@ -3149,6 +3337,24 @@ func _update_interact_hint(delta: float) -> void:
 			_door_hint.text = "按 E 坐下"
 		return
 
+	# 自己房间里的猫：E 摸摸，F 牵出门遛（和 _try_interact / _try_leash_cat 一一对应）
+	if in_room:
+		var room_cat := _nearest_room_cat(pos)
+		if room_cat != null:
+			_near_dorm = ""
+			_door_hint.visible = true
+			# 刚摸完先让反馈（「喵～ · 亲密 3」）占一会儿，再回到操作提示
+			if _cat_msg_t > 0.0:
+				_door_hint.text = _cat_msg
+				return
+			_restore_leash()
+			var rc_name := str(room_cat.call("cat_name"))
+			if _leash_idx >= 0 and _leash_idx == _room_cat_index(room_cat):
+				_door_hint.text = "「%s」跟着你 · 按 E 摸摸 · F 放回窝里" % rc_name
+			else:
+				_door_hint.text = "按 E 摸摸「%s」· 按 F 牵出门遛" % rc_name
+			return
+
 	# 房间里：只有站到门口才提示离开（房间中间按 E 不做任何事，
 	# 免得「想坐下却走出房间」）
 	if in_room:
@@ -3234,6 +3440,10 @@ func _update_interact_hint(delta: float) -> void:
 	if cat != null:
 		_door_hint.visible = true
 		var nm := str(cat.call("cat_name"))
+		if cat == _leash_cat:
+			# 牵着溜达的那只：名字是你起的，别再走领养流程
+			_door_hint.text = "「%s」跟着你 · 按 E 摸摸 · 回宿舍就收工" % nm
+			return
 		var left := ADOPT_PETS - int(cat.get("pet_count"))
 		if _ensure_adopted().size() >= ADOPT_MAX:
 			_door_hint.text = "按 E 摸摸「%s」· 猫窝已满" % nm

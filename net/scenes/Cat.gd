@@ -123,6 +123,15 @@ var _bubble_was := false
 var _follow_t := 0.0         # 好感够了，跟着玩家走一小段
 var _follow_node: Node2D = null
 
+## 只在某个矩形里活动（宿舍单间用）。size 为 0 表示不限制。
+## 房间里的猫没有 NavGrid（房间是另一套几何），用这个挡住它们穿墙/出门。
+var roam_rect := Rect2()
+## 房间里的主人：闲着的时候偶尔走过去蹭一下腿。
+var companion: Node2D = null
+## 牵着走（带出门遛）：一直跟着，不按时间掉。
+var follow_forever := false
+var _rub_cd := 6.0           # 下一次「去蹭主人」的冷却
+
 
 ## 素材可能没随仓库分发（见 assets/cats/ 的授权说明），缺了就别生成猫，别让游戏崩。
 static func available() -> bool:
@@ -132,9 +141,30 @@ static func available() -> bool:
 ## 猫不像玩家有碰撞体，漫游前自己查一下可走网格，别走进楼里或踩到水面。
 ## 没传网格（比如别的场景单独摆一只）就退回原来的自由走。
 func _can_walk(p: Vector2) -> bool:
+	if roam_rect.size.x > 0.0 and roam_rect.size.y > 0.0 and not roam_rect.has_point(p):
+		return false
 	if _nav == null:
 		return true
 	return _nav.is_walkable(Vector2i(int(floor(p.x / TS)), int(floor(p.y / TS))))
+
+
+## 牵着走：一直跟在这个节点脚边（带猫出门遛）
+func start_follow(n: Node2D) -> void:
+	_follow_node = n
+	follow_forever = true
+	_follow_t = 0.0
+	moving = false
+
+
+## 收回牵绳：自己该干嘛干嘛（回窝附近溜达）
+func stop_follow() -> void:
+	follow_forever = false
+	_follow_t = 0.0
+	wait = 0.4
+
+
+func is_following() -> bool:
+	return follow_forever
 
 
 func cat_name() -> String:
@@ -227,10 +257,12 @@ func _process(delta: float) -> void:
 	elif _bubble_was:
 		queue_redraw()          # 最后刷一次，把爱心擦掉
 		_bubble_was = false
-	if _follow_t > 0.0:
+	if _follow_t > 0.0 and not follow_forever:
 		_follow_t = maxf(0.0, _follow_t - delta)
+	_rub_cd = maxf(0.0, _rub_cd - delta)
 
-	if _follow_t > 0.0 and _pet_t <= 0.0 and _follow_node != null and is_instance_valid(_follow_node):
+	var following := follow_forever or _follow_t > 0.0
+	if following and _pet_t <= 0.0 and _follow_node != null and is_instance_valid(_follow_node):
 		_follow_player(delta)
 	elif _pet_t > 0.0:
 		moving = false
@@ -248,9 +280,16 @@ func _process(delta: float) -> void:
 			else:
 				_arrive()   # 撞到楼/水就停下，休息完换个方向再走
 	else:
-		wait -= delta
-		if wait <= 0.0:
-			_leave_rest()
+		# 房间里的猫：闲着每隔十几秒走过去蹭主人一下，别一直趴着不动
+		if (companion != null and _rub_cd <= 0.0 and is_instance_valid(companion)
+				and pos.distance_to((companion as Node2D).position) < 150.0):
+			_rub_cd = _rng.randf_range(9.0, 18.0)
+			_follow_node = companion
+			_follow_t = _rng.randf_range(1.6, 3.2)
+		else:
+			wait -= delta
+			if wait <= 0.0:
+				_leave_rest()
 	# 兜底：万一还是被挤到障碍格边缘，轻轻拉回自己的活动中心
 	if _nav != null and not _can_walk(pos):
 		pos = home
@@ -261,11 +300,18 @@ func _process(delta: float) -> void:
 		queue_redraw()   # 影子是静态的，只有爱心动画需要逐帧重绘
 
 
-## 好感够了：贴着玩家脚边小跑，离远了会加速追；跟到就原地待机
+## 好感够了 / 牵出去遛：贴着玩家脚边小跑，离远了会加速追；跟到就原地待机
 func _follow_player(delta: float) -> void:
 	var goal: Vector2 = (_follow_node as Node2D).position + Vector2(-14.0, 10.0)
 	var to := goal - pos
 	moving = false
+	# 被落得太远（穿过了楼、玩家传送/上下船、房间里绕不出来）就直接跟到身边，
+	# 不要让「遛猫」变成「猫卡在墙后面一直叫」
+	if to.length() > 220.0 and _can_walk(goal):
+		pos = goal
+		position = pos
+		_play("stand", true)
+		return
 	if to.length() > 3.0:
 		if anim != "walk" and anim != "run":
 			_play("walk", true)
