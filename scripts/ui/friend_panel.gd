@@ -12,6 +12,8 @@ extends CanvasLayer
 
 signal opened
 signal closed
+## 点了某一行的「私信」：online_boot 收到后打开私信窗（私信窗自己管会话历史）
+signal dm_requested(uid: String, name: String)
 
 var _font: Font
 var _mask: ColorRect
@@ -160,7 +162,7 @@ func _build() -> void:
 	_empty.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	col.add_child(_empty)
 
-	col.add_child(_label("按 P 开关这个面板", 12, "#5f6f7c"))
+	col.add_child(_label("按 P 开关这个面板 · 在线好友可以私信（不进公屏）", 12, "#5f6f7c"))
 
 
 ## 重建列表。数据只读 Net.my_friends，不缓存 —— 每次变了就整块重画，
@@ -183,6 +185,18 @@ func _rebuild() -> void:
 	_empty.visible = friends.size() == 0
 	for f in friends:
 		_friend_box.add_child(_friend_row(String(f["uid"]), String(f["name"])))
+	_friend_demo()
+
+
+## 调试用（XGD_FRIEND_DEMO=1）：单机模式下没有好友表，造两行核对「私信」按钮的排版。
+## 只往本进程的 peers 里塞假条目，不发任何请求，截图核对完就随进程消失。
+func _friend_demo() -> void:
+	if not OS.has_environment("XGD_FRIEND_DEMO"):
+		return
+	Net.peers[99] = {"name": "干饭人", "uid": "demo-a"}
+	_empty.visible = false
+	_friend_box.add_child(_friend_row("demo-a", "干饭人"))
+	_friend_box.add_child(_friend_row("demo-b", "散步党"))
 
 
 func _request_row(uid: String, nm: String) -> Control:
@@ -219,6 +233,15 @@ func _friend_row(uid: String, nm: String) -> Control:
 	var st := _label("在线" if _online(uid) else "离线", 12,
 		"#9ff0d0" if _online(uid) else "#6f7f8c")
 	row.add_child(st)
+	# 私信：不重开面板，交给 online_boot 打开私信窗（那一层比这里高，
+	# 关掉私信还能回到好友列表）
+	var dm := Button.new()
+	dm.text = "私信"
+	dm.focus_mode = Control.FOCUS_NONE
+	_style_btn(dm, Color(0.20, 0.34, 0.50, 0.55))
+	dm.disabled = not _online(uid)
+	dm.pressed.connect(func() -> void: dm_requested.emit(uid, nm))
+	row.add_child(dm)
 	var del := Button.new()
 	del.text = "删除"
 	del.focus_mode = Control.FOCUS_NONE

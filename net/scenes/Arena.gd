@@ -199,6 +199,11 @@ func _ready() -> void:
 	# 好友表一变，门锁跟着变（好友能进我的房、我也能进他的）
 	Net.social_changed.connect(_on_social_changed)
 	Net.roster_changed.connect(_update_floor_visibility)
+	# 宠物表：现在以服务端为准（换机器 / 重装 / 清缓存都还在）。
+	# 先把本地缓存读进来（离线也能养），连上后再拉服务端那份覆盖。
+	Net.pets_changed.connect(_on_pets_changed)
+	_ensure_adopted()
+	Net.pet_refresh()
 	# 先把本地存档里的「我的房间 + 公告」灌进 Net：没连上服务器也能显示，
 	# 连上了就用它把服务端丢掉的那份补回来。
 	_restore_my_room()
@@ -2013,8 +2018,9 @@ var _wildlife_ground: Node2D = null   # campus/Objects/WildlifeGround，猫都�
 var _cat_nav: NavGrid = null          # 撒锚点 + 给猫做漫游碰撞判定
 var _cat_msg := ""             # 摸猫后短暂占住提示条的反馈文字
 var _cat_msg_t := 0.0
-var _adopted: Array = []       # [{name, skin}]，本地存档，不进联机协议
+var _adopted: Array = []       # [{name, skin, pets}]，服务端权威 + 本机缓存，不进联机协议
 var _adopt_loaded := false
+var _pet_migrated := false     # 老玩家本地存档已经往服务端推过一次
 var _adopt_layer: CanvasLayer = null
 var _adopt_panel: PanelContainer = null
 var _adopt_edit: LineEdit = null
@@ -2241,19 +2247,27 @@ func _pet_cat(cat: Node2D) -> void:
 
 # ---------------------------------------------------------------- 领养 / 命名 / 宿舍猫窝
 
-## 领养存档是纯本地的（user://），不塞进 room_claims —— 改联机协议会让公共服
-## 旧服务端 checksum failed，房间和聊天一起废掉。
+## 领养数据现在是**服务端权威**的（Net 的宠物表：按 uid 存 + 服务端落盘），
+## 本机 user://adopted_cats.json 降级成离线缓存 —— 断网、单机、旧服务端时照常能养。
+## 为什么不用新 RPC：改协议会让公共服旧服务端 checksum failed，房间和聊天一起废。
 func _ensure_adopted() -> Array:
 	if _adopt_loaded:
 		return _adopted
 	_adopt_loaded = true
-	if FileAccess.file_exists(ADOPT_PATH):
-		var f := FileAccess.open(ADOPT_PATH, FileAccess.READ)
-		if f != null:
-			var parsed = JSON.parse_string(f.get_as_text())
-			f.close()
-			if parsed is Array:
-				_adopted = parsed
+	var pack := _read_adopted_pack()
+	var local: Array = pack["cats"]
+	if Net.pets_synced:
+		# 服务端有权威数据就用它；服务端还是空、本地却有**没同步过**的猫
+		# = 老玩家第一次接上新服务端，把本地这只传上去。
+		_adopted = Net.my_pets.duplicate(true)
+		if _adopted.is_empty() and not local.is_empty() and not bool(pack["synced"]):
+			_adopted = local
+			_pet_migrated = true
+			Net.pet_push(_adopted)
+		else:
+			_write_adopted_file()     # 让磁盘跟上服务端（含「你在别处把猫都送走了」）
+	else:
+		_adopted = local
 	# 上限是后来才收窄的（曾经允许 4 只），旧存档要按当前上限裁掉多余的，
 	# 否则房间里会多出猫、提示条却一直在说「猫窝已满」。
 	if _adopted.size() > ADOPT_MAX:
@@ -2262,12 +2276,119 @@ func _ensure_adopted() -> Array:
 	return _adopted
 
 
-func _save_adopted() -> void:
+## 本地缓存格式：{"cats": [...], "synced": true}，老版本是一个裸数组。
+## synced = 这份缓存已经跟服务端对齐过。**只有没同步过的存档才允许往服务端迁移**：
+## 否则在 A 机上删光猫之后，B 机上那份过期缓存会趁「服务端说空」的时候把猫推回去。
+func _read_adopted_pack() -> Dictionary:
+	if not FileAccess.file_exists(ADOPT_PATH):
+		return {"cats": [], "synced": true}
+	var f := FileAccess.open(ADOPT_PATH, FileAccess.READ)
+	if f == null:
+		return {"cats": [], "synced": true}
+	var txt := f.get_as_text()
+	f.close()
+	var j := JSON.new()
+	if j.parse(txt) != OK:
+		return {"cats": [], "synced": true}      # 坏文件：别反复尝试迁移
+	if j.data is Array:
+		return {"cats": j.data, "synced": false}   # 老格式 = 从没同步过
+	if j.data is Dictionary:
+		var d: Dictionary = j.data
+		var cats = d.get("cats", [])
+		return {
+			"cats": cats if cats is Array else [],
+			"synced": bool(d.get("synced", false)),
+		}
+	return {"cats": [], "synced": true}
+
+
+func _read_adopted_file() -> Array:
+	return _read_adopted_pack()["cats"]
+
+
+## 只写本地缓存。**不推服务端** —— 服务端回包也会走这里，
+## 再推一次就会「回包 → 写缓存 → 再推」打转。
+func _write_adopted_file() -> void:
 	var f := FileAccess.open(ADOPT_PATH, FileAccess.WRITE)
 	if f == null:
 		return
-	f.store_string(JSON.stringify(_adopted))
+	# synced 跟着 Net.pets_synced 走：离线 / 旧服务端时永远是 false，
+	# 等哪天真连上新服务端了，还有机会把这只猫搬上去。
+	f.store_string(JSON.stringify({"cats": _adopted, "synced": Net.pets_synced}))
 	f.close()
+
+
+## 本地缓存 + 推给服务端保存（服务端落盘后换端/重装都还在）
+func _save_adopted() -> void:
+	_write_adopted_file()
+	Net.pet_push(_adopted)
+
+
+## 服务端下发了权威宠物表：换成它，回写本地缓存，并按新数据重建房里的猫 / 牵绳。
+func _on_pets_changed() -> void:
+	if Net.my_pets.is_empty():
+		# 服务端这份是空的：本地要是养着**从没同步过**的猫，说明是老玩家第一次
+		# 接上新服务端 —— 把本地这份传上去，别让存了半天的猫凭空没了。
+		# 只迁一次（_pet_migrated），而且 synced 过的缓存不参与，防止过期缓存回灌。
+		if _pet_migrated:
+			return
+		var pack := _read_adopted_pack()
+		var local: Array = pack["cats"]
+		if local.is_empty() or bool(pack["synced"]):
+			_adopted = Net.my_pets.duplicate(true)
+			_adopt_loaded = true
+			_write_adopted_file()
+			return
+		_pet_migrated = true
+		_adopted = local
+		_adopt_loaded = true
+		_write_adopted_file()
+		Net.pet_push(_adopted)
+		return
+	_pet_migrated = false
+	_adopted = Net.my_pets.duplicate(true)
+	_adopt_loaded = true
+	_write_adopted_file()
+	_restore_leash()
+	if in_room:
+		_setup_room_cats()
+	if _leash_idx >= 0 and not in_room:
+		_spawn_leash_cat()
+	else:
+		_despawn_leash_cat()
+
+
+## 宠物面板（scripts/ui/pet_panel.gd）只认这个结构，别让它直接摸 _adopted 内部。
+## 花色名 / 深色浅色取自 Cat.SKINS，和世界里那只猫的着色一致。
+func pet_info() -> Array:
+	var cats := _ensure_adopted()
+	_restore_leash()
+	var cat_script: Script = load("res://net/scenes/Cat.gd")
+	var skins: Array = cat_script.SKINS if cat_script != null else []
+	var out: Array = []
+	for i in cats.size():
+		if not (cats[i] is Dictionary):
+			continue
+		var cd: Dictionary = cats[i]
+		var si := maxi(0, int(cd.get("skin", 0)))
+		var sd: Dictionary = {}
+		if not skins.is_empty():
+			sd = skins[si % skins.size()]
+		out.append({
+			"name": str(cd.get("name", "猫咪")),
+			"skin": si,
+			"skin_name": str(sd.get("name", "猫")),
+			"dark": str(sd.get("dark", "3d3445")),
+			"light": str(sd.get("light", "f2eee7")),
+			"pets": int(cd.get("pets", 0)),
+			"leash": i == _leash_idx,
+		})
+	return out
+
+
+## 猫窝能养几只（面板显示「养了 1 / 2 只」用）
+func pet_capacity() -> int:
+	return ADOPT_MAX
 
 
 func _adopt_open() -> bool:

@@ -1,9 +1,12 @@
 extends Control
-## 手机端操作层：左下虚拟摇杆 + 右下功能键。
+## 操作层：左下虚拟摇杆（仅触屏）+ 右下功能键（触屏与桌面都有）。
 ##
 ## 为什么不用 Button 节点：Godot 默认把单指触摸「模拟成鼠标」，只有第一根手指能驱动 GUI。
 ## 左手摇杆按住时，右手去点按钮就会失效。所以这里全部自己处理 InputEventScreenTouch/Drag，
 ## 按 finger index 分别跟踪，真正做到多点同时操作。
+##
+## 桌面端（Windows / macOS）也挂这一层，只是不画摇杆、改用鼠标事件 ——
+## 右下角那排圆钮和手机上完全一致，键盘快捷键（M / Tab / P）照旧可用。
 ##
 ## 规格参考 tiled 版（sxgd-tiled-vertion/src/engine.js）：
 ##   摇杆半透明深色圆 + 2px 边 + 硬投影，摇杆头浅色圆，死区 0.18；右下竖排方块按钮。
@@ -15,9 +18,14 @@ const DEAD := 0.18             # 死区：小于这个位移算没动
 const SPRINT_AT := 0.92        # 推到底自动加速（手机没有 Shift 键）
 const JOY_LEFT := 30.0
 const JOY_BOTTOM := 34.0
-const BTN := 76.0          # 圆形按钮直径
+const BTN_TOUCH := 76.0     # 触屏按钮直径（手指得点得准）
+const BTN_DESK := 56.0      # 桌面按钮直径（鼠标精确，做小一点不压画面）
 const BTN_RIGHT := 26.0
-const BTN_GAP := 18.0
+const BTN_BOTTOM := 30.0
+const BTN_GAP := 18.0       # 触屏横排间隙
+const BTN_LEFT := 14.0      # 桌面竖排：离屏幕左边
+const BTN_TOP := 14.0
+const BTN_GAP_DESK := 10.0
 
 const C_JOY_BG := Color(0.07, 0.10, 0.15, 0.52)
 const C_JOY_RING := Color(0.78, 0.82, 0.86, 0.70)
@@ -27,14 +35,22 @@ const C_BTN_BG := Color(0.075, 0.105, 0.145, 0.82)
 const C_BTN_EDGE := Color(0.74, 0.82, 0.90, 0.80)
 const C_BTN_TEXT := Color(0.93, 0.97, 1.0, 1.0)
 
-## 右下按钮：从下往上排
+## 五个按钮，slot 的顺序就是视觉顺序（0 最先）。两个平台摆放不同：
+##   触屏：右下角**横排**（右手拇指够得到；竖排到第 3 颗就会压到右上角的小地图）
+##   桌面：左上角**竖排**（小一点，鼠标点；不挡下方聊天框，也不挡右上角小地图）
 const BUTTONS := [
-	{"id": "chat", "bottom": 34.0},
-	{"id": "map", "bottom": 132.0},
-	{"id": "set", "bottom": 230.0},
+	{"id": "chat", "slot": 0},
+	{"id": "map", "slot": 1},
+	{"id": "friend", "slot": 2},
+	{"id": "pet", "slot": 3},
+	{"id": "set", "slot": 4},
 ]
 
-var boot: Node                  # online_boot，用来开地图 / 开设置
+var boot: Node                  # online_boot，用来开地图 / 开设置 / 开好友 / 开宠物
+## 真正的触屏环境才画摇杆、走 ScreenTouch；桌面只画右下按钮、走鼠标事件
+var _touch_mode := false
+var _hover_id := ""             # 桌面鼠标悬停的按钮（触屏恒为空）
+var _btn_mouse := ""            # 桌面按住中的按钮
 var _joy_finger := -1
 var _joy_vec := Vector2.ZERO
 var _joy_origin := Vector2.ZERO      # 浮动摇杆：手指按下处即圆心
@@ -100,14 +116,16 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE     # 不吃 GUI 事件，全部走 _input
 	add_to_group("touch_pad")
 	_font = GameTheme.font()
-	visible = is_touch_ui()
-	set_process_input(visible)
-	set_process(visible)
-	if visible:
-		queue_redraw()
-		# 桌面预览（XGD_TOUCH=1）时用鼠标当手指：按住拖就能试摇杆和按钮
-		if not OS.has_feature("mobile"):
-			Input.set_emulate_touch_from_mouse(true)
+	_touch_mode = is_touch_ui()
+	# 桌面也常驻：右下角那排快捷按钮是两侧通用的，只是没有摇杆
+	visible = true
+	set_process_input(true)
+	set_process(true)
+	queue_redraw()
+	# 桌面预览触屏（XGD_TOUCH=1）时用鼠标当手指：按住拖就能试摇杆和按钮。
+	# 纯桌面模式不开这个 —— 否则聊天输入框的点击会被改成触摸事件。
+	if _touch_mode and not OS.has_feature("mobile"):
+		Input.set_emulate_touch_from_mouse(true)
 	# 调试用：XGD_TOUCH_TEST=1 自动推一次摇杆，验证动作映射与角色移动
 	if OS.has_environment("XGD_TOUCH_TEST"):
 		_auto_test.call_deferred()
@@ -159,12 +177,24 @@ func _joy_radius_center() -> Vector2:
 	return Vector2(JOY_LEFT + JOY_R, s.y - JOY_BOTTOM - JOY_R)
 
 
+## 当前平台的按钮直径
+func _btn_size() -> float:
+	return BTN_TOUCH if _touch_mode else BTN_DESK
+
+
 func _btn_center(id: String) -> Vector2:
 	var s := _viewport_size()
+	var r := _btn_size() * 0.5
 	for b in BUTTONS:
-		if b["id"] == id:
-			var bottom := float(b["bottom"])
-			return Vector2(s.x - BTN_RIGHT - BTN * 0.5, s.y - bottom - BTN * 0.5)
+		if b["id"] != id:
+			continue
+		var slot := int(b.get("slot", 0))
+		if _touch_mode:
+			# 右下横排：最右那颗贴边，往左每颗退一个「直径 + 间隙」
+			return Vector2(s.x - BTN_RIGHT - r - slot * (_btn_size() + BTN_GAP),
+				s.y - BTN_BOTTOM - r)
+		# 桌面：左上竖排
+		return Vector2(BTN_LEFT + r, BTN_TOP + r + slot * (_btn_size() + BTN_GAP_DESK))
 	return Vector2.ZERO
 
 
@@ -172,10 +202,10 @@ func _btn_center(id: String) -> Vector2:
 func _btn_hit(pos: Vector2) -> String:
 	if hide_buttons:
 		return ""
+	var r := _btn_size() * 0.5 + 6.0
 	for b in BUTTONS:
-		var id := str(b["id"])
-		if pos.distance_to(_btn_center(id)) <= BTN * 0.5 + 6.0:
-			return id
+		if pos.distance_to(_btn_center(str(b["id"]))) <= r:
+			return str(b["id"])
 	return ""
 
 
@@ -209,6 +239,8 @@ func _input(event: InputEvent) -> void:
 			_pinch_update()
 		elif event.index == _joy_finger:
 			_update_joy(event.position)
+	elif not _touch_mode:
+		_mouse_input(event)
 
 
 func _on_touch_down(finger: int, pos: Vector2) -> void:
@@ -235,6 +267,32 @@ func _on_touch_up(finger: int) -> void:
 	if _btn_finger.has(finger):
 		_btn_finger.erase(finger)
 		queue_redraw()
+
+
+## 桌面：左键点击圆钮 = 按下并立刻触发（和触屏一致）；移动只更新 hover 高亮。
+## 只处理命中按钮的事件，其余原样放过 —— 否则会吃掉聊天框、设置面板的点击。
+func _mouse_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton:
+		var mb := event as InputEventMouseButton
+		if mb.button_index != MOUSE_BUTTON_LEFT:
+			return
+		if mb.pressed:
+			var hit := _btn_hit(mb.position)
+			if hit.is_empty():
+				return
+			_btn_mouse = hit
+			_fire(hit)
+			queue_redraw()
+			get_viewport().set_input_as_handled()
+		elif not _btn_mouse.is_empty():
+			_btn_mouse = ""
+			queue_redraw()
+			get_viewport().set_input_as_handled()
+	elif event is InputEventMouseMotion:
+		var id := _btn_hit((event as InputEventMouseMotion).position)
+		if id != _hover_id:
+			_hover_id = id
+			queue_redraw()
 
 
 func _in_joy_zone(pos: Vector2) -> bool:
@@ -305,6 +363,8 @@ func _apply_action(action: String, on: bool) -> void:
 func release_all() -> void:
 	_joy_finger = -1
 	_btn_finger.clear()
+	_btn_mouse = ""
+	_hover_id = ""
 	_set_joy(Vector2.ZERO)
 	for a in ["move_left", "move_right", "move_up", "move_down", "sprint"]:
 		_apply_action(a, false)
@@ -318,6 +378,10 @@ func _fire(id: String) -> void:
 			boot.call("touch_open_chat")
 		"map":
 			boot.call("touch_toggle_map")
+		"friend":
+			boot.call("touch_toggle_friends")
+		"pet":
+			boot.call("touch_toggle_pets")
 		"set":
 			boot.call("touch_open_settings")
 
@@ -326,18 +390,20 @@ func _fire(id: String) -> void:
 func _draw() -> void:
 	if not visible:
 		return
-	# 摇杆：未按下时只在默认位置留一个淡淡的提示圈（告诉新手「这块能按」）
-	if _joy_active:
-		var c := _joy_origin
-		draw_circle(c, JOY_R, C_JOY_BG)
-		draw_arc(c, JOY_R, 0.0, TAU, 48, C_JOY_RING, 2.0, true)
-		var knob := c + _joy_vec * JOY_R
-		draw_circle(knob, KNOB_R, C_KNOB)
-		draw_arc(knob, KNOB_R, 0.0, TAU, 32, C_KNOB_RING, 2.0, true)
-	else:
-		var hint := _joy_radius_center()
-		draw_circle(hint, JOY_R * 0.86, Color(0.07, 0.10, 0.15, 0.20))
-		draw_arc(hint, JOY_R * 0.86, 0.0, TAU, 40, Color(0.80, 0.84, 0.88, 0.22), 2.0, true)
+	# 摇杆只在触屏上出现；桌面用 WASD，右下角只留按钮
+	if _touch_mode:
+		# 摇杆：未按下时只在默认位置留一个淡淡的提示圈（告诉新手「这块能按」）
+		if _joy_active:
+			var c := _joy_origin
+			draw_circle(c, JOY_R, C_JOY_BG)
+			draw_arc(c, JOY_R, 0.0, TAU, 48, C_JOY_RING, 2.0, true)
+			var knob := c + _joy_vec * JOY_R
+			draw_circle(knob, KNOB_R, C_KNOB)
+			draw_arc(knob, KNOB_R, 0.0, TAU, 32, C_KNOB_RING, 2.0, true)
+		else:
+			var hint := _joy_radius_center()
+			draw_circle(hint, JOY_R * 0.86, Color(0.07, 0.10, 0.15, 0.20))
+			draw_arc(hint, JOY_R * 0.86, 0.0, TAU, 40, Color(0.80, 0.84, 0.88, 0.22), 2.0, true)
 
 	# 按钮：圆形 + 程序绘制的图标（和左侧摇杆同一套语言，不用素材）
 	for b in BUTTONS:
@@ -345,8 +411,9 @@ func _draw() -> void:
 			break
 		var id := str(b["id"])
 		var c := _btn_center(id)
-		var down := _btn_finger.values().has(id)
-		var rad := BTN * 0.5
+		var down: bool = _btn_finger.values().has(id) or _btn_mouse == id
+		var hot := _hover_id == id
+		var rad := _btn_size() * 0.5
 		# 硬投影（项目里所有面板都是硬边、无模糊）
 		draw_circle(c + Vector2(0, 3), rad, Color(0, 0, 0, 0.38))
 		var bg := C_BTN_BG
@@ -356,16 +423,27 @@ func _draw() -> void:
 			bg = Color(0.20, 0.38, 0.58, 0.90)
 			edge = Color(0.72, 0.86, 1.0, 0.85)
 			ink = Color(1, 1, 1, 1)
+		elif hot:
+			bg = Color(0.12, 0.18, 0.25, 0.92)
+			edge = Color(0.86, 0.92, 0.98, 0.95)
+			ink = Color(1, 1, 1, 1)
 		draw_circle(c, rad, bg)
 		draw_arc(c, rad - 1.4, 0.0, TAU, 48, edge, 2.6, true)
 		# 内侧一圈暗环 + 顶部高光：让图标和圆边之间有个"凹槽"，不会糊成一块
 		draw_arc(c, rad - 5.0, 0.0, TAU, 40, Color(0, 0, 0, 0.22), 1.4, true)
 		if not down:
 			draw_arc(c, rad - 5.0, PI * 1.12, PI * 1.88, 18, Color(1, 1, 1, 0.13), 1.6, true)
-		_draw_btn_icon(id, c, ink)
+		# 图标是按 76px 的圆画的，桌面 56px 时整体缩放，免得贴着边
+		var sc := _btn_size() / BTN_TOUCH
+		if is_equal_approx(sc, 1.0):
+			_draw_btn_icon(id, c, ink)
+		else:
+			draw_set_transform(c, 0.0, Vector2(sc, sc))
+			_draw_btn_icon(id, Vector2.ZERO, ink)
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
-## 三个图标全部现画：空心气泡 / 折页地图 / 设置滑杆
+## 五个图标全部现画：空心气泡 / 折页地图 / 双人 / 猫头 / 设置滑杆
 func _draw_btn_icon(id: String, c: Vector2, col: Color) -> void:
 	var hole := Color(0.045, 0.065, 0.095, 0.95)
 	match id:
@@ -395,6 +473,24 @@ func _draw_btn_icon(id: String, c: Vector2, col: Color) -> void:
 			# 定位针
 			draw_circle(c + Vector2(0, 0), 4.4, hole)
 			draw_circle(c + Vector2(0, 0), 2.6, col)
+		"friend":
+			# 两个人：后面那个半透明、小一点、靠左上；前面实心压在上面
+			var back := Color(col.r, col.g, col.b, 0.42)
+			draw_circle(c + Vector2(-5.6, -8.0), 4.0, back)
+			draw_arc(c + Vector2(-5.6, 11.6), 7.0, PI, TAU, 18, back, 2.2, true)
+			draw_circle(c + Vector2(4.6, -5.4), 4.6, col)
+			draw_arc(c + Vector2(4.6, 14.0), 7.8, PI, TAU, 20, col, 2.4, true)
+		"pet":
+			# 猫头剪影：圆脸 + 两只三角耳 + 两只眼睛（用背景色抠出）
+			draw_circle(c + Vector2(0.0, 2.5), 8.6, col)
+			draw_colored_polygon(PackedVector2Array([
+				c + Vector2(-8.4, -1.5), c + Vector2(-7.6, -11.5), c + Vector2(-1.4, -5.0),
+			]), col)
+			draw_colored_polygon(PackedVector2Array([
+				c + Vector2(8.4, -1.5), c + Vector2(7.6, -11.5), c + Vector2(1.4, -5.0),
+			]), col)
+			draw_circle(c + Vector2(-3.2, 1.2), 1.5, hole)
+			draw_circle(c + Vector2(3.2, 1.2), 1.5, hole)
 		"set":
 			# 三条滑杆：线更粗、滑块更大、位置错开
 			for i in 3:

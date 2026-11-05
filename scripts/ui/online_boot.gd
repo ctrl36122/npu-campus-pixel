@@ -20,6 +20,8 @@ const ChatScript := preload("res://scripts/ui/chat.gd")
 const TouchPadScript := preload("res://scripts/ui/touch_pad.gd")
 const ConsentScript := preload("res://scripts/ui/consent.gd")
 const FriendPanelScript := preload("res://scripts/ui/friend_panel.gd")
+const PetPanelScript := preload("res://scripts/ui/pet_panel.gd")
+const DmPanelScript := preload("res://scripts/ui/dm_panel.gd")
 
 ## 小地图尺寸（保持 424:800 的校园比例）。200 宽在 1080p 下足够看清街区。
 const MINI_W: float = 200.0
@@ -67,6 +69,10 @@ var _clock: Label
 var _consent: Node
 ## 好友面板（按 P 开合），常驻但不是模态：不开的时候不挡任何东西
 var _friend_panel: Node
+## 宠物面板（右下「宠」按钮），显示宿舍里养的猫
+var _pet_panel: Node
+## 私信窗（好友面板里点「私信」进入），消息不进公屏
+var _dm_panel: Node
 
 
 ## 触屏设备（Android/iOS 包，或 XGD_TOUCH=1 在桌面模拟）
@@ -107,17 +113,18 @@ func _ready() -> void:
 	_build_chat()
 	_add_consent()
 	_add_friend_panel()
-	# 手机：左下摇杆 + 右下按钮（自己要处理多点触摸，所以是独立 Control）
-	if is_touch_ui():
-		# 必须放独立 CanvasLayer：直接挂在 online_boot 下会落到 layer 0（世界层），
-		# 被 UI 和地图整片压住，而且会跟着相机变换跑掉。
-		var tl := CanvasLayer.new()
-		tl.name = "TouchLayer"
-		tl.layer = 11
-		add_child(tl)
-		_touch_pad = TouchPadScript.new()
-		_touch_pad.set("boot", self)
-		tl.add_child(_touch_pad)
+	_add_pet_panel()
+	_add_dm_panel()
+	# 操作层：左下摇杆（仅触屏）+ 右下快捷按钮（两侧都有）。
+	# 必须放独立 CanvasLayer：直接挂在 online_boot 下会落到 layer 0（世界层），
+	# 被 UI 和地图整片压住，而且会跟着相机变换跑掉。
+	var tl := CanvasLayer.new()
+	tl.name = "TouchLayer"
+	tl.layer = 11
+	add_child(tl)
+	_touch_pad = TouchPadScript.new()
+	_touch_pad.set("boot", self)
+	tl.add_child(_touch_pad)
 	Net.session_ready.connect(_on_session_ready)
 	Net.session_closed.connect(_on_session_closed)
 	Net.roster_changed.connect(_refresh_roster)
@@ -205,6 +212,37 @@ func _add_friend_panel() -> void:
 	add_child(_friend_panel)
 	_friend_panel.connect("opened", func() -> void: _refresh_block())
 	_friend_panel.connect("closed", func() -> void: _refresh_block())
+	_friend_panel.connect("dm_requested", _on_dm_requested)
+
+
+## 私信窗。和好友列表同一条链路：好友面板点「私信」→ 这里打开对应会话。
+func _add_dm_panel() -> void:
+	if Net.is_dedicated:
+		return
+	_dm_panel = DmPanelScript.new()
+	_dm_panel.name = "DmPanel"
+	add_child(_dm_panel)
+	_dm_panel.connect("opened", func() -> void: _refresh_block())
+	_dm_panel.connect("closed", func() -> void: _refresh_block())
+	if OS.has_environment("XGD_DM_PANEL"):
+		var t := get_tree().create_timer(3.0)
+		t.timeout.connect(func() -> void:
+			print("[dbg] 打开私信面板 dm_panel=", _dm_panel)
+			# 顺带塞两条假消息，核对气泡左右分布（只在本进程内存里，不联网）
+			Net.dm_received.emit("demo-uid", "测试好友", Net.local_uid, "我到宿舍楼下了，你人呢")
+			Net.dm_received.emit(Net.local_uid, Net.local_name, "demo-uid", "马上下来，刚喂完猫")
+			open_dm("demo-uid", "测试好友")
+			print("[dbg] 私信 is_open=", _dm_panel.call("is_open")))
+
+
+func _on_dm_requested(uid: String, nm: String) -> void:
+	open_dm(uid, nm)
+
+
+## 打开（或切换）私信会话。面板自己维护每个好友的历史。
+func open_dm(uid: String, nm: String) -> void:
+	if _dm_panel != null and is_instance_valid(_dm_panel):
+		_dm_panel.call("open_dm", uid, nm)
 
 
 ## 说明页和好友面板都可能是"该挡住移动"的那一个。谁都没开才放开 ——
@@ -215,7 +253,29 @@ func _refresh_block() -> void:
 		blocked = true
 	if _friend_panel != null and is_instance_valid(_friend_panel) and bool(_friend_panel.call("is_open")):
 		blocked = true
+	if _pet_panel != null and is_instance_valid(_pet_panel) and bool(_pet_panel.call("is_open")):
+		blocked = true
+	if _dm_panel != null and is_instance_valid(_dm_panel) and bool(_dm_panel.call("is_open")):
+		blocked = true
 	_set_local_blocked(blocked)
+
+
+## 宠物面板：数据源是 Arena（领养存档 + 牵绳状态），世界建好后再 setup。
+func _add_pet_panel() -> void:
+	if Net.is_dedicated:
+		return
+	_pet_panel = PetPanelScript.new()
+	_pet_panel.name = "PetPanel"
+	add_child(_pet_panel)
+	_pet_panel.connect("opened", func() -> void: _refresh_block())
+	_pet_panel.connect("closed", func() -> void: _refresh_block())
+	if OS.has_environment("XGD_PET_PANEL"):
+		var t := get_tree().create_timer(6.0)
+		t.timeout.connect(func() -> void:
+			print("[dbg] 打开宠物面板 pet_panel=", _pet_panel)
+			if _pet_panel != null and is_instance_valid(_pet_panel):
+				_pet_panel.call("open")
+				print("[dbg] 宠物面板 is_open=", _pet_panel.call("is_open")))
 
 
 # ---------------------------------------------------------------- 启动流程
@@ -414,6 +474,8 @@ func _wait_world() -> void:
 			return
 		var w = SessionFlow.world
 		if w != null and is_instance_valid(w) and w.get("minimap_tex") != null:
+			if _pet_panel != null and is_instance_valid(_pet_panel):
+				_pet_panel.call("setup", w)
 			_build_map_ui(w)
 			return
 
@@ -540,9 +602,9 @@ func _build_ui() -> void:
 	hint_wrap.add_theme_stylebox_override("panel", _box("#0d1218a8", "#26313c", 5))
 	layer.add_child(hint_wrap)
 
-	var hint_text := "WASD 移动 · Shift 加速 · 回车聊天 · 滚轮缩放 · M 地图 · Tab 设置"
+	var hint_text := "WASD 移动 · Shift 加速 · 回车聊天 · M 地图 · P 好友 · Tab 设置"
 	if is_touch_ui():
-		hint_text = "左摇杆走路（推到底＝跑）· 右下：聊 / 图 / 设"
+		hint_text = "左摇杆走路（推到底＝跑）· 右下：聊 / 图 / 友 / 宠 / 设"
 	var hint := _label(hint_text, 11, "#9fb0bd")
 	if is_touch_ui():
 		hint_wrap.visible = false        # 手机上底部让给摇杆，提示没地方放也没必要
@@ -909,6 +971,18 @@ func touch_toggle_map() -> void:
 
 func touch_open_settings() -> void:
 	_toggle_settings(true)
+
+
+## 右下「友」：和按 P 是同一个面板（手机上没有 P 键，只能靠这个按钮）
+func touch_toggle_friends() -> void:
+	if _friend_panel != null and is_instance_valid(_friend_panel):
+		_friend_panel.call("toggle")
+
+
+## 右下「宠」：自己养的猫
+func touch_toggle_pets() -> void:
+	if _pet_panel != null and is_instance_valid(_pet_panel):
+		_pet_panel.call("toggle")
 
 
 ## 全屏浮层（校园地图 / 大聊天窗）打开时把 HUD 让开：

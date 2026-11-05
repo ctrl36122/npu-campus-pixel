@@ -28,6 +28,9 @@ signal message_received(speaker: String, text: String)
 ## 这样客户端可以只把它塞进聊天面板、不弹头顶气泡。
 signal history_received(speaker: String, text: String, unix_time: int)
 signal emote_received(id: int, index: int)
+## 私信（好友之间的定向消息）。**不会**走 message_received，所以公屏上不会出现。
+## 发送方自己也会收到一次（本地直接发出），界面据此回显。
+signal dm_received(from_uid: String, from_name: String, to_uid: String, text: String)
 ## 联机信息变了（比如 UPnP 探测出结果），设置面板据此刷新「联机地址」那栏
 signal info_changed
 
@@ -466,6 +469,13 @@ func post_message(text: String) -> void:
 	var speaker: String = str(peers[sender]["name"])
 	var clean := text.left(160)
 
+	# 私信：前缀编码的定向消息。服务端只转发（不落盘、不改协议），
+	# 客户端只给收件人显示 —— 绝不能进 message_received，否则公屏就露出来了。
+	if clean.begins_with(DM_PREFIX):
+		if is_server():
+			_relay_dm(sender, speaker, clean)
+		return
+
 	# 以 / 开头的是管理命令：只交给服务端执行，绝不进公共聊天。
 	# 客户端本地那一趟（call_local）直接返回，指令原文不会出现在自己的聊天框里。
 	# 复用现有 RPC、不新增通道 —— 旧客户端连新服务端不会 checksum failed。
@@ -498,10 +508,89 @@ func post_message(text: String) -> void:
 ## 服务端转发别人的聊天。客户端收到后走和本地一样的气泡 + 列表逻辑。
 @rpc("authority", "call_remote", "reliable", 0)
 func _relay_message(speaker: String, text: String) -> void:
+	# 私信串不能进公屏：解析后只发给收件人，其余客户端静默丢弃
+	if _dispatch_dm(speaker, text):
+		return
+	# 宠物表回包同理：只给本人，聊天框里一个字都不出现
+	if _apply_pets(text):
+		return
+	if text.begins_with(PET_ERR):
+		message_received.emit(SYS_SPEAKER, "宠物存档没存上：" + text.substr(PET_ERR.length()))
+		return
+	if text.begins_with(PET_OK):
+		return
+	# 旧服务端不认识 /pets，回的那句「没有这个命令」别刷进聊天框
+	if speaker == SYS_SPEAKER and _is_pet_reject(text):
+		return
 	if OS.has_environment("XGD_DEBUG"):
 		print("[net] relay <- ", speaker, ": ", text, " peer=", my_id())
 	note_received([text])
 	message_received.emit(speaker, text)
+
+
+# ---------------------------------------------------------------- 私信
+## 私信怎么在不改协议的前提下跑起来：
+##   好友功能已经证明「命令走 post_message、回执走 _relay_message」这套老通道能用，
+##   但私信不能走 /dm 命令 —— 公共服跑的还是旧服务端，它不认识新命令，只会回「未知命令」。
+##   所以改成客户端自己编码：正文前加「@DM|发送者uid|接收者uid|」，服务端照常当普通
+##   聊天广播（它也认不出这是什么），各客户端解析前缀后只把「收件人是我」的那条
+##   显示进私信窗，其余直接丢弃 —— 公屏一个字都不会出现。
+##
+## 必须说清的边界：这**不是加密信道**。同房间的客户端技术上收得到这串文本，
+## 服务端也会把它写进聊天存档；只是界面不显示。真要私密得靠新服务端做定向转发。
+const DM_PREFIX := "@DM|"
+## 明文长度上限：post_message 会把整串截到 160 字符，前缀占约 30，留 90 给正文。
+const DM_MAX := 90
+
+
+## 发一条私信。返回空串表示已发出，否则是给界面看的失败原因。
+func send_dm(to_uid: String, to_name: String, text: String) -> String:
+	var body := text.strip_edges().left(DM_MAX)
+	if body.is_empty():
+		return "内容不能为空"
+	if to_uid.is_empty() or to_uid == local_uid:
+		return "收件人不对"
+	if not has_session():
+		return "私信要联机才能用"
+	if not _uid_online(to_uid):
+		return "「%s」不在线，等 ta 上线再发" % to_name
+	# 本地先回显（下面是 call_local，本机会再跑一趟 post_message，
+	# _dispatch_dm 里按「发送者是我」去重，不会显示两遍）
+	dm_received.emit(local_uid, local_name, to_uid, body)
+	post_message.rpc("%s%s|%s|%s" % [DM_PREFIX, local_uid, to_uid, body])
+	return ""
+
+
+## 解析私信串。返回 true = 这条是私信、已经咽掉了，调用方不要再当公聊处理。
+func _dispatch_dm(speaker: String, text: String) -> bool:
+	if not text.begins_with(DM_PREFIX):
+		return false
+	var parts := text.substr(DM_PREFIX.length()).split("|", true, 2)
+	if parts.size() < 3:
+		return true                        # 畸形串也吞掉，别漏进公屏
+	var from_uid := String(parts[0]).strip_edges()
+	var to_uid := String(parts[1]).strip_edges()
+	var body := String(parts[2])
+	if from_uid.is_empty() or to_uid.is_empty():
+		return true
+	if to_uid != local_uid:
+		return true                        # 不是发给我的，静默丢弃
+	if from_uid == local_uid:
+		return true                        # 自己发的：发送时已经回显过
+	dm_received.emit(from_uid, speaker, to_uid, body)
+	return true
+
+
+## 服务端：把私信转发给除发送者外的所有人。
+## **故意不做定向**：客户端只认 to_uid，转发到谁都没关系，但这样能兼容「客户端发 /
+## 主机发」两种来源（主机自己 rpc 广播的那份会被客户端的前置检查丢掉）。
+func _relay_dm(sender: int, speaker: String, text: String) -> void:
+	# 主机自己也是可能的收件人：它不在 multiplayer.get_peers() 里，
+	# 只转发的话「客户端发给主机」这条就永远到不了主机。
+	_dispatch_dm(speaker, text)
+	for id in multiplayer.get_peers():
+		if int(id) != sender:
+			_relay_message.rpc_id(int(id), speaker, text)
 
 
 # ---------------------------------------------------------------- 聊天内容管理
@@ -577,6 +666,10 @@ func _handle_command(sender: int, raw: String) -> void:
 	# 好友命令人人可用，必须在管理员检查之前分流
 	if FRIEND_CMDS.has(cmd):
 		_handle_friend_command(sender, cmd, arg)
+		return
+	# 宠物存档同步（客户端进世界时自动调，不需要玩家敲）
+	if cmd == "/pets" or cmd == "/petsset":
+		_pets_cmd(sender, cmd, arg)
 		return
 	if not _is_admin(uid):
 		_notice_to(sender, "这条命令只有管理员能用。")
@@ -1003,6 +1096,184 @@ func _save_social() -> void:
 	f.close()
 
 
+# ---------------------------------------------------------------- 宠物表（服务端权威）
+## 领养数据以前只写在客户端 user://adopted_cats.json —— 换机器、重装、清缓存就没了。
+## 现在和服务端好友表一样：按 uid 存在服务端并落盘，客户端只拿自己那份。
+## 客户端本地那份降级成「离线缓存」，断网/单机时照常养猫。
+##
+## 为什么不用新 RPC：RPC 方法一改，旧客户端连新服务端立刻 checksum failed，所有人
+## 必须同时升级。这里复用现成通道 —— 命令走 post_message，回包走 _relay_message：
+##   客户端 → post_message("/pets")             服务端 → "@PETS|<json>"
+##   客户端 → post_message("/petsset <json>")   服务端 → "@PETS|<json>"（清洗后的）
+## 旧服务端不认识这两个命令，只会回「没有这个命令：/pets」；客户端把这条悄悄咽掉，
+## 退回本地存档，功能照常，只是暂时不同步。
+const PETS_PATH := "user://pets.json"
+const PET_TAG := "@PETS|"
+const PET_OK := "@PETOK|"
+const PET_ERR := "@PETERR|"
+const PET_LIMIT := 2              # 与服务端一致：一间宿舍最多两只
+## 服务端全量：uid -> [{name, skin, pets, walk?}]
+var _pets: Dictionary = {}
+var _pets_loaded := false
+## 客户端切片（服务端下发的那份；没同步过就是空）
+var my_pets: Array = []
+## 这个服务端确认过一次宠物表（哪怕回的是空数组）。false = 旧服务端，走本地存档。
+var pets_synced := false
+signal pets_changed
+
+
+## 客户端：向服务端要自己的宠物表。Arena 进世界时调一次。
+func pet_refresh() -> void:
+	if not has_session():
+		return
+	if is_server():
+		if not _pets_loaded:
+			_load_pets()
+		_pet_answer(_pets.get(local_uid, []))
+		return
+	post_message.rpc("/pets")
+
+
+## 客户端：把当前列表交给服务端保存（本地已经先写过缓存了）。
+func pet_push(list: Array) -> void:
+	if not has_session():
+		return
+	var clean := _sanitize_pets(list)
+	if is_server():
+		if not _pets_loaded:
+			_load_pets()
+		_pets[local_uid] = clean
+		_save_pets()
+		_pet_answer(clean)
+		return
+	var payload := JSON.stringify(clean)
+	# post_message 会把正文截到 160 字符（"/petsset " 占 9），超了会被截成半截 JSON。
+	# 名字都卡 12 字、最多两只，正常永远到不了；真超了就别发（本地那份还在，
+	# 下次改名变短了会补上），绝不能发一条截断的上去让服务端把存档写坏。
+	if payload.length() > 150:
+		push_warning("[net] 宠物数据太长（%d 字符），这次不同步" % payload.length())
+		return
+	post_message.rpc("/petsset " + payload)
+
+
+## 服务端：处理 /pets（拉取）与 /petsset（保存）。人人可用，不走管理员检查。
+func _pets_cmd(sender: int, cmd: String, arg: String) -> void:
+	var uid := str(peers.get(sender, {}).get("uid", ""))
+	if uid.is_empty():
+		return
+	if not _pets_loaded:
+		_load_pets()
+	if cmd == "/pets":
+		_pet_answer_to(sender, _pets.get(uid, []))
+		return
+	var parsed = null
+	if not arg.is_empty():
+		var j := JSON.new()
+		if j.parse(arg) == OK:
+			parsed = j.data
+	if not (parsed is Array):
+		_pet_err_to(sender, "存档格式不对")
+		return
+	var clean := _sanitize_pets(parsed)
+	_pets[uid] = clean
+	_save_pets()
+	print("[net] 宠物表已更新：%s 养了 %d 只" % [uid, clean.size()])
+	_pet_answer_to(sender, clean)
+
+
+## 只保留认识的字段，并且卡住上限 —— 客户端可以自己 rpc，不能全信。
+func _sanitize_pets(raw: Array) -> Array:
+	var out: Array = []
+	for it in raw:
+		if out.size() >= PET_LIMIT:
+			break
+		if not (it is Dictionary):
+			continue
+		var d: Dictionary = it
+		var nm := str(d.get("name", "猫咪")).strip_edges().left(12)
+		if nm.is_empty():
+			nm = "猫咪"
+		var rec := {
+			"name": nm,
+			"skin": clampi(int(d.get("skin", 0)), 0, 63),
+			"pets": clampi(int(d.get("pets", 0)), 0, 999999),
+		}
+		if bool(d.get("walk", false)):
+			rec["walk"] = true
+		out.append(rec)
+	return out
+
+
+func _pet_answer(list: Array) -> void:
+	_apply_pets(PET_TAG + JSON.stringify(_sanitize_pets(list)))
+
+
+func _pet_answer_to(peer: int, list: Array) -> void:
+	if peer <= 0:
+		return
+	var txt := PET_TAG + JSON.stringify(_sanitize_pets(list))
+	if is_server() and peer == my_id():
+		_apply_pets(txt)
+	else:
+		_relay_message.rpc_id(peer, SYS_SPEAKER, txt)
+
+
+func _pet_err_to(peer: int, reason: String) -> void:
+	if peer <= 0:
+		return
+	var txt := PET_ERR + reason
+	if is_server() and peer == my_id():
+		message_received.emit(SYS_SPEAKER, "宠物存档没存上：" + reason)
+	else:
+		_relay_message.rpc_id(peer, SYS_SPEAKER, txt)
+
+
+## 解析服务端下发的宠物表。返回 true = 这条是宠物回包，别当聊天处理。
+## 用 JSON.new().parse() 而不是 JSON.parse_string()：后者遇到坏串会往控制台
+## 打一条 ERROR，而这条串本来是「别人随便发的聊天」—— 不该在日志里报错。
+func _apply_pets(txt: String) -> bool:
+	if not txt.begins_with(PET_TAG):
+		return false
+	var j := JSON.new()
+	var parsed = j.parse(txt.substr(PET_TAG.length()))
+	pets_synced = true
+	my_pets = j.data if parsed == OK and j.data is Array else []
+	pets_changed.emit()
+	return true
+
+
+## 旧服务端不认识 /pets 时回的那句，别让它刷进聊天框
+func _is_pet_reject(text: String) -> bool:
+	return text.begins_with("没有这个命令") and text.contains("/pets")
+
+
+func _load_pets() -> void:
+	_pets_loaded = true
+	if not is_server():
+		return
+	if not FileAccess.file_exists(PETS_PATH):
+		return
+	var f := FileAccess.open(PETS_PATH, FileAccess.READ)
+	if f == null:
+		return
+	var parsed = JSON.parse_string(f.get_as_text())
+	f.close()
+	if parsed is Dictionary:
+		_pets = parsed
+		print("[net] 宠物表已载入：%d 个 uid" % _pets.size())
+
+
+func _save_pets() -> void:
+	if not is_server():
+		return
+	var f := FileAccess.open(PETS_PATH, FileAccess.WRITE)
+	if f == null:
+		push_warning("[net] 宠物表写不进去：%s" % PETS_PATH)
+		return
+	f.store_string(JSON.stringify(_pets))
+	f.close()
+
+
 # ---------------------------------------------------------------- 聊天落盘
 ## 服务端把聊天记录写进 user://chat_log.json：重启不丢、新来的人能看到刚才在聊什么。
 ## 客户端不需要这份文件（加入时会由服务端补发），所以只在 is_server() 时读写。
@@ -1064,7 +1335,12 @@ func _push_history(items: Array) -> void:
 	for it in items:
 		if not (it is Dictionary):
 			continue
-		history_received.emit(str(it.get("n", "?")), str(it.get("m", "")), int(it.get("t", 0)))
+		var msg := str(it.get("m", ""))
+		# 旧服务端会把私信一起落盘（它看不出前缀）。补发时直接跳过，
+		# 否则重进游戏的人会在公屏历史里看到别人的私信。
+		if msg.begins_with(DM_PREFIX):
+			continue
+		history_received.emit(str(it.get("n", "?")), msg, int(it.get("t", 0)))
 
 
 ## A quick emote over your head. Unreliable on its own channel (2): losing one
