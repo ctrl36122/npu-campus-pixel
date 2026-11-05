@@ -9,6 +9,7 @@ extends Node2D
 ##
 ## origin = 脚底中点；由 Wildlife（ground 模式）生成，挂进 Objects 参与 y 排序。
 
+const TS := 8.0             # 格→校园局部像素，和可走网格一致
 const SHEET_PATH := "res://assets/cats/oreo_cat_sheet.png"
 const TINT_SHADER := "res://assets/cats/cat_tint.gdshader"
 const FRAME_W := 33.0
@@ -86,6 +87,16 @@ var _size_k := 1.0
 var _speed_k := 1.0
 var _doze := 0.3
 var _rng := RandomNumberGenerator.new()
+var _nav: NavGrid = null     # 可走网格（Arena 传入）；漫游时避开楼和水
+
+## 互动状态（Arena 里按 E 摸猫时调 pet()）
+var pet_count := 0
+var _skin_name := "猫咪"
+var _pet_t := 0.0            # 被摸后保持坐姿
+var _bubble_t := 0.0         # 头顶爱心剩余时间
+var _bubble_was := false
+var _follow_t := 0.0         # 好感够了，跟着玩家走一小段
+var _follow_node: Node2D = null
 
 
 ## 素材可能没随仓库分发（见 assets/cats/ 的授权说明），缺了就别生成猫，别让游戏崩。
@@ -93,7 +104,40 @@ static func available() -> bool:
 	return ResourceLoader.exists(SHEET_PATH)
 
 
-func setup(anchor: Vector2, skin_data: Variant, seed_val: int) -> void:
+## 猫不像玩家有碰撞体，漫游前自己查一下可走网格，别走进楼里或踩到水面。
+## 没传网格（比如别的场景单独摆一只）就退回原来的自由走。
+func _can_walk(p: Vector2) -> bool:
+	if _nav == null:
+		return true
+	return _nav.is_walkable(Vector2i(int(floor(p.x / TS)), int(floor(p.y / TS))))
+
+
+func cat_name() -> String:
+	return _skin_name
+
+
+## 按 E 摸猫：停下漫游 → 转向玩家 → 坐下 → 冒爱心；摸够 3 次会跟一小段。
+## 返回一句反馈给屏幕提示条。
+func pet(player: Node2D) -> String:
+	pet_count += 1
+	_pet_t = 2.2
+	_bubble_t = 2.0
+	_follow_node = player
+	moving = false
+	wait = 0.9
+	if player != null and is_instance_valid(player):
+		face = 1.0 if player.position.x >= pos.x else -1.0
+	if pet_count >= 3:
+		_follow_t = 8.0
+	_play("sit_down", false, "sit")
+	match pet_count:
+		1: return "喵？"
+		2: return "喵～"
+		3: return "跟着你走啦！"
+		_: return "呼噜呼噜～"
+
+
+func setup(anchor: Vector2, skin_data: Variant, seed_val: int, nav_data: NavGrid = null) -> void:
 	_rng.seed = seed_val
 	var skin: Dictionary = SKINS[0] if skin_data is Dictionary else SKINS[0]
 	if skin_data is Dictionary:
@@ -101,13 +145,22 @@ func setup(anchor: Vector2, skin_data: Variant, seed_val: int) -> void:
 	_size_k = float(skin.get("size", 1.0))
 	_speed_k = float(skin.get("speed", 1.0))
 	_doze = float(skin.get("doze", 0.3))
+	_skin_name = str(skin.get("name", "猫咪"))
+	_nav = nav_data
 	home = anchor
-	pos = anchor + Vector2(_rng.randf_range(-40.0, 40.0), _rng.randf_range(-24.0, 24.0))
+	# 初始落点也要查可走，别一出生就站在楼影里
+	pos = anchor
+	for i in 12:
+		var cand := anchor + Vector2(_rng.randf_range(-40.0, 40.0), _rng.randf_range(-24.0, 24.0))
+		if _can_walk(cand):
+			pos = cand
+			break
 	position = pos
 	_build_sprite(skin)
 	_play("stand", true)
 	wait = _rng.randf_range(0.5, 2.0)
 	scale = Vector2(BASE_SCALE * _size_k * face, BASE_SCALE * _size_k)
+	queue_redraw()   # 影子只画一次；之后只有冒爱心时才重绘
 
 
 func _build_sprite(skin: Dictionary) -> void:
@@ -134,24 +187,64 @@ func _build_sprite(skin: Dictionary) -> void:
 
 func _process(delta: float) -> void:
 	_tick_anim(delta)
-	if moving:
+	_pet_t = maxf(0.0, _pet_t - delta)
+	if _bubble_t > 0.0:
+		_bubble_t = maxf(0.0, _bubble_t - delta)
+		_bubble_was = true
+	elif _bubble_was:
+		queue_redraw()          # 最后刷一次，把爱心擦掉
+		_bubble_was = false
+	if _follow_t > 0.0:
+		_follow_t = maxf(0.0, _follow_t - delta)
+
+	if _follow_t > 0.0 and _pet_t <= 0.0 and _follow_node != null and is_instance_valid(_follow_node):
+		_follow_player(delta)
+	elif _pet_t > 0.0:
+		moving = false
+	elif moving:
 		var to := target - pos
 		if to.length() < 2.0:
 			_arrive()
 		else:
 			var spd := RUN_SPEED if anim == "run" else WALK_SPEED
 			var step := to.normalized() * spd * _speed_k * delta
-			pos += step
-			if absf(step.x) > 0.01:
-				face = 1.0 if step.x > 0.0 else -1.0
+			if _can_walk(pos + step):
+				pos += step
+				if absf(step.x) > 0.01:
+					face = 1.0 if step.x > 0.0 else -1.0
+			else:
+				_arrive()   # 撞到楼/水就停下，休息完换个方向再走
 	else:
 		wait -= delta
 		if wait <= 0.0:
 			_leave_rest()
+	# 兜底：万一还是被挤到障碍格边缘，轻轻拉回自己的活动中心
+	if _nav != null and not _can_walk(pos) and _can_walk(home):
+		pos = home
 	position = pos
 	# 原图猫朝右；朝左时整个节点（连同 sprite）镜像
 	scale = Vector2(BASE_SCALE * _size_k * face, BASE_SCALE * _size_k)
-	queue_redraw()
+	if _bubble_t > 0.0:
+		queue_redraw()   # 影子是静态的，只有爱心动画需要逐帧重绘
+
+
+## 好感够了：贴着玩家脚边小跑，离远了会加速追；跟到就原地待机
+func _follow_player(delta: float) -> void:
+	var goal: Vector2 = (_follow_node as Node2D).position + Vector2(-14.0, 10.0)
+	var to := goal - pos
+	moving = false
+	if to.length() > 3.0:
+		if anim != "walk" and anim != "run":
+			_play("walk", true)
+		var spd := RUN_SPEED if to.length() > 40.0 else WALK_SPEED
+		var step := to.normalized() * spd * _speed_k * delta
+		if _can_walk(pos + step):
+			pos += step
+			if absf(step.x) > 0.01:
+				face = 1.0 if step.x > 0.0 else -1.0
+	elif anim != "stand":
+		_play("stand", true)
+	wait = 0.5   # 跟随结束后稍等一下再恢复自己溜达
 
 
 ## 一次性动画（起身/趴下/跳/连击）播完自动接循环动画
@@ -221,9 +314,15 @@ func _arrive() -> void:
 
 ## 休息结束：坐着/睡着要先播起身帧，再走
 func _leave_rest() -> void:
-	var t := pos + Vector2(_rng.randf_range(-55.0, 55.0), _rng.randf_range(-35.0, 35.0))
-	if t.distance_to(home) > HOME_RADIUS:
-		t = home + (t - home).limit_length(60.0)
+	# 挑一个确实站得住的落点（最多试 8 次），否则猫会一头撞进楼里
+	var t := pos
+	for i in 8:
+		var cand := pos + Vector2(_rng.randf_range(-55.0, 55.0), _rng.randf_range(-35.0, 35.0))
+		if cand.distance_to(home) > HOME_RADIUS:
+			cand = home + (cand - home).limit_length(60.0)
+		if _can_walk(cand):
+			t = cand
+			break
 	target = t
 	moving = true
 	if anim == "sit":
@@ -239,3 +338,15 @@ func _leave_rest() -> void:
 func _draw() -> void:
 	# 脚下一小片影子（sprite sheet 没有影），跟随节点缩放
 	draw_rect(Rect2(-8.0, -0.8, 16.0, 1.6), Color(0.0, 0.0, 0.0, 0.10))
+	# 被摸时头顶冒 3 颗像素爱心，边飘边淡出
+	if _bubble_t > 0.0:
+		var ph := 1.0 - _bubble_t / 2.0
+		var c := Color(0.93, 0.32, 0.42, 0.92 * (1.0 - ph * 0.7))
+		var y0 := -24.0 - ph * 7.0
+		for i in 3:
+			var x := -5.0 + float(i) * 5.0 + sin(ph * 5.0 + float(i) * 1.7) * 1.5
+			var y := y0 - float(i) * 2.0
+			draw_rect(Rect2(x, y, 2.0, 2.0), c)
+			draw_rect(Rect2(x + 2.6, y, 2.0, 2.0), c)
+			draw_rect(Rect2(x + 0.6, y + 1.6, 4.0, 1.6), c)
+			draw_rect(Rect2(x + 1.4, y + 3.0, 2.4, 1.0), c)

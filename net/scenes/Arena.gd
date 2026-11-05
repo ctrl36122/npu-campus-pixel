@@ -237,9 +237,7 @@ func _ready() -> void:
 func _setup_wildlife() -> void:
 	## 水波层 + 小动物（猫/鸟/蝴蝶），全部程序绘制、零素材
 	var wf: GDScript = load("res://net/scenes/Wildlife.gd")
-	var anchors: Array = []
-	for info in NPC_SPAWNS:
-		anchors.append((info["cell"] as Vector2) * TS)
+	var anchors: Array = _cat_anchors()
 	# 水波层：贴在 Ground 之上、Objects 之下（先 add 再挪到 Objects 前）
 	var fx := Node2D.new()
 	fx.name = "WaterFX"
@@ -254,13 +252,53 @@ func _setup_wildlife() -> void:
 		ground.name = "WildlifeGround"
 		ground.set("mode", "ground")
 		objs.add_child(ground)
-		ground.call("setup", anchors, _water_rects())
+		_wildlife_ground = ground
+		ground.call("setup", anchors, _water_rects(), _cat_nav)
 	# 鸟 + 蝴蝶：空中层，永远在人/楼上面
 	var air: Node2D = wf.new()
 	air.name = "WildlifeAir"
 	air.set("mode", "air")
 	campus.add_child(air)
 	air.call("setup", anchors)
+
+
+## 猫的活动锚点：NPC 活跃点固定打头，再按规则网格在全图挑「开阔可走空地」。
+## 用 NavGrid 排除水面、建筑 footprint 和楼影（楼影里的猫会被楼整个盖住）。
+## 点位只有 30 个、猫有 48 只，前面的点位自然会有两三只凑一起。
+func _cat_anchors() -> Array:
+	_cat_nav = _build_nav_grid()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 20261105
+	# NPC 点固定在最前面、不参与洗牌：玩家常路过的地方一定要能看到猫
+	var out: Array = []
+	for info in NPC_SPAWNS:
+		var c: Vector2 = info["cell"] as Vector2
+		if _cat_nav == null or _cat_nav.is_walkable(Vector2i(int(c.x), int(c.y))):
+			out.append(c * TS)
+	var grid_pts: Array = []
+	if _cat_nav != null:
+		for gy in range(48, 641, 54):
+			for gx in range(72, 401, 54):
+				var cx: int = gx + rng.randi_range(-10, 10)
+				var cy: int = gy + rng.randi_range(-10, 10)
+				var open := true
+				# 3×3 邻域都要可走，别让猫贴着墙根或水边生成
+				for dy in range(-1, 2):
+					for dx in range(-1, 2):
+						if not _cat_nav.is_walkable(Vector2i(cx + dx, cy + dy)):
+							open = false
+				if open:
+					grid_pts.append(Vector2(float(cx), float(cy)) * TS)
+	# 固定种子洗牌 + 截断：分布可复现，且不会全挤在地图某一角
+	for i in range(grid_pts.size() - 1, 0, -1):
+		var j := rng.randi_range(0, i)
+		var tmp: Vector2 = grid_pts[i]
+		grid_pts[i] = grid_pts[j]
+		grid_pts[j] = tmp
+	if grid_pts.size() > 24:
+		grid_pts = grid_pts.slice(0, 24)
+	out.append_array(grid_pts)
+	return out
 
 
 func _water_rects() -> Array:
@@ -1406,6 +1444,7 @@ func _update_daynight() -> void:
 
 
 func _process(delta: float) -> void:
+	_cat_msg_t = maxf(0.0, _cat_msg_t - delta)
 	_update_boat_control(delta)
 	_update_boats()
 	_update_bridge_z()
@@ -1949,6 +1988,13 @@ var _seats_campus: Array = []
 var _seats_room: Array = []
 var _near_seat: Dictionary = {}
 
+# ── 猫咪互动 ────────────────────────────────────────────────────────────────
+const CAT_PET_R := 26.0        # 能摸到猫的距离（校园局部像素）
+var _wildlife_ground: Node2D = null   # campus/Objects/WildlifeGround，猫都在它下面
+var _cat_nav: NavGrid = null          # 撒锚点 + 给猫做漫游碰撞判定
+var _cat_msg := ""             # 摸猫后短暂占住提示条的反馈文字
+var _cat_msg_t := 0.0
+
 # ── 小船状态 ────────────────────────────────────────────────────────────────
 ## 每艘船的服务端权威状态：[{pos: Vector2(campus 局部坐标), rider: peer id, moving: bool, dirx: float, diry: float}]
 ## 服务端改 rider/pos 后广播；客户端只做表现。离线单机时本机就是服务端。
@@ -2108,7 +2154,40 @@ func _try_interact() -> bool:
 	if _near_dorm != "":
 		enter_room("res://assets/rooms/dorm_space.json")
 		return true
+	# 校园里最后一级：身边有猫就摸一下。排在门/船/座位之后，不抢原有交互。
+	if not in_room:
+		var cat := _nearest_cat((me as Node2D).position)
+		if cat != null:
+			_pet_cat(cat)
+			return true
 	return false
+
+
+## 校园里离玩家最近、且摸得到的猫（房间里没有 WildlifeGround，自然返回 null）
+func _nearest_cat(pos: Vector2) -> Node2D:
+	if _wildlife_ground == null or not is_instance_valid(_wildlife_ground):
+		return null
+	var best: Node2D = null
+	var best_d := CAT_PET_R
+	for c in _wildlife_ground.get_children():
+		if not (c is Node2D) or not String(c.name).begins_with("Cat"):
+			continue
+		var d: float = pos.distance_to((c as Node2D).position)
+		if d < best_d:
+			best_d = d
+			best = c as Node2D
+	return best
+
+
+## 摸猫：猫自己停下、转身、坐下、冒爱心；反馈借现成的提示条亮 1.8 秒
+func _pet_cat(cat: Node2D) -> void:
+	var me: Node2D = _local_avatar() as Node2D
+	var reply: String = str(cat.call("pet", me))
+	_cat_msg = "「%s」%s" % [str(cat.call("cat_name")), reply]
+	_cat_msg_t = 1.8
+	if _door_hint != null:
+		_door_hint.text = _cat_msg
+		_door_hint.visible = true
 
 
 ## 朝向名 → sit_dir 的编号（1..4，和 SIT_DIRS 一致）
@@ -2876,9 +2955,21 @@ func _update_interact_hint(delta: float) -> void:
 			hit = String(d["name"])
 			break
 	_near_dorm = hit
-	_door_hint.visible = hit != ""
 	if hit != "":
+		_door_hint.visible = true
 		_door_hint.text = "%s · 按 E 进入「宿舍空间」" % hit
+		return
+	# 摸猫反馈短暂占住提示条，之后回到「按 E 摸猫」
+	if _cat_msg_t > 0.0:
+		_door_hint.visible = true
+		_door_hint.text = _cat_msg
+		return
+	var cat := _nearest_cat(pos)
+	if cat != null:
+		_door_hint.visible = true
+		_door_hint.text = "按 E 摸摸「%s」" % str(cat.call("cat_name"))
+		return
+	_door_hint.visible = false
 
 
 ## 是否站在门口（房间局部坐标，格）。门洞在 exit 矩形里，外扩 2.5 格算「门附近」——

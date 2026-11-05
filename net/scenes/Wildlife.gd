@@ -12,6 +12,9 @@ const DuckScript := preload("res://net/scenes/Duck.gd")
 const BunnyScript := preload("res://net/scenes/Bunny.gd")
 
 const TS := 8.0   # 格→像素（锚点转换用，与 Arena 里一致）
+## 校园里的猫总数。锚点由 Arena._cat_anchors() 在全图可走空地上撒；
+## 猫比锚点略多，个别点位会有两三只凑在一起。
+const CAT_COUNT := 48
 
 @export var mode: String = "ground"
 
@@ -44,13 +47,16 @@ var _flies: Array = []       # {anchor, phase, col}
 var _bird_cd: float = 1.5
 var _bounds := Rect2(0, 0, 3392, 6400)   # 校园局部像素范围（424×800 格 ×8）
 var _player: Node2D = null               # 本地玩家（让鸟贴着玩家视野飞）
+var _nav: NavGrid = null                 # 可走网格，交给猫做漫游碰撞判定
 
 
-## anchors: NPC 出生点等「确定可走」的位置 ×8
+## anchors: 全图挑出来的可走空地 ×8（由 Arena._cat_anchors() 生成）
 ## water_rects: world.json 的 water 数组（格坐标），给鸭子当活动锚点
-func setup(anchors: Array, water_rects: Array = []) -> void:
+## nav_data: 可走网格，猫漫游时用它避开楼和水
+func setup(anchors: Array, water_rects: Array = [], nav_data: NavGrid = null) -> void:
 	_rng.seed = 424242 if mode == "ground" else 909090
 	_anchors = anchors.duplicate()
+	_nav = nav_data
 	if _anchors.is_empty() and mode == "ground" and water_rects.is_empty():
 		set_process(false)
 		return
@@ -58,9 +64,9 @@ func setup(anchors: Array, water_rects: Array = []) -> void:
 		y_sort_enabled = true
 		var idx := 0
 		var seed := 1000
-		# 猫：SKINS 里一条一只（花色/体型/性格都不同，见 Cat.gd 的 SKINS）
+		# 猫：48 只按 12 种花色循环，撒在全图锚点上
 		_spawn_cats()
-		idx += CatScript.SKINS.size(); seed += 77
+		idx += CAT_COUNT; seed += 77
 		# 狗 4 只
 		for i in 4:
 			_spawn_animal(DogScript, _anchors, DOG_COLORS, idx, seed)
@@ -100,7 +106,8 @@ func _spawn_animal(script: Script, anchors: Array, colors: Array, idx: int, seed
 	a.call("setup", anchors[idx % anchors.size()], colors[idx % colors.size()], seed)
 
 
-## 猫：花色表里一条一只，绕着活动锚点撒开（同一锚点的两只按 180° 错开，别叠一起）
+## 猫：48 只按 12 花色循环，撒在全图锚点上；同锚点时按角度错开，别叠一起。
+## 名字一律 "Cat%d"，Arena._nearest_cat() 靠这个前缀找最近的猫。
 func _spawn_cats() -> void:
 	var skins: Array = CatScript.SKINS
 	if _anchors.is_empty():
@@ -109,15 +116,15 @@ func _spawn_cats() -> void:
 	if not ResourceLoader.exists("res://assets/cats/oreo_cat_sheet.png"):
 		push_warning("[Wildlife] 缺 assets/cats/oreo_cat_sheet.png，跳过猫咪")
 		return
-	for i in skins.size():
+	for i in CAT_COUNT:
 		var cat := Node2D.new()
 		cat.set_script(CatScript)
 		cat.name = "Cat%d" % i
 		add_child(cat)
 		var base: Vector2 = _anchors[i % _anchors.size()]
-		var ang := TAU * float(i) / float(skins.size())
-		var spot := base + Vector2(cos(ang), sin(ang) * 0.55) * 46.0
-		cat.call("setup", spot, skins[i], 2000 + i * 137)
+		var ang := TAU * float(i) / float(CAT_COUNT)
+		var spot := base + Vector2(cos(ang), sin(ang) * 0.55) * _rng.randf_range(20.0, 48.0)
+		cat.call("setup", spot, skins[i % skins.size()], 2000 + i * 137, _nav)
 
 
 ## 从 water 矩形（格坐标）取四边贴边点作为鸭子活动锚点（×TS 转像素），最多 8 只

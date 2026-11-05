@@ -8,6 +8,8 @@ var _grid: AStarGrid2D
 var _W := 0
 var _H := 0
 var _TS := 8.0
+## 1 = 障碍（水面 / 建筑 footprint / 楼影），build() 后留给撒点查询用
+var _solid := PackedByteArray()
 
 
 func build(world: Dictionary, ts: float) -> void:
@@ -20,23 +22,23 @@ func build(world: Dictionary, ts: float) -> void:
 	_grid.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_AT_LEAST_ONE_WALKABLE
 	_grid.update()
 
-	var solid := PackedByteArray()
-	solid.resize(_W * _H)
-	solid.fill(0)
+	_solid = PackedByteArray()
+	_solid.resize(_W * _H)
+	_solid.fill(0)
 
 	# 水面 → 障碍
 	for r in world.get("water", []):
-		_fill_rect(solid, int(r["x"]), int(r["y"]), int(r["w"]), int(r["h"]))
+		_fill_rect(_solid, int(r["x"]), int(r["y"]), int(r["w"]), int(r["h"]))
 	# 桥面甲板 → 挖空（可走，让 NPC 能过桥）
 	for br in world.get("bridges", []):
-		_clear_rect(solid, int(br["x"]), int(br["y"]), int(br["w"]), int(br["h"]))
+		_clear_rect(_solid, int(br["x"]), int(br["y"]), int(br["w"]), int(br["h"]))
 	# 建筑 footprint + 阴影区 → 障碍
 	for b in world.get("buildings", []):
-		_fill_poly(solid, b.get("poly", []), float(b.get("hp", 20)))
+		_fill_poly(_solid, b.get("poly", []), float(b.get("hp", 20)))
 
 	for y in range(_H):
 		for x in range(_W):
-			if solid[y * _W + x] == 1:
+			if _solid[y * _W + x] == 1:
 				_grid.set_point_solid(Vector2i(x, y), true)
 
 
@@ -79,6 +81,15 @@ func _fill_poly(s: PackedByteArray, poly: Array, hp: float) -> void:
 
 
 # ---------------------------------------------------------------- 对外接口（像素）
+
+## 这个格能不能站（给撒猫锚点用）。直接查障碍表，不依赖 AStarGrid2D 的查询 API。
+func is_walkable(cell: Vector2i) -> bool:
+	if _solid.is_empty():
+		return false
+	if cell.x < 0 or cell.y < 0 or cell.x >= _W or cell.y >= _H:
+		return false
+	return _solid[cell.y * _W + cell.x] == 0
+
 
 func _to_cell(px: Vector2) -> Vector2i:
 	return Vector2i(int(floor(px.x / _TS)), int(floor(px.y / _TS)))
