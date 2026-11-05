@@ -1971,9 +1971,15 @@ var _boat_snap_at: float = 0.0
 var _bridge_decks: Array = []
 
 # ── 多层宿舍 ────────────────────────────────────────────────────────────
-## 楼层数。每层布局完全相同，只用一个房间实例 + 每玩家的楼层号来复用第 1 层的设计。
+## 地上楼层数。1~5 层布局完全相同，只用一个房间实例 + 每玩家的楼层号复用设计。
 const FLOOR_COUNT := 5
-## 本地玩家当前楼层（1 起）。异层玩家互相隐藏（见 _update_floor_visibility）。
+## B1 在内部用楼层号 6：Net.claim_room / _write_claim 要求楼层 >= 1，
+## 用 6 就能让组队公告板直接复用现成的联机同步，不必改服务端协议。
+## 界面上只显示「B1 · 游戏活动室」，玩家看不到这个数字。
+const BASEMENT_FLOOR := 6
+const ACTIVITY_PATH := "res://assets/rooms/activity_room.json"
+const DORM_PATH := "res://assets/rooms/dorm_space.json"
+## 本地玩家当前楼层（1 起；6 = B1）。异层玩家互相隐藏（见 _update_floor_visibility）。
 var current_floor: int = 1
 ## 楼层 UI（指示 + 电梯选层面板 + 换层黑场）
 var _floor_layer: CanvasLayer
@@ -1992,6 +1998,9 @@ var _note_panel: PanelContainer
 var _note_edit: TextEdit
 var _note_title: Label
 var _note_count: Label
+## 组队板复用同一套公告面板，只是把提示语和「退房」按钮换成组队措辞
+var _note_hint: Label
+var _note_bye_btn: Button
 var _note_view: PanelContainer
 var _note_view_title: Label
 var _note_view_body: Label
@@ -2059,14 +2068,20 @@ func _try_interact() -> bool:
 	# 门口公告板：站在某间宿舍门口按 E —— 空房是认领，自己的房是编写，别人的房是查看。
 	# 手机上没有 F 键（提示条本身就是按钮），所以认领必须也能从 E 走通。
 	if in_room and not _note_open():
-		var rd: Dictionary = _nearest_room_door((me as Node2D).position)
-		if not rd.is_empty():
-			var idx0: int = int(rd["index"])
-			if (Net.room_claims.get("%d:%d" % [current_floor, idx0], {}) as Dictionary).is_empty():
-				_try_claim_room()
+		if current_floor == BASEMENT_FLOOR:
+			var tb: Dictionary = _nearest_team_board((me as Node2D).position)
+			if not tb.is_empty():
+				_open_note_board(int(tb["index"]))   # 空板会在里面直接开队
 				return true
-			_open_note_board(idx0)
-			return true
+		else:
+			var rd: Dictionary = _nearest_room_door((me as Node2D).position)
+			if not rd.is_empty():
+				var idx0: int = int(rd["index"])
+				if (Net.room_claims.get("%d:%d" % [current_floor, idx0], {}) as Dictionary).is_empty():
+					_try_claim_room()
+					return true
+				_open_note_board(idx0)
+				return true
 	if in_room and _near_door((me as Node2D).position):
 		leave_room()
 		return true
@@ -2092,31 +2107,63 @@ func _face_code(face: String) -> int:
 	return 1
 
 
+## 楼层号 → 房间数据。B1 用独立活动室布局，地上 1~5 层共用宿舍。
+func _room_path_for(n: int) -> String:
+	return ACTIVITY_PATH if n == BASEMENT_FLOOR else DORM_PATH
+
+
+func _room_id_for(path: String) -> String:
+	return "activity_room" if path == ACTIVITY_PATH else "dorm_space"
+
+
+## 按目标楼层搭好房间：同一份布局就复用，跨 B1 / 地上则销毁重建。
+## 玩家不挂在 room 节点下（只挂在校园 Objects），所以重建不会把人一起删掉。
+## 必须 remove_child 立刻从树里摘掉 —— 只 queue_free 的话帧末才生效，
+## 新旧两份房间会重叠一帧。
+func _ensure_room_for_floor(n: int) -> bool:
+	var path := _room_path_for(n)
+	if room != null and is_instance_valid(room):
+		if String(room.get("data").get("id", "")) == _room_id_for(path):
+			room.visible = true
+			return true
+		if campus != null:
+			var old_objs: Node2D = campus.get_node_or_null("Objects")
+			if old_objs != null and room.get_parent() == old_objs:
+				old_objs.remove_child(room)
+		room.queue_free()
+		room = null
+	if campus == null:
+		return false
+	var objs: Node2D = campus.get_node_or_null("Objects")
+	if objs == null:
+		return false
+	room = Node2D.new()
+	room.name = "Room"
+	room.set_script(RoomScript)
+	room.set("node_scale", 1.0)          # Objects 空间已经是 8px/格
+	objs.add_child(room)
+	room.position = ROOM_ORIGIN * TS
+	if not bool(room.call("load_room", path)):
+		objs.remove_child(room)
+		room.queue_free()
+		room = null
+		push_error("[arena] 房间加载失败：" + path)
+		return false
+	room.visible = true
+	return true
+
+
 ## 把一个房间挂到校园的 Objects 下并把人送进去。成功返回 true。
 ## floor_n：进门直接落在第几层（自家所在层用它，普通进楼走默认 1 层）。
+## path 留在签名里只为兼容旧调用，实际用哪份房间由楼层决定。
 func enter_room(path: String, floor_n: int = 1) -> bool:
 	if in_room or campus == null:
 		return false
 	if _my_boat >= 0:
 		return false                      # 划船中不能直接进宿舍（先下船）
-	var objs: Node2D = campus.get_node_or_null("Objects")
-	if objs == null:
+	var want := clampi(floor_n, 1, BASEMENT_FLOOR)
+	if not _ensure_room_for_floor(want):
 		return false
-
-	if room == null:
-		room = Node2D.new()
-		room.name = "Room"
-		room.set_script(RoomScript)
-		room.set("node_scale", 1.0)          # Objects 空间已经是 8px/格
-		objs.add_child(room)
-		room.position = ROOM_ORIGIN * TS
-		if not bool(room.call("load_room", path)):
-			room.queue_free()
-			room = null
-			push_error("[arena] 房间加载失败：" + path)
-			return false
-	else:
-		room.visible = true
 
 	var me: Node = _local_avatar()
 	if me == null:
@@ -2156,8 +2203,8 @@ func enter_room(path: String, floor_n: int = 1) -> bool:
 	if _door_hint != null:
 		_door_hint.visible = true
 	_door_clock = 0.0
-	# 每次进楼默认从 1 层开始（但自家在那层就直接落到自家那层）；建好门牌、显示楼层指示
-	current_floor = clampi(floor_n, 1, FLOOR_COUNT)
+	# 每次进楼默认从 1 层开始（自家在那层就直接落到自家那层；B1 则直接进活动室）
+	current_floor = want
 	Net.set_my_floor(current_floor)
 	# 告诉服务端「我进房间了、在第几层、落在哪」：房间内不跑服务端模拟，
 	# 但位置/楼层要同步出去，否则同房间的人互相看不见（房间内只有自己）。
@@ -2208,7 +2255,10 @@ func leave_room() -> void:
 ## 直接调 enter_room() 测不出「按键到底有没有被吞掉」这类问题。
 func _auto_press_e() -> void:
 	var times: int = maxi(1, OS.get_environment("XGD_TEST_E").to_int())
-	await get_tree().create_timer(3.0).timeout
+	var delay := 3.0
+	if OS.has_environment("XGD_TEST_E_DELAY"):
+		delay = clampf(OS.get_environment("XGD_TEST_E_DELAY").to_float(), 0.1, 60.0)
+	await get_tree().create_timer(delay).timeout
 	# 调试：先站到第一把椅子旁边，方便验证「按 E 坐下」这条链路
 	if OS.has_environment("XGD_TEST_SEAT") and not _seats_room.is_empty():
 		var a: Node = _local_avatar()
@@ -2420,11 +2470,24 @@ func _auto_walk_sync() -> void:
 
 
 func _try_auto_room() -> void:
-	if not enter_room("res://assets/rooms/dorm_space.json"):
+	# 调试：XGD_ROOM_FLOOR=6 直接落到 B1 活动室（配合 XGD_ROOM=1 截图用）
+	var f := 1
+	if OS.has_environment("XGD_ROOM_FLOOR"):
+		f = clampi(OS.get_environment("XGD_ROOM_FLOOR").to_int(), 1, BASEMENT_FLOOR)
+	if not enter_room("res://assets/rooms/dorm_space.json", f):
 		push_warning("[arena] 自动进房间失败")
 	else:
 		print("[dbg] 自动进房成功 in_room=", in_room,
 			" 玩家=", (_local_avatar() as Node2D).position if _local_avatar() != null else Vector2.ZERO)
+		# 调试：XGD_ROOM_AT="x,y" 进房后落到房间局部格坐标（测门/板/座位交互用）
+		if OS.has_environment("XGD_ROOM_AT"):
+			var raw := OS.get_environment("XGD_ROOM_AT").split(",")
+			if raw.size() == 2:
+				var a := _local_avatar()
+				if a != null:
+					(a as Node2D).call("teleport_to",
+						room.position + Vector2(float(raw[0]), float(raw[1])) * TS)
+					print("[dbg] 房内落点=", (a as Node2D).position)
 
 
 ## 进出房间时放开/恢复相机边界。只动本地玩家的相机，远端玩家不影响视角。
@@ -2630,6 +2693,22 @@ func _update_interact_hint(delta: float) -> void:
 			_door_hint.visible = true
 			_door_hint.text = "按 E 离开「%s」" % _room_title
 		else:
+			if current_floor == BASEMENT_FLOOR:
+				var tb := _nearest_team_board(pos)
+				if tb.is_empty():
+					_door_hint.visible = false
+				else:
+					var bi := int(tb["index"])
+					var cur: Dictionary = Net.room_claims.get("%d:%d" % [BASEMENT_FLOOR, bi], {})
+					_door_hint.visible = true
+					if cur.is_empty():
+						_door_hint.text = "%s · 空队 · 按 E 开队" % _team_board_name(bi)
+					elif String(cur.get("uid", "")) == Net.local_uid:
+						_door_hint.text = "%s · 我的队 · 按 E 编辑招募" % _team_board_name(bi)
+					else:
+						_door_hint.text = "%s ·「%s」的队 · 按 E 看招募" % [
+							_team_board_name(bi), String(cur.get("name", "?"))]
+				return
 			var rd := _nearest_room_door(pos)
 			if rd.is_empty():
 				_door_hint.visible = false
@@ -2804,7 +2883,6 @@ func _face_name(dir: int) -> String:
 
 # ── 「回家的宿舍」：认领过房间的人，一上线直接出生在自己床上了 ─────────
 const MY_ROOM_CFG := "user://my_room.cfg"
-const DORM_PATH := "res://assets/rooms/dorm_space.json"
 
 ## 进游戏时决定是否直接落到自己房间里。没认领过 → 老规矩从校园出生。
 func _auto_spawn_home() -> void:
@@ -3018,7 +3096,7 @@ func _build_floor_panel() -> PanelContainer:
 	vb.add_child(title)
 
 	var g := GridContainer.new()
-	g.columns = 5
+	g.columns = 3                       # 5 个地上层 + B1 = 6 个按钮，两行三列
 	g.add_theme_constant_override("h_separation", 8)
 	g.add_theme_constant_override("v_separation", 8)
 	vb.add_child(g)
@@ -3031,6 +3109,14 @@ func _build_floor_panel() -> PanelContainer:
 		b.add_theme_color_override("font_color", Color("#e8f4ff"))
 		b.pressed.connect(_on_floor_picked.bind(i + 1))
 		g.add_child(b)
+	var bb := Button.new()
+	bb.text = "B1 · 活动室"
+	bb.custom_minimum_size = Vector2(88, 42)
+	bb.focus_mode = Control.FOCUS_NONE
+	bb.add_theme_font_size_override("font_size", 17)
+	bb.add_theme_color_override("font_color", Color("#ffd88a"))
+	bb.pressed.connect(_on_floor_picked.bind(BASEMENT_FLOOR))
+	g.add_child(bb)
 	return pc
 
 
@@ -3060,14 +3146,21 @@ func _on_floor_picked(n: int) -> void:
 
 
 ## 换层的全部事情：改楼层号（广播给别人）+ 站到新楼层的电梯口 + 刷新门牌 + 黑场淡入。
-## 注意：楼层不影响玩家坐标 —— 每层布局相同，同一个 x/y 在每层都是同一个位置。
+## 地上 1~5 层布局相同，只换层号；地上 ↔ B1 则连房间布局一起换（4 个大单间 vs 14 间小隔间）。
 func _go_floor(n: int) -> void:
-	var want: int = clampi(n, 1, FLOOR_COUNT)
+	var want: int = clampi(n, 1, BASEMENT_FLOOR)
 	_close_floor_panel()
 	if want == current_floor:
 		return
+	var was_basement := current_floor == BASEMENT_FLOOR
+	var is_basement := want == BASEMENT_FLOOR
 	current_floor = want
 	Net.set_my_floor(want)
+	if is_basement != was_basement:
+		_ensure_room_for_floor(want)
+		_collect_room_seats()
+		_build_door_plates()
+		_update_room_doors()
 	var me: Node = _local_avatar()
 	if me != null:
 		var spot: Vector2 = _elevator_step_out()
@@ -3109,7 +3202,10 @@ func _update_floor_label() -> void:
 		return
 	_ensure_floor_ui()
 	_floor_label.visible = true
-	_floor_label.text = "宿舍楼 · %d / %d 层" % [current_floor, FLOOR_COUNT]
+	if current_floor == BASEMENT_FLOOR:
+		_floor_label.text = "B1 · 游戏活动室"
+	else:
+		_floor_label.text = "宿舍楼 · %d / %d 层" % [current_floor, FLOOR_COUNT]
 
 
 ## 是否站在电梯前（房间局部坐标，格）
@@ -3149,6 +3245,10 @@ func _room_gate(idx: int) -> Dictionary:
 ## 动画本身在 RoomDoor._process 里逐帧插值，所以离散判定看不出来。
 func _update_room_doors() -> void:
 	if not in_room or room == null or not is_instance_valid(room):
+		return
+	if current_floor == BASEMENT_FLOOR:
+		# B1 没有会锁的宿舍门，8Hz 巡检改成刷组队板的「已入座几人」
+		_refresh_team_plates()
 		return
 	var me: Node = _local_avatar()
 	if me == null:
@@ -3266,6 +3366,63 @@ func _nearest_room_door(pos: Vector2) -> Dictionary:
 	return best
 
 
+# ── B1 组队板 ───────────────────────────────────────────────────────────
+## 组队板直接复用宿舍的认领/公告同步：一块板 = Net.room_claims 里的 "6:idx"。
+## 开队就是认领，招募正文就是 note，撤队就是退认领 —— 服务端协议一行没改。
+func _team_board_name(idx: int) -> String:
+	if room == null or not is_instance_valid(room):
+		return "%d 区" % (idx + 1)
+	for b in room.get("data").get("team_boards", []):
+		if int(b.get("index", -1)) == idx:
+			return String(b.get("name", "%d 区" % (idx + 1)))
+	return "%d 区" % (idx + 1)
+
+
+## 站在哪块组队板前（房间局部坐标，格）。半径沿用门口认领的 CLAIM_RADIUS。
+func _nearest_team_board(pos: Vector2) -> Dictionary:
+	var best: Dictionary = {}
+	if room == null or not is_instance_valid(room):
+		return best
+	var lp: Vector2 = (pos - room.position) / TS
+	var best_d := CLAIM_RADIUS
+	for b in room.get("data").get("team_boards", []):
+		var bd: Dictionary = b
+		var dist: float = lp.distance_to(Vector2(
+			float(bd["x"]) + float(bd["w"]) * 0.5,
+			float(bd["y"]) + float(bd["h"]) * 0.5))
+		if dist < best_d:
+			best_d = dist
+			best = bd
+	return best
+
+
+## 这间活动室此刻坐着几个人。「进去找空位坐下」就是加入队伍，不用另做一套报名状态。
+func _team_seated_count(idx: int) -> int:
+	if room == null or not is_instance_valid(room) or players == null:
+		return 0
+	var rr: Array = []
+	for b in room.get("data").get("team_boards", []):
+		if int(b.get("index", -1)) == idx:
+			rr = b.get("room_rect", [])
+			break
+	if rr.size() < 4:
+		return 0
+	var area := Rect2(
+		room.position + Vector2(float(rr[0]), float(rr[1])) * TS,
+		Vector2(float(rr[2]), float(rr[3])) * TS)
+	var n := 0
+	for c in players.get_children():
+		if c == null or not is_instance_valid(c):
+			continue
+		if int(c.get("sit_dir")) == 0:
+			continue
+		if int(c.get("room_floor")) != BASEMENT_FLOOR:
+			continue
+		if area.has_point((c as Node2D).position):
+			n += 1
+	return n
+
+
 # ── 门口公告 ─────────────────────────────────────────────────────────────
 ## 每间宿舍门口一块牌子（世界坐标锚定，跟着相机走）。
 ## 没被认领时显示淡色房号；被认领后显示「某某的房间」亮字。
@@ -3274,7 +3431,11 @@ func _build_door_plates() -> void:
 	if room == null or not is_instance_valid(room):
 		return
 	_ensure_floor_ui()
-	for item in room.get("data").get("room_doors", []):
+	# B1 没有会锁的宿舍门，牌子改挂在 4 块组队板上；ax/ay 是组队板专用锚点。
+	var is_b1 := current_floor == BASEMENT_FLOOR
+	var plate_src: Array = (room.get("data").get("team_boards", []) if is_b1
+		else room.get("data").get("room_doors", []))
+	for item in plate_src:
 		var d: Dictionary = item
 		var pc := PanelContainer.new()
 		var sb := StyleBoxFlat.new()
@@ -3296,9 +3457,12 @@ func _build_door_plates() -> void:
 		pc.z_index = -1
 		_door_plates_holder.add_child(pc)
 		_door_plates.append({
-			"index": int(d["index"]), "side": String(d["side"]),
+			"index": int(d["index"]), "side": String(d.get("side", "n")),
 			"x": float(d["x"]), "y": float(d["y"]),
 			"w": float(d["w"]), "h": float(d["h"]),
+			"ax": (float(d["x"]) + float(d["w"]) * 0.5) if is_b1 else -1.0,
+			"ay": (float(d["y"]) + float(d["h"]) * 0.5) if is_b1 else -1.0,
+			"team": is_b1,
 			"panel": pc, "label": lb,
 		})
 	_refresh_door_plates()
@@ -3337,11 +3501,11 @@ func _build_note_panel() -> PanelContainer:
 	_note_title.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
 	_note_title.add_theme_constant_override("outline_size", 4)
 	vb.add_child(_note_title)
-	var hint := Label.new()
-	hint.text = "写点自我介绍：叫什么、哪个学院、作息、想认识什么样的人…（最多 160 字）"
-	hint.add_theme_font_size_override("font_size", 12)
-	hint.add_theme_color_override("font_color", Color(0.62, 0.70, 0.80))
-	vb.add_child(hint)
+	_note_hint = Label.new()
+	_note_hint.text = "写点自我介绍：叫什么、哪个学院、作息、想认识什么样的人…（最多 160 字）"
+	_note_hint.add_theme_font_size_override("font_size", 12)
+	_note_hint.add_theme_color_override("font_color", Color(0.62, 0.70, 0.80))
+	vb.add_child(_note_hint)
 	_note_edit = TextEdit.new()
 	_note_edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
 	_note_edit.custom_minimum_size = Vector2(460, 150)
@@ -3369,14 +3533,14 @@ func _build_note_panel() -> PanelContainer:
 		hb.add_child(b)
 	# 退房（= 撕下名牌）。桌面上按 F 就行，但手机没有 F 键，必须给个能点的入口，
 	# 否则手机上认了房就再也退不掉。
-	var bye := Button.new()
-	bye.text = "退房"
-	bye.custom_minimum_size = Vector2(96, 46)
-	bye.focus_mode = Control.FOCUS_NONE
-	bye.add_theme_font_size_override("font_size", 16)
-	bye.add_theme_color_override("font_color", Color("#ff9a84"))
-	bye.pressed.connect(_leave_my_room)
-	hb.add_child(bye)
+	_note_bye_btn = Button.new()
+	_note_bye_btn.text = "退房"
+	_note_bye_btn.custom_minimum_size = Vector2(96, 46)
+	_note_bye_btn.focus_mode = Control.FOCUS_NONE
+	_note_bye_btn.add_theme_font_size_override("font_size", 16)
+	_note_bye_btn.add_theme_color_override("font_color", Color("#ff9a84"))
+	_note_bye_btn.pressed.connect(_leave_my_room)
+	hb.add_child(_note_bye_btn)
 	return pc
 
 
@@ -3388,11 +3552,16 @@ func _leave_my_room() -> void:
 	_close_note_board()
 	Net.claim_room(current_floor, idx, "")          # 空名字 = 撕下来
 	var key := "%d:%d" % [current_floor, idx]
+	var is_b1 := current_floor == BASEMENT_FLOOR
 	if Net.room_claims.has(key):
-		_notice("没能退掉 %d 层 %d 号房（服务器没接受请求）" % [current_floor, idx + 1])
+		_notice(("没能撤掉 %s 的队伍（服务器没接受请求）" % _team_board_name(idx)) if is_b1 else \
+			("没能退掉 %d 层 %d 号房（服务器没接受请求）" % [current_floor, idx + 1]))
 		return
 	_clear_my_room()
-	_notice("已撕下 %d 层 %d 号房的名牌，下次上线从校园出生" % [current_floor, idx + 1])
+	if is_b1:
+		_notice("已撤下 %s 的组队招募" % _team_board_name(idx))
+	else:
+		_notice("已撕下 %d 层 %d 号房的名牌，下次上线从校园出生" % [current_floor, idx + 1])
 
 
 func _update_note_count() -> void:
@@ -3448,21 +3617,43 @@ func _build_note_view() -> PanelContainer:
 
 ## 打开某间房的公告板：自己的可编辑，别人的只读，空房提示先认领。
 func _open_note_board(idx: int) -> void:
-	var cur: Dictionary = Net.room_claims.get("%d:%d" % [current_floor, idx], {})
+	var is_b1 := current_floor == BASEMENT_FLOOR
+	if _note_hint != null:
+		_note_hint.text = "想玩什么、几缺几、什么段位、开麦吗…（最多 160 字）" if is_b1 else \
+			"写点自我介绍：叫什么、哪个学院、作息、想认识什么样的人…（最多 160 字）"
+	if _note_bye_btn != null:
+		_note_bye_btn.text = "撤队" if is_b1 else "退房"
+	var label := _team_board_name(idx) if is_b1 else "%d 号房" % (idx + 1)
+	var key := "%d:%d" % [current_floor, idx]
+	var cur: Dictionary = Net.room_claims.get(key, {})
 	if cur.is_empty():
-		_notice("%d 号房还没人认领 · 先按 E 认领，再来写公告" % (idx + 1))
-		return
+		if not is_b1:
+			_notice("%d 号房还没人认领 · 先按 E 认领，再来写公告" % (idx + 1))
+			return
+		# B1 空板 = 直接开队。claim_room 客户端会先本地预写，所以马上能读到。
+		Net.claim_room(BASEMENT_FLOOR, idx, Net.local_name)
+		cur = Net.room_claims.get(key, {})
+		if cur.is_empty():
+			_notice("这块组队板刚被别人开了，稍等一下再看")
+			return
 	if String(cur.get("uid", "")) != Net.local_uid:
-		_note_view_title.text = "%d 号房 ·「%s」" % [idx + 1, String(cur.get("name", "?"))]
+		_note_view_title.text = ("%s ·「%s」的队伍" % [label, String(cur.get("name", "?"))]) if is_b1 else \
+			("%d 号房 ·「%s」" % [idx + 1, String(cur.get("name", "?"))])
 		var note := String(cur.get("note", ""))
-		_note_view_body.text = note if not note.is_empty() else "这间房的房主还没写公告。"
+		if is_b1:
+			var body := note if not note.is_empty() else "队长还没写招募内容。"
+			body += "\n\n已入座 %d / 6 人 · 进去找空位坐下就算加入" % _team_seated_count(idx)
+			_note_view_body.text = body
+		else:
+			_note_view_body.text = note if not note.is_empty() else "这间房的房主还没写公告。"
 		_note_view_body.add_theme_color_override("font_color",
 			Color("#e6effb") if not note.is_empty() else Color(0.60, 0.66, 0.74))
 		_note_view.visible = true
 		_center_panel.call_deferred(_note_view)
 		return
 	_note_room_idx = idx
-	_note_title.text = "编写 %d 号房的门口公告" % (idx + 1)
+	_note_title.text = ("发布 %s 组队招募" % label) if is_b1 else \
+		("编写 %d 号房的门口公告" % (idx + 1))
 	_note_edit.text = String(cur.get("note", ""))
 	_update_note_count()
 	_note_panel.visible = true
@@ -3519,7 +3710,10 @@ func _save_note_board() -> void:
 	# 同步落本地存档：服务端只把认领/公告存在内存里，重启就没了，
 	# 而旧版服务端连请求都收不到 —— 不存本地就是「退出之后公告没保存」。
 	_save_my_room(current_floor, idx, txt.strip_edges().left(160))
-	_notice("门口公告已擦掉" if txt.strip_edges().is_empty() else "门口公告已更新")
+	if current_floor == BASEMENT_FLOOR:
+		_notice("组队招募已撤下" if txt.strip_edges().is_empty() else "组队招募已发布 · B1 的同学都能看到")
+	else:
+		_notice("门口公告已擦掉" if txt.strip_edges().is_empty() else "门口公告已更新")
 
 
 func _clear_note_board() -> void:
@@ -3553,9 +3747,48 @@ func _close_note_all() -> void:
 	_close_note_view()
 
 
+## B1：把 4 块组队板刷成「谁开的队 / 已入座几人」。
+## 空板按 E 开队，队长的板是金色，别人的队是青色；人数来自此刻坐在房里的玩家。
+func _refresh_team_plates() -> void:
+	for item in _door_plates:
+		if not bool(item.get("team", false)):
+			continue
+		var pc: PanelContainer = item["panel"]
+		var lb: Label = item["label"]
+		if not is_instance_valid(pc) or not is_instance_valid(lb):
+			continue
+		var idx: int = int(item["index"])
+		var label := _team_board_name(idx)
+		var cur: Dictionary = Net.room_claims.get("%d:%d" % [BASEMENT_FLOOR, idx], {})
+		var sb := pc.get_theme_stylebox("panel") as StyleBoxFlat
+		var seated := _team_seated_count(idx)
+		# 文案压短：牌子是屏幕空间 Label，写长了会和隔壁板子的牌子横向叠住
+		if cur.is_empty():
+			lb.text = "%s · 空 · E 开队" % label
+			lb.add_theme_color_override("font_color", Color(0.74, 0.80, 0.88, 0.85))
+			pc.modulate = Color(0.72, 0.74, 0.78, 0.90)
+			if sb != null:
+				sb.border_color = Color(0.55, 0.62, 0.72, 0.85)
+		elif String(cur.get("uid", "")) == Net.local_uid:
+			lb.text = "%s · 我的队 %d/6" % [label, seated]
+			lb.add_theme_color_override("font_color", Color("#ffe9a8"))
+			pc.modulate = Color(1, 1, 1, 1)
+			if sb != null:
+				sb.border_color = Color(0.95, 0.78, 0.38, 0.95)
+		else:
+			lb.text = "%s · %s %d/6" % [label, String(cur.get("name", "?")), seated]
+			lb.add_theme_color_override("font_color", Color("#9ff0d0"))
+			pc.modulate = Color(1, 1, 1, 1)
+			if sb != null:
+				sb.border_color = Color(0.42, 0.90, 0.72, 0.95)
+
+
 ## 按 current_floor 重算每块牌子的文字。认领是「楼层:房号」为键的，换层自然切换。
 ## 被认领的牌子亮边暖字，还带房主写的公告一行；空房是淡灰的小号牌。
 func _refresh_door_plates() -> void:
+	if current_floor == BASEMENT_FLOOR:
+		_refresh_team_plates()
+		return
 	_remember_my_home()
 	for item in _door_plates:
 		var pc: PanelContainer = item["panel"]
@@ -3615,10 +3848,13 @@ func _place_door_plates() -> void:
 		var pc: PanelContainer = item["panel"]
 		if not is_instance_valid(pc):
 			continue
-		var side: String = String(item["side"])
-		var ax: float = float(item["x"]) + float(item["w"]) * 0.5
-		# 北排的门开在南墙（走廊在下）→ 牌子往下挂；南排反过来往上挂
-		var ay: float = float(item["y"]) + (float(item["h"]) + PLATE_OFF if side == "n" else -PLATE_OFF)
+		# 组队板自带 ax/ay 锚点；宿舍门牌仍按 side 把牌子挂到门洞下方/上方。
+		var ax: float = float(item.get("ax", -1.0))
+		var ay: float = float(item.get("ay", -1.0))
+		if ax < 0.0:
+			var side: String = String(item["side"])
+			ax = float(item["x"]) + float(item["w"]) * 0.5
+			ay = float(item["y"]) + (float(item["h"]) + PLATE_OFF if side == "n" else -PLATE_OFF)
 		var world: Vector2 = room.to_global(Vector2(ax * TS, ay * TS))
 		var sp: Vector2 = ct * world
 		var sz: Vector2 = pc.get_combined_minimum_size()
