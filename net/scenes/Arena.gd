@@ -2010,7 +2010,10 @@ var _seats_room: Array = []
 var _near_seat: Dictionary = {}
 
 # ── 猫咪互动 ────────────────────────────────────────────────────────────────
-const CAT_PET_R := 26.0        # 能摸到猫的距离（校园局部像素）
+const CAT_PET_R := 26.0        # 按 E 摸猫的距离（校园局部像素）
+## 鼠标点的判定框，猫节点局部坐标（贴图是 33×32，脚底在原点，头顶约 -27）。
+## 比贴图宽一圈、高一点：猫只有十几像素，按像素边界点太难受。
+const CAT_HIT := Rect2(-19.0, -32.0, 38.0, 40.0)
 const ADOPT_PATH := "user://adopted_cats.json"
 const ADOPT_MAX := 2           # 宿舍猫窝最多养几只
 const ADOPT_PETS := 3          # 摸满几次可以领养（与 Cat.gd 的 can_adopt() 一致）
@@ -2018,6 +2021,7 @@ var _wildlife_ground: Node2D = null   # campus/Objects/WildlifeGround，猫都�
 var _cat_nav: NavGrid = null          # 撒锚点 + 给猫做漫游碰撞判定
 var _cat_msg := ""             # 摸猫后短暂占住提示条的反馈文字
 var _cat_msg_t := 0.0
+var _cat_click_ms := 0         # 上次「点中猫」的时刻，用来给鼠标/触摸的双份事件去重
 var _adopted: Array = []       # [{name, skin, pets}]，服务端权威 + 本机缓存，不进联机协议
 var _adopt_loaded := false
 var _pet_migrated := false     # 老玩家本地存档已经往服务端推过一次
@@ -2096,7 +2100,13 @@ var _vk_last: float = 0.0
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if Net.is_dedicated or not (event is InputEventKey):
+	if Net.is_dedicated:
+		return
+	# 鼠标 / 手指点猫：点中就算「摸」，不用先走到跟前再按 E
+	if _click_cat_at_screen(event):
+		get_viewport().set_input_as_handled()
+		return
+	if not (event is InputEventKey):
 		return
 	var k := event as InputEventKey
 	if not k.pressed or k.echo:
@@ -2123,6 +2133,90 @@ func _unhandled_input(event: InputEvent) -> void:
 	if k.keycode == KEY_ESCAPE and _floor_open:
 		_close_floor_panel()
 		get_viewport().set_input_as_handled()
+
+
+## 点猫：点在猫身上才算，点在别处一个事件都不吃（聊天框、面板、摇杆都得照常收到）。
+## 返回 true 表示这一下已经被猫用掉了。
+func _click_cat_at_screen(event: InputEvent) -> bool:
+	var screen := Vector2.ZERO
+	if event is InputEventMouseButton:
+		var mb := event as InputEventMouseButton
+		if mb.button_index != MOUSE_BUTTON_LEFT or not mb.pressed:
+			return false
+		screen = mb.position
+	elif event is InputEventScreenTouch:
+		var st := event as InputEventScreenTouch
+		if not st.pressed:
+			return false
+		screen = st.position
+	else:
+		return false
+	# 触屏模式下鼠标会被模拟成触摸，同一次点击可能进来两遍（鼠标版 + 触摸版）。
+	# 不能按 is_emulating_touch_from_mouse() 区分 —— 手机上那个开关也是开的，
+	# 真手指反而会被一起过滤掉；所以用时间窗去重：120ms 内只认第一下。
+	var now := Time.get_ticks_msec()
+	if now - _cat_click_ms < 120:
+		return false
+	# 面板开着时点地图是在关面板 / 继续操作，别顺手摸到背后的猫
+	if _adopt_open() or _note_open() or _floor_open:
+		return false
+	var cat := _cat_at_screen(screen)
+	if cat == null:
+		return false
+	_cat_click_ms = now
+	_interact_with_cat(cat)
+	return true
+
+
+## 屏幕坐标 → 转进每只猫自己的局部坐标判框（自动带上相机、campus 的 2 倍缩放、猫的翻转）。
+## 命中多只时取离点击处最近的那只，重叠也不会摸错。
+func _cat_at_screen(screen: Vector2) -> Node2D:
+	var best: Node2D = null
+	var best_d := INF
+	for c in _cats_now():
+		if not is_instance_valid(c):
+			continue
+		var lp: Vector2 = (c as Node2D).get_global_transform_with_canvas().affine_inverse() * screen
+		if not CAT_HIT.has_point(lp):
+			continue
+		var d := lp.length()
+		if d < best_d:
+			best_d = d
+			best = c
+	return best
+
+
+## 当前场景里能点的猫：房间里只有自己的猫，校园里是野猫 + 牵着的那只。
+func _cats_now() -> Array:
+	var out: Array = []
+	if in_room:
+		if room != null and is_instance_valid(room):
+			var host: Node2D = room.call("anchor") as Node2D
+			if host != null:
+				for c in host.get_children():
+					if c is Node2D and String(c.name).begins_with("RoomCat_"):
+						out.append(c)
+		return out
+	if _leash_cat != null and is_instance_valid(_leash_cat):
+		out.append(_leash_cat)
+	if _wildlife_ground != null and is_instance_valid(_wildlife_ground):
+		for c in _wildlife_ground.get_children():
+			if c is Node2D and String(c.name).begins_with("Cat"):
+				out.append(c)
+	return out
+
+
+## 摸一只猫（点中、或按 E）：校园里摸熟了就领养，房间里只加亲密。
+func _interact_with_cat(cat: Node2D) -> void:
+	if in_room:
+		_pet_room_cat(cat)
+		return
+	# 牵着的那只不走领养流程，它已经有名字了
+	if cat != _leash_cat and bool(cat.call("can_adopt")) \
+			and _ensure_adopted().size() < ADOPT_MAX:
+		_open_adopt_panel(cat)
+		return
+	_pet_cat(cat)
 
 
 ## E 键只有一个入口，按「最近、最明确」的顺序依次试。
@@ -2159,7 +2253,7 @@ func _try_interact() -> bool:
 	if in_room and _near_elevator((me as Node2D).position):
 		_open_floor_panel()
 		return true
-	# 自己房间里的猫：E 摸它（F 牵出门遛，走 _try_leash_cat）
+	# 自己房间里的猫：E 摸它（点它也行；F 牵出门遛，走 _try_leash_cat）
 	if in_room:
 		var room_cat := _nearest_room_cat((me as Node2D).position)
 		if room_cat != null:
@@ -2204,10 +2298,7 @@ func _try_interact() -> bool:
 	if not in_room:
 		var cat := _nearest_cat((me as Node2D).position)
 		if cat != null:
-			if bool(cat.call("can_adopt")) and _ensure_adopted().size() < ADOPT_MAX:
-				_open_adopt_panel(cat)
-			else:
-				_pet_cat(cat)
+			_interact_with_cat(cat)
 			return true
 	return false
 
@@ -2234,7 +2325,7 @@ func _nearest_cat(pos: Vector2) -> Node2D:
 	return best
 
 
-## 摸猫：猫自己停下、转身、坐下、冒爱心；反馈借现成的提示条亮 1.8 秒
+## 摸猫（点猫或按 E）：猫自己停下、转身、坐下、冒爱心；反馈借现成的提示条亮 1.8 秒
 func _pet_cat(cat: Node2D) -> void:
 	var me: Node2D = _local_avatar() as Node2D
 	var reply: String = str(cat.call("pet", me))
@@ -2346,9 +2437,16 @@ func _on_pets_changed() -> void:
 		Net.pet_push(_adopted)
 		return
 	_pet_migrated = false
-	_adopted = Net.my_pets.duplicate(true)
+	var incoming: Array = Net.my_pets.duplicate(true)
+	# 只看「名字 / 花色 / 牵绳」这套外形，**不看亲密度**：
+	# 摸一下猫、切换牵绳都会把宠物表回环同步一次，每次都重建的话
+	# 房里的猫会被销毁重造，动画和站位都会跳一下。
+	var same := _cat_shape(incoming) == _cat_shape(_adopted)
+	_adopted = incoming
 	_adopt_loaded = true
 	_write_adopted_file()
+	if same:
+		return
 	_restore_leash()
 	if in_room:
 		_setup_room_cats()
@@ -2356,6 +2454,17 @@ func _on_pets_changed() -> void:
 		_spawn_leash_cat()
 	else:
 		_despawn_leash_cat()
+
+
+## 领养表的「外形签名」：名字 + 花色 + 有没有牵着。亲密度故意不算在里面。
+func _cat_shape(list: Array) -> String:
+	var parts := PackedStringArray()
+	for it in list:
+		if it is Dictionary:
+			var d: Dictionary = it
+			parts.append("%s|%d|%d" % [str(d.get("name", "")), int(d.get("skin", 0)),
+				1 if bool(d.get("walk", false)) else 0])
+	return "\n".join(parts)
 
 
 ## 宠物面板（scripts/ui/pet_panel.gd）只认这个结构，别让它直接摸 _adopted 内部。
@@ -2558,16 +2667,12 @@ func _setup_room_cats() -> void:
 			roam.position.y = maxf(roam.position.y, 18.6 * TS)
 			roam.end.y = minf(roam.end.y, 27.2 * TS)
 		var owner_avatar: Node2D = _local_avatar() as Node2D
-		# 自己的窝：摆上领养的猫，加名牌
-		var name_text := ""
+		# 自己的窝：摆上领养的猫，名字挂在各自头顶（以前是钉在窝上的一行字）
 		for i in cats.size():
 			if not (cats[i] is Dictionary):
 				continue
 			var cd: Dictionary = cats[i]
 			var nm := str(cd.get("name", "猫"))
-			if name_text != "":
-				name_text += "、"
-			name_text += nm
 			var c := Node2D.new()
 			c.name = "RoomCat_%d" % i
 			c.set_script(cat_script)
@@ -2581,6 +2686,11 @@ func _setup_room_cats() -> void:
 			c.set("roam_rect", roam)
 			c.set("companion", owner_avatar)   # 闲着会自己走过来蹭腿
 			c.position = cat_at
+			# 名字跟着猫头顶走：setup 之后再挂，补偿缩放要用到花色大小。
+			# _skin_name 也要改成你起的名字 —— 提示条 / 摸猫反馈都从它取，
+			# 不然摸一下弹出来的是「蓝猫」这种花色名。
+			c.set("_skin_name", nm)
+			c.call("set_display_name", nm)
 			# 猫的脚底 y 比窝小，纯 y-sort 会被垫子盖住；抬一级让它蹲在垫子上
 			c.z_index = 1
 			# 每只猫的初始状态错开，一进门不会像复制粘贴的标本
@@ -2595,25 +2705,10 @@ func _setup_room_cats() -> void:
 			else:
 				c.call("_play", "stand", true)
 				c.set("wait", 0.8 + float(i) * 0.6)
-		if name_text != "":
-			var lb := Label.new()
-			lb.name = "CatName_%d" % idx
-			lb.text = name_text
-			# 名牌做得小而克制：贴着窝上方一行，字号/缩放都收一半，
-			# 免得名字比猫还显眼（之前 14px×0.5 在 2.1 倍房间视距下又粗又大）
-			lb.position = at + Vector2(-30.0, -21.0)
-			lb.scale = Vector2(0.4, 0.4)
-			lb.add_theme_font_size_override("font_size", 11)
-			lb.add_theme_color_override("font_color", Color("f1e6d2cc"))
-			lb.add_theme_color_override("font_outline_color", Color("1a1410a6"))
-			lb.add_theme_constant_override("outline_size", 3)
-			lb.add_theme_color_override("font_shadow_color", Color("1a1410a6"))
-			lb.z_index = 60
-			host.add_child(lb)
 
 
 # ── 带猫出门遛 ───────────────────────────────────────────────────────────
-## 自己房间里的猫：E 是摸它，F 是牵绳。牵着出门 → 校园里会一直跟在脚边；
+## 自己房间里的猫：点它（或按 E）是摸，F 是牵绳。牵着出门 → 校园里会一直跟在脚边；
 ## 走进宿舍/电梯它就跟你回家，出门又跟出来。状态存在领养存档的 "walk" 字段里。
 var _leash_idx := -1            # 牵着的猫在 _adopted 里的下标（-1 = 没牵）
 var _leash_cat: Node2D = null   # 校园里跟着你的那只（房间里不生成）
@@ -2730,6 +2825,8 @@ func _spawn_leash_cat() -> void:
 	cat.call("setup", at, skins[int(cd.get("skin", 0)) % skins.size()], 7777, _cat_nav)
 	# 提示条上要显示你给它起的名字，而不是花色名
 	cat.set("_skin_name", str(cd.get("name", "猫咪")))
+	# 头顶也挂上同一个名字，遛弯时一眼认得出是哪只
+	cat.call("set_display_name", str(cd.get("name", "猫咪")))
 	cat.call("start_follow", me)
 	_leash_cat = cat
 
@@ -3476,9 +3573,9 @@ func _update_interact_hint(delta: float) -> void:
 			_restore_leash()
 			var rc_name := str(room_cat.call("cat_name"))
 			if _leash_idx >= 0 and _leash_idx == _room_cat_index(room_cat):
-				_door_hint.text = "「%s」跟着你 · 按 E 摸摸 · F 放回窝里" % rc_name
+				_door_hint.text = "「%s」跟着你 · 点它摸摸 · F 放回窝里" % rc_name
 			else:
-				_door_hint.text = "按 E 摸摸「%s」· 按 F 牵出门遛" % rc_name
+				_door_hint.text = "点「%s」摸摸 · 按 F 牵出门遛" % rc_name
 			return
 
 	# 房间里：只有站到门口才提示离开（房间中间按 E 不做任何事，
@@ -3557,7 +3654,7 @@ func _update_interact_hint(delta: float) -> void:
 		_door_hint.visible = true
 		_door_hint.text = "%s · 按 E 进入「宿舍空间」" % hit
 		return
-	# 摸猫反馈短暂占住提示条，之后回到「按 E 摸猫」
+	# 摸猫反馈短暂占住提示条，之后回到「点它摸摸」
 	if _cat_msg_t > 0.0:
 		_door_hint.visible = true
 		_door_hint.text = _cat_msg
@@ -3568,15 +3665,15 @@ func _update_interact_hint(delta: float) -> void:
 		var nm := str(cat.call("cat_name"))
 		if cat == _leash_cat:
 			# 牵着溜达的那只：名字是你起的，别再走领养流程
-			_door_hint.text = "「%s」跟着你 · 按 E 摸摸 · 回宿舍就收工" % nm
+			_door_hint.text = "「%s」跟着你 · 点它摸摸 · 回宿舍就收工" % nm
 			return
 		var left := ADOPT_PETS - int(cat.get("pet_count"))
 		if _ensure_adopted().size() >= ADOPT_MAX:
-			_door_hint.text = "按 E 摸摸「%s」· 猫窝已满" % nm
+			_door_hint.text = "点「%s」摸摸 · 猫窝已满" % nm
 		elif left <= 0:
-			_door_hint.text = "按 E 领养「%s」回宿舍" % nm
+			_door_hint.text = "点「%s」领养回宿舍" % nm
 		else:
-			_door_hint.text = "按 E 摸摸「%s」· 再摸 %d 次可领养" % [nm, left]
+			_door_hint.text = "点「%s」摸摸 · 再点 %d 次可领养" % [nm, left]
 		return
 	_door_hint.visible = false
 

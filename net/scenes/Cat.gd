@@ -132,6 +132,14 @@ var companion: Node2D = null
 var follow_forever := false
 var _rub_cd := 6.0           # 下一次「去蹭主人」的冷却
 
+## 头顶名牌（只有被领养的猫才有名字；校园里那 100 只野猫不挂）。
+## 标签是 Cat 的子节点，所以猫走、猫转身它都跟着，不用 Arena 每帧去摆。
+const TAG_FONT := 11
+const TAG_SCALE := 0.42      # 名牌在**父空间**里的缩放：字约 4.6px，猫约 20px 高
+const TAG_Y := -34.0         # 标签原点在猫局部坐标的 y（猫头顶约 -27，帧顶还留了几像素空白）
+var _tag: Label = null
+var _tag_face := 1.0
+
 
 ## 素材可能没随仓库分发（见 assets/cats/ 的授权说明），缺了就别生成猫，别让游戏崩。
 static func available() -> bool:
@@ -169,6 +177,46 @@ func is_following() -> bool:
 
 func cat_name() -> String:
 	return _skin_name
+
+
+## 挂一个跟头顶走的名牌（传空串 = 摘掉）。必须在 setup() 之后调：
+## 补偿缩放要用 _size_k，花色大小不同，字不能跟着一起变大变小。
+func set_display_name(t: String) -> void:
+	var txt := t.strip_edges()
+	if txt.is_empty():
+		if _tag != null and is_instance_valid(_tag):
+			_tag.queue_free()
+		_tag = null
+		return
+	if _tag == null or not is_instance_valid(_tag):
+		_tag = Label.new()
+		_tag.name = "NameTag"
+		_tag.mouse_filter = Control.MOUSE_FILTER_IGNORE   # 名字不能挡住点猫
+		_tag.add_theme_font_size_override("font_size", TAG_FONT)
+		_tag.add_theme_color_override("font_color", Color("f1e6d2cc"))
+		_tag.add_theme_color_override("font_outline_color", Color("1a1410a6"))
+		_tag.add_theme_constant_override("outline_size", 3)
+		_tag.add_theme_color_override("font_shadow_color", Color("1a1410a6"))
+		add_child(_tag)
+	_tag.text = txt
+	_sync_tag()
+	# 刚建的标签首帧字体度量可能还没算完，等布局定下来再对一次中
+	_sync_tag.call_deferred()
+
+
+## 名字的位置 / 镜像补偿。
+## 猫节点自身的 scale.x 带 face 的正负号（朝左时整只翻过来），标签直接挂上去会跟着
+## 左右镜像。做法是给标签一个逆缩放：父缩放 s·f × 标签缩放 k/(s·f) = k，
+## 名字永远正着写、也永远和猫一样大。朝左时 position.x 也得跟着反号才是居中。
+func _sync_tag() -> void:
+	if _tag == null or not is_instance_valid(_tag):
+		return
+	var s := maxf(0.01, BASE_SCALE * _size_k)
+	var f := 1.0 if face >= 0.0 else -1.0
+	_tag_face = f
+	_tag.scale = Vector2(TAG_SCALE / (s * f), TAG_SCALE / s)
+	var w: float = _tag.get_minimum_size().x
+	_tag.position = Vector2(-w * TAG_SCALE * 0.5 * f / s, TAG_Y)
 
 
 ## 摸满 3 次就能领养（Arena 的提示条和 E 键共用这个判定）
@@ -296,6 +344,9 @@ func _process(delta: float) -> void:
 	position = pos
 	# 原图猫朝右；朝左时整个节点（连同 sprite）镜像
 	scale = Vector2(BASE_SCALE * _size_k * face, BASE_SCALE * _size_k)
+	# 转身了就把名牌的镜像补偿和居中偏移一起重算（平时只有挂着名牌的猫走这条路）
+	if _tag != null and is_instance_valid(_tag) and face != _tag_face:
+		_sync_tag()
 	if _bubble_t > 0.0:
 		queue_redraw()   # 影子是静态的，只有爱心动画需要逐帧重绘
 
