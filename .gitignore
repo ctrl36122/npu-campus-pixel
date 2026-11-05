@@ -65,3 +65,11 @@ before_after.png.import
 cmp_*.png.import
 road_mask_full.png.import
 road_before_after.png.import
+
+# ── 第三方像素猫素材（Aichan_owo「Oreo Cat」）─────────────
+# 授权允许用于个人/商业项目，但明确禁止以任何形式再分发素材本身，
+# 也禁止修改原文件。所以原图只留本机、不进仓库；clone 后缺素材时
+# Wildlife 会自动跳过猫（见 net/scenes/Cat.gd 的 available()）。
+# 运行时换色走 cat_tint.gdshader，不改动 PNG 一个字节。
+assets/cats/oreo_cat_sheet.png
+assets/cats/oreo_cat_sheet.png.import

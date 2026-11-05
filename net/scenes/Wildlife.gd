@@ -1,7 +1,9 @@
 extends Node2D
-## 校园小动物 v2（全部程序绘制，零素材）。
-##  mode="ground"：小猫 —— 每只是独立的 Cat.gd 节点，参与 y 排序（会被楼挡住）
+## 校园小动物。
+##  mode="ground"：小猫 —— 每只是独立的 Cat.gd 节点，直接播 Oreo Cat 原图帧
+##                （见 references/.../Oreo Cat - Aichan_owo/）；参与 y 排序
 ##  mode="air"   ：飞鸟 —— 掠过校园上空（两帧扇翅 + 地面影子），蝴蝶在锚点附近飘舞
+## 鸟/蝴蝶/影子仍是程序绘制。
 ## 坐标是校园局部像素（campus scale=2 后翻倍显示）。
 
 const CatScript := preload("res://net/scenes/Cat.gd")
@@ -16,12 +18,7 @@ const TS := 8.0   # 格→像素（锚点转换用，与 Arena 里一致）
 const BUTTERFLY_COLORS := [
 	Color("e8b34b"), Color("d97fa8"), Color("8fd0ff"),
 ]
-const CAT_COLORS := [
-	Color("d9822b"),   # 橘猫
-	Color("9a9a9a"),   # 灰猫
-	Color("e8e3da"),   # 白猫
-	Color("4a3826"),   # 深棕
-]
+## 猫的花色表在 Cat.gd 的 SKINS 里（同一张原图，运行时 shader 换色，一只一个不重样）
 const DOG_COLORS := [
 	Color("6b4a2b"),   # 棕
 	Color("3a3a3a"),   # 黑
@@ -61,10 +58,9 @@ func setup(anchors: Array, water_rects: Array = []) -> void:
 		y_sort_enabled = true
 		var idx := 0
 		var seed := 1000
-		# 猫 6 只（原样保留）
-		for i in 6:
-			_spawn_animal(CatScript, _anchors, CAT_COLORS, idx, seed)
-			idx += 1; seed += 77
+		# 猫：SKINS 里一条一只（花色/体型/性格都不同，见 Cat.gd 的 SKINS）
+		_spawn_cats()
+		idx += CatScript.SKINS.size(); seed += 77
 		# 狗 4 只
 		for i in 4:
 			_spawn_animal(DogScript, _anchors, DOG_COLORS, idx, seed)
@@ -102,6 +98,26 @@ func _spawn_animal(script: Script, anchors: Array, colors: Array, idx: int, seed
 	a.set_script(script)
 	add_child(a)
 	a.call("setup", anchors[idx % anchors.size()], colors[idx % colors.size()], seed)
+
+
+## 猫：花色表里一条一只，绕着活动锚点撒开（同一锚点的两只按 180° 错开，别叠一起）
+func _spawn_cats() -> void:
+	var skins: Array = CatScript.SKINS
+	if _anchors.is_empty():
+		return
+	# 第三方素材可能没随仓库分发，缺了就跳过猫，别让整个场景报错
+	if not ResourceLoader.exists("res://assets/cats/oreo_cat_sheet.png"):
+		push_warning("[Wildlife] 缺 assets/cats/oreo_cat_sheet.png，跳过猫咪")
+		return
+	for i in skins.size():
+		var cat := Node2D.new()
+		cat.set_script(CatScript)
+		cat.name = "Cat%d" % i
+		add_child(cat)
+		var base: Vector2 = _anchors[i % _anchors.size()]
+		var ang := TAU * float(i) / float(skins.size())
+		var spot := base + Vector2(cos(ang), sin(ang) * 0.55) * 46.0
+		cat.call("setup", spot, skins[i], 2000 + i * 137)
 
 
 ## 从 water 矩形（格坐标）取四边贴边点作为鸭子活动锚点（×TS 转像素），最多 8 只
