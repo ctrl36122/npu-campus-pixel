@@ -3762,9 +3762,10 @@ func _refresh_team_plates() -> void:
 		var cur: Dictionary = Net.room_claims.get("%d:%d" % [BASEMENT_FLOOR, idx], {})
 		var sb := pc.get_theme_stylebox("panel") as StyleBoxFlat
 		var seated := _team_seated_count(idx)
-		# 文案压短：牌子是屏幕空间 Label，写长了会和隔壁板子的牌子横向叠住
+		# 文案压短：牌子是屏幕空间 Label（13px≈每字 13px，一块牌子只有 ~120px 宽），
+		# 写长了会和隔壁板子的牌子横向叠住，字被后画的那块盖掉。
 		if cur.is_empty():
-			lb.text = "%s · 空 · E 开队" % label
+			lb.text = "%s · 空队" % label
 			lb.add_theme_color_override("font_color", Color(0.74, 0.80, 0.88, 0.85))
 			pc.modulate = Color(0.72, 0.74, 0.78, 0.90)
 			if sb != null:
@@ -3776,7 +3777,11 @@ func _refresh_team_plates() -> void:
 			if sb != null:
 				sb.border_color = Color(0.95, 0.78, 0.38, 0.95)
 		else:
-			lb.text = "%s · %s %d/6" % [label, String(cur.get("name", "?")), seated]
+			# 名字最多 5 字，超长的 ID 会把牌子撑爆
+			var who := String(cur.get("name", "?"))
+			if who.length() > 5:
+				who = who.left(4) + "…"
+			lb.text = "%s · %s %d/6" % [label, who, seated]
 			lb.add_theme_color_override("font_color", Color("#9ff0d0"))
 			pc.modulate = Color(1, 1, 1, 1)
 			if sb != null:
