@@ -12,9 +12,8 @@ const DuckScript := preload("res://net/scenes/Duck.gd")
 const BunnyScript := preload("res://net/scenes/Bunny.gd")
 
 const TS := 8.0   # 格→像素（锚点转换用，与 Arena 里一致）
-## 校园里的猫总数。锚点由 Arena._cat_anchors() 在全图可走空地上撒；
-## 猫比锚点略多，个别点位会有两三只凑在一起。
-const CAT_COUNT := 48
+## 校园里的猫总数。锚点由 Arena._cat_anchors() 全图随机撒在可走空地上。
+const CAT_COUNT := 100
 
 @export var mode: String = "ground"
 
@@ -64,7 +63,7 @@ func setup(anchors: Array, water_rects: Array = [], nav_data: NavGrid = null) ->
 		y_sort_enabled = true
 		var idx := 0
 		var seed := 1000
-		# 猫：48 只按 12 种花色循环，撒在全图锚点上
+		# 猫：100 只按 24 种花色循环，撒在全图随机锚点上
 		_spawn_cats()
 		idx += CAT_COUNT; seed += 77
 		# 狗 4 只
@@ -106,7 +105,7 @@ func _spawn_animal(script: Script, anchors: Array, colors: Array, idx: int, seed
 	a.call("setup", anchors[idx % anchors.size()], colors[idx % colors.size()], seed)
 
 
-## 猫：48 只按 12 花色循环，撒在全图锚点上；同锚点时按角度错开，别叠一起。
+## 猫：100 只按 24 花色循环，撒在全图随机锚点上；同锚点时按角度错开，别叠一起。
 ## 名字一律 "Cat%d"，Arena._nearest_cat() 靠这个前缀找最近的猫。
 func _spawn_cats() -> void:
 	var skins: Array = CatScript.SKINS
@@ -124,6 +123,10 @@ func _spawn_cats() -> void:
 		var base: Vector2 = _anchors[i % _anchors.size()]
 		var ang := TAU * float(i) / float(CAT_COUNT)
 		var spot := base + Vector2(cos(ang), sin(ang) * 0.55) * _rng.randf_range(20.0, 48.0)
+		# 错开用的偏移可能把猫丢进楼影/水面；home 一旦不可走，后续兜底也拉不回来
+		if _nav != null and not _nav.is_walkable(
+				Vector2i(int(floor(spot.x / 8.0)), int(floor(spot.y / 8.0)))):
+			spot = base
 		cat.call("setup", spot, skins[i % skins.size()], 2000 + i * 137, _nav)
 
 

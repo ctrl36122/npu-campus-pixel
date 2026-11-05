@@ -262,43 +262,59 @@ func _setup_wildlife() -> void:
 	air.call("setup", anchors)
 
 
-## 猫的活动锚点：NPC 活跃点固定打头，再按规则网格在全图挑「开阔可走空地」。
-## 用 NavGrid 排除水面、建筑 footprint 和楼影（楼影里的猫会被楼整个盖住）。
-## 点位只有 30 个、猫有 48 只，前面的点位自然会有两三只凑一起。
+## 猫的活动锚点：NPC 活跃点打头，再按 10×10 分区在全图随机撒可走点。
+## 每个点要求 3×3 邻域都可走（避开水面、建筑 footprint 和楼影）。
+## 默认每局随机；调试时用 XGD_CAT_SEED 固定种子便于复现。
 func _cat_anchors() -> Array:
 	_cat_nav = _build_nav_grid()
 	var rng := RandomNumberGenerator.new()
-	rng.seed = 20261105
-	# NPC 点固定在最前面、不参与洗牌：玩家常路过的地方一定要能看到猫
+	if OS.has_environment("XGD_CAT_SEED"):
+		rng.seed = int(OS.get_environment("XGD_CAT_SEED"))
+	else:
+		rng.randomize()
 	var out: Array = []
 	for info in NPC_SPAWNS:
-		var c: Vector2 = info["cell"] as Vector2
-		if _cat_nav == null or _cat_nav.is_walkable(Vector2i(int(c.x), int(c.y))):
-			out.append(c * TS)
-	var grid_pts: Array = []
-	if _cat_nav != null:
-		for gy in range(48, 641, 54):
-			for gx in range(72, 401, 54):
-				var cx: int = gx + rng.randi_range(-10, 10)
-				var cy: int = gy + rng.randi_range(-10, 10)
-				var open := true
-				# 3×3 邻域都要可走，别让猫贴着墙根或水边生成
-				for dy in range(-1, 2):
-					for dx in range(-1, 2):
-						if not _cat_nav.is_walkable(Vector2i(cx + dx, cy + dy)):
-							open = false
-				if open:
-					grid_pts.append(Vector2(float(cx), float(cy)) * TS)
-	# 固定种子洗牌 + 截断：分布可复现，且不会全挤在地图某一角
-	for i in range(grid_pts.size() - 1, 0, -1):
-		var j := rng.randi_range(0, i)
-		var tmp: Vector2 = grid_pts[i]
-		grid_pts[i] = grid_pts[j]
-		grid_pts[j] = tmp
-	if grid_pts.size() > 24:
-		grid_pts = grid_pts.slice(0, 24)
-	out.append_array(grid_pts)
+		var cell: Vector2 = info["cell"] as Vector2
+		# NPC 活跃点同样要查可走：有的点贴着楼影，直接拿来当猫窝会卡住
+		if _cat_nav != null and not _cat_spot_open(int(cell.x), int(cell.y)):
+			continue
+		out.append(cell * TS)
+	if _cat_nav == null:
+		return out
+	# 分区采样：既随机又铺满整张地图，不会全挤在一角
+	var cols := 10
+	var rows := 10
+	for ry in range(rows):
+		for rx in range(cols):
+			var x0 := 40.0 + 370.0 * float(rx) / float(cols)
+			var x1 := 40.0 + 370.0 * float(rx + 1) / float(cols)
+			var y0 := 30.0 + 600.0 * float(ry) / float(rows)
+			var y1 := 30.0 + 600.0 * float(ry + 1) / float(rows)
+			for t in 16:
+				var cx := rng.randi_range(int(x0), maxi(int(x0), int(x1)))
+				var cy := rng.randi_range(int(y0), maxi(int(y0), int(y1)))
+				if _cat_spot_open(cx, cy):
+					out.append(Vector2(float(cx), float(cy)) * TS)
+					break
+	# 个别分区全是障碍时，纯随机补足到 100 个点位
+	var tries := 0
+	while out.size() < 100 and tries < 4000:
+		tries += 1
+		var cx := rng.randi_range(40, 410)
+		var cy := rng.randi_range(30, 630)
+		if _cat_spot_open(cx, cy):
+			out.append(Vector2(float(cx), float(cy)) * TS)
 	return out
+
+
+func _cat_spot_open(cx: int, cy: int) -> bool:
+	if _cat_nav == null:
+		return false
+	for dy in range(-1, 2):
+		for dx in range(-1, 2):
+			if not _cat_nav.is_walkable(Vector2i(cx + dx, cy + dy)):
+				return false
+	return true
 
 
 func _water_rects() -> Array:
@@ -1990,10 +2006,19 @@ var _near_seat: Dictionary = {}
 
 # ── 猫咪互动 ────────────────────────────────────────────────────────────────
 const CAT_PET_R := 26.0        # 能摸到猫的距离（校园局部像素）
+const ADOPT_PATH := "user://adopted_cats.json"
+const ADOPT_MAX := 4           # 猫窝最多养几只
+const ADOPT_PETS := 3          # 摸满几次可以领养（与 Cat.gd 的 can_adopt() 一致）
 var _wildlife_ground: Node2D = null   # campus/Objects/WildlifeGround，猫都在它下面
 var _cat_nav: NavGrid = null          # 撒锚点 + 给猫做漫游碰撞判定
 var _cat_msg := ""             # 摸猫后短暂占住提示条的反馈文字
 var _cat_msg_t := 0.0
+var _adopted: Array = []       # [{name, skin}]，本地存档，不进联机协议
+var _adopt_loaded := false
+var _adopt_layer: CanvasLayer = null
+var _adopt_panel: PanelContainer = null
+var _adopt_edit: LineEdit = null
+var _adopt_cat: Node2D = null
 
 # ── 小船状态 ────────────────────────────────────────────────────────────────
 ## 每艘船的服务端权威状态：[{pos: Vector2(campus 局部坐标), rider: peer id, moving: bool, dirx: float, diry: float}]
@@ -2081,6 +2106,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		_open_voice(_voice_link_now)
 		get_viewport().set_input_as_handled()
 		return
+	if k.keycode == KEY_ESCAPE and _adopt_open():
+		_close_adopt_panel()
+		get_viewport().set_input_as_handled()
+		return
 	if k.keycode == KEY_ESCAPE and _note_open():
 		_close_note_all()
 		get_viewport().set_input_as_handled()
@@ -2097,6 +2126,10 @@ func _try_interact() -> bool:
 	var me: Node = _local_avatar()
 	if me == null:
 		return false
+	# 命名框开着时 E = 取消（确认走按钮或回车）
+	if _adopt_open():
+		_close_adopt_panel()
+		return true
 	# 面板开着时，E 先关面板（选层 / 公告查看）
 	if _note_open():
 		_close_note_all()
@@ -2154,11 +2187,15 @@ func _try_interact() -> bool:
 	if _near_dorm != "":
 		enter_room("res://assets/rooms/dorm_space.json")
 		return true
-	# 校园里最后一级：身边有猫就摸一下。排在门/船/座位之后，不抢原有交互。
+	# 校园里最后一级：身边有猫就摸；摸熟了按 E 领养回宿舍。
+	# 排在门/船/座位之后，不抢原有交互。
 	if not in_room:
 		var cat := _nearest_cat((me as Node2D).position)
 		if cat != null:
-			_pet_cat(cat)
+			if bool(cat.call("can_adopt")) and _ensure_adopted().size() < ADOPT_MAX:
+				_open_adopt_panel(cat)
+			else:
+				_pet_cat(cat)
 			return true
 	return false
 
@@ -2188,6 +2225,231 @@ func _pet_cat(cat: Node2D) -> void:
 	if _door_hint != null:
 		_door_hint.text = _cat_msg
 		_door_hint.visible = true
+
+
+# ---------------------------------------------------------------- 领养 / 命名 / 宿舍猫窝
+
+## 领养存档是纯本地的（user://），不塞进 room_claims —— 改联机协议会让公共服
+## 旧服务端 checksum failed，房间和聊天一起废掉。
+func _ensure_adopted() -> Array:
+	if _adopt_loaded:
+		return _adopted
+	_adopt_loaded = true
+	if FileAccess.file_exists(ADOPT_PATH):
+		var f := FileAccess.open(ADOPT_PATH, FileAccess.READ)
+		if f != null:
+			var parsed = JSON.parse_string(f.get_as_text())
+			f.close()
+			if parsed is Array:
+				_adopted = parsed
+	return _adopted
+
+
+func _save_adopted() -> void:
+	var f := FileAccess.open(ADOPT_PATH, FileAccess.WRITE)
+	if f == null:
+		return
+	f.store_string(JSON.stringify(_adopted))
+	f.close()
+
+
+func _adopt_open() -> bool:
+	return _adopt_panel != null and is_instance_valid(_adopt_panel) and _adopt_panel.visible
+
+
+func _build_adopt_panel() -> void:
+	_adopt_layer = CanvasLayer.new()
+	_adopt_layer.name = "AdoptUI"
+	_adopt_layer.layer = 9
+	add_child(_adopt_layer)
+	var host := Control.new()
+	host.set_anchors_preset(Control.PRESET_FULL_RECT)
+	host.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_adopt_layer.add_child(host)
+	var pc := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.11, 0.13, 0.16, 0.96)
+	sb.border_color = Color("b99a68")
+	sb.set_border_width_all(2)
+	sb.set_content_margin_all(14)
+	pc.add_theme_stylebox_override("panel", sb)
+	host.add_child(pc)
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 10)
+	pc.add_child(vb)
+	var title := Label.new()
+	title.text = "领养猫咪 · 给它起个名字"
+	title.add_theme_font_size_override("font_size", 18)
+	title.add_theme_color_override("font_color", Color("f2e3c4"))
+	vb.add_child(title)
+	_adopt_edit = LineEdit.new()
+	_adopt_edit.placeholder_text = "最多 12 个字"
+	_adopt_edit.max_length = 12
+	_adopt_edit.custom_minimum_size = Vector2(320, 38)
+	_adopt_edit.text_submitted.connect(func(_t): _confirm_adopt())
+	vb.add_child(_adopt_edit)
+	var hb := HBoxContainer.new()
+	hb.add_theme_constant_override("separation", 10)
+	vb.add_child(hb)
+	for cfg: Array in [["带它回宿舍", _confirm_adopt], ["再想想", _close_adopt_panel]]:
+		var b := Button.new()
+		b.text = String(cfg[0])
+		b.custom_minimum_size = Vector2(140, 40)
+		b.focus_mode = Control.FOCUS_NONE
+		b.pressed.connect(cfg[1] as Callable)
+		hb.add_child(b)
+	_adopt_panel = pc
+	pc.visible = false
+
+
+func _open_adopt_panel(cat: Node2D) -> void:
+	_ensure_adopted()
+	if _adopt_panel == null or not is_instance_valid(_adopt_panel):
+		_build_adopt_panel()
+	_adopt_cat = cat
+	_adopt_edit.text = str(cat.call("cat_name"))
+	_adopt_panel.visible = true
+	_center_panel(_adopt_panel)
+	_center_panel.call_deferred(_adopt_panel)   # 内容尺寸要等一帧才准
+	_adopt_edit.grab_focus()
+	_adopt_edit.select_all()
+	if OS.has_feature("mobile"):
+		DisplayServer.virtual_keyboard_show("")
+
+
+func _close_adopt_panel() -> void:
+	if _adopt_panel != null and is_instance_valid(_adopt_panel):
+		_adopt_panel.visible = false
+	if _adopt_edit != null and is_instance_valid(_adopt_edit):
+		_adopt_edit.release_focus()
+	if OS.has_feature("mobile"):
+		DisplayServer.virtual_keyboard_hide()
+	_adopt_cat = null
+
+
+func _confirm_adopt() -> void:
+	if _adopt_cat == null or not is_instance_valid(_adopt_cat):
+		_close_adopt_panel()
+		return
+	var nm := _adopt_edit.text.strip_edges()
+	if nm.is_empty():
+		nm = str(_adopt_cat.call("cat_name"))
+	nm = nm.left(12)
+	_ensure_adopted()
+	if _adopted.size() >= ADOPT_MAX:
+		_notice("宿舍猫窝已经满了")
+		_close_adopt_panel()
+		return
+	_adopted.append({"name": nm, "skin": int(_adopt_cat.get("skin_index"))})
+	_save_adopted()
+	_cat_msg = "「%s」已入住宿舍猫窝" % nm
+	_cat_msg_t = 2.2
+	_adopt_cat.queue_free()   # 校园里这只被抱走了
+	_close_adopt_panel()
+	_notice(_cat_msg)
+	if in_room:
+		_setup_room_cats()
+
+
+## 宿舍猫窝：每个单间都摆一个（按 room_doors 的门位算），自己的猫只出现在
+## 自己认领的那间房里。直接挂进 room.anchor() 的 Objects —— 它本身就是 y-sort
+## 容器，单独套一层 Node2D 会让整层被当成 y=0 的一个节点，猫窝永远压在家具后面。
+func _setup_room_cats() -> void:
+	if room == null or not is_instance_valid(room) or current_floor == BASEMENT_FLOOR:
+		return
+	var host: Node2D = room.call("anchor") as Node2D
+	if host == null:
+		return
+	# 清掉上一版可能留下的分组层，以及本函数自己造的所有节点。
+	# 用 remove_child 立刻让出名字，否则同帧重建时新节点会被 Godot 自动改名。
+	for grp_name in ["AdoptedCats", "AdoptedCatsOld"]:
+		var grp := host.get_node_or_null(grp_name)
+		if grp != null:
+			host.remove_child(grp)
+			grp.queue_free()
+	for ch in host.get_children():
+		var nm := String(ch.name)
+		if nm.begins_with("CatBed_") or nm.begins_with("RoomCat_") or nm.begins_with("CatName_"):
+			host.remove_child(ch)
+			ch.queue_free()
+
+	var bed_script: Script = load("res://net/scripts/room_cat_bed.gd")
+	var cat_script: Script = load("res://net/scenes/Cat.gd")
+	var skins: Array = cat_script.SKINS
+	var cats := _ensure_adopted()
+
+	# 自己的房间：优先服务端权威的认领关系，退回本地存档，最后默认第一间
+	var my_idx := 0
+	var mine := _load_my_room()
+	if mine.x == current_floor and mine.y >= 0:
+		my_idx = mine.y
+	for key in Net.room_claims.keys():
+		var parts := String(key).split(":")
+		if parts.size() == 2 and int(parts[0]) == current_floor:
+			var claim: Dictionary = Net.room_claims[key]
+			if String(claim.get("uid", "")) == Net.local_uid:
+				my_idx = int(parts[1])
+				break
+	if OS.has_environment("XGD_CAT_ROOM"):
+		my_idx = int(OS.get_environment("XGD_CAT_ROOM"))
+
+	var doors: Array = room.get("data").get("room_doors", [])
+	for d in doors:
+		if not (d is Dictionary):
+			continue
+		var dd: Dictionary = d
+		var idx := int(dd.get("index", 0))
+		var north := String(dd.get("side", "n")) == "n"
+		var cx := float(dd.get("x", 0.0)) + float(dd.get("w", 3.0)) * 0.5
+		# 北排房间 y≈2..10、南排 y≈20..28。往右挪 1.5 格避开正对门洞的位置，
+		# 北排再抬高 1.2 格，别贴着门口那道墙；此处的书桌/椅子/绿植都不占这块地。
+		var at := Vector2(cx + 1.5, 7.4 if north else 25.8) * TS
+		var bed := Node2D.new()
+		bed.name = "CatBed_%d" % idx
+		bed.set_script(bed_script)
+		bed.position = at
+		host.add_child(bed)
+		if idx != my_idx:
+			continue
+		# 自己的窝：摆上领养的猫，加名牌
+		var name_text := ""
+		for i in cats.size():
+			if not (cats[i] is Dictionary):
+				continue
+			var cd: Dictionary = cats[i]
+			var nm := str(cd.get("name", "猫"))
+			if name_text != "":
+				name_text += "、"
+			name_text += nm
+			var c := Node2D.new()
+			c.name = "RoomCat_%d" % i
+			c.set_script(cat_script)
+			host.add_child(c)
+			# 2 只并排趴垫子，第 3/4 只挪到窝前地板上，别叠成一坨
+			var cat_at := at + Vector2(-8.0 + float(i % 2) * 15.0,
+				float(int(i / 2)) * 10.0)
+			c.call("setup", cat_at, skins[int(cd.get("skin", 0)) % skins.size()], 9000 + i * 71)
+			c.set("pos", cat_at)
+			c.set("home", cat_at)
+			c.position = cat_at
+			# 猫的脚底 y 比窝小，纯 y-sort 会被垫子盖住；抬一级让它趴在垫子上
+			c.z_index = 1
+			c.set_process(false)                # 房里不漫游，坐姿比蜷成一团更好认
+			c.call("_play", "sit", true)
+		if name_text != "":
+			var lb := Label.new()
+			lb.name = "CatName_%d" % idx
+			lb.text = name_text
+			# 贴着窝上方，往左偏开椅子；描边+投影保证压在深色地板上也读得清
+			lb.position = at + Vector2(-34.0, -19.0)
+			lb.scale = Vector2(0.5, 0.5)
+			lb.add_theme_font_size_override("font_size", 14)
+			lb.add_theme_color_override("font_color", Color("fff0cf"))
+			lb.add_theme_color_override("font_outline_color", Color("1a1410"))
+			lb.add_theme_constant_override("outline_size", 4)
+			lb.add_theme_color_override("font_shadow_color", Color("1a1410"))
+			lb.z_index = 60
+			host.add_child(lb)
 
 
 ## 朝向名 → sit_dir 的编号（1..4，和 SIT_DIRS 一致）
@@ -2302,6 +2564,7 @@ func enter_room(path: String, floor_n: int = 1) -> bool:
 	_update_room_doors()          # 进门先按认领关系把每扇门锁好/放开
 	_update_floor_label()
 	_update_floor_visibility()
+	_setup_room_cats()
 	room_changed.emit(true)
 	return true
 
@@ -2967,7 +3230,14 @@ func _update_interact_hint(delta: float) -> void:
 	var cat := _nearest_cat(pos)
 	if cat != null:
 		_door_hint.visible = true
-		_door_hint.text = "按 E 摸摸「%s」" % str(cat.call("cat_name"))
+		var nm := str(cat.call("cat_name"))
+		var left := ADOPT_PETS - int(cat.get("pet_count"))
+		if _ensure_adopted().size() >= ADOPT_MAX:
+			_door_hint.text = "按 E 摸摸「%s」· 猫窝已满" % nm
+		elif left <= 0:
+			_door_hint.text = "按 E 领养「%s」回宿舍" % nm
+		else:
+			_door_hint.text = "按 E 摸摸「%s」· 再摸 %d 次可领养" % [nm, left]
 		return
 	_door_hint.visible = false
 
@@ -3381,6 +3651,7 @@ func _go_floor(n: int) -> void:
 		_collect_room_seats()
 		_build_door_plates()
 		_update_room_doors()
+		_setup_room_cats()   # 房间整份重建后，猫窝也要重新挂
 	var me: Node = _local_avatar()
 	if me != null:
 		# 跨布局换层时房间是整份重建的，相机边界必须重新按新房间矩形算一遍。

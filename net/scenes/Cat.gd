@@ -67,6 +67,30 @@ const SKINS := [
 		"size": 0.98, "speed": 1.00, "doze": 0.30},
 	{"name": "奶猫", "dark": "7b6b58", "light": "f3e6d2", "tint": 0.85,
 		"size": 0.72, "speed": 1.30, "doze": 0.15},
+	{"name": "布偶猫", "dark": "6b5a4c", "light": "f6efe6", "tint": 0.90,
+		"size": 1.16, "speed": 0.80, "doze": 0.55},
+	{"name": "金渐层", "dark": "b08a4a", "light": "f2e2bd", "tint": 0.90,
+		"size": 1.08, "speed": 0.88, "doze": 0.42},
+	{"name": "蓝白猫", "dark": "6b7686", "light": "f2f1ec", "tint": 0.92,
+		"size": 1.02, "speed": 1.00, "doze": 0.30},
+	{"name": "橘白猫", "dark": "c46a22", "light": "f8eee0", "tint": 0.92,
+		"size": 1.04, "speed": 1.05, "doze": 0.35},
+	{"name": "狸白猫", "dark": "565449", "light": "f0ece2", "tint": 0.88,
+		"size": 1.00, "speed": 1.12, "doze": 0.22},
+	{"name": "烟灰猫", "dark": "3f4149", "light": "9aa0a8", "tint": 0.90,
+		"size": 1.00, "speed": 0.95, "doze": 0.38},
+	{"name": "奶油猫", "dark": "c8a678", "light": "f8ecd8", "tint": 0.88,
+		"size": 0.98, "speed": 0.92, "doze": 0.48},
+	{"name": "巧克力猫", "dark": "4a342a", "light": "8a6852", "tint": 0.92,
+		"size": 1.02, "speed": 1.00, "doze": 0.32},
+	{"name": "银虎斑", "dark": "5f6268", "light": "c9cbd0", "tint": 0.90,
+		"size": 1.04, "speed": 1.08, "doze": 0.26},
+	{"name": "孟买猫", "dark": "17161a", "light": "2a2830", "tint": 0.95,
+		"size": 0.98, "speed": 1.15, "doze": 0.18},
+	{"name": "阿比西尼亚", "dark": "8a5a2c", "light": "d9a86a", "tint": 0.90,
+		"size": 0.96, "speed": 1.25, "doze": 0.20},
+	{"name": "挪威森林", "dark": "5c5142", "light": "ddd0b4", "tint": 0.88,
+		"size": 1.24, "speed": 0.82, "doze": 0.40},
 ]
 
 var home := Vector2.ZERO
@@ -91,6 +115,7 @@ var _nav: NavGrid = null     # 可走网格（Arena 传入）；漫游时避开�
 
 ## 互动状态（Arena 里按 E 摸猫时调 pet()）
 var pet_count := 0
+var skin_index := 0          # 在 SKINS 里的下标，领养存档用它还原花色
 var _skin_name := "猫咪"
 var _pet_t := 0.0            # 被摸后保持坐姿
 var _bubble_t := 0.0         # 头顶爱心剩余时间
@@ -114,6 +139,11 @@ func _can_walk(p: Vector2) -> bool:
 
 func cat_name() -> String:
 	return _skin_name
+
+
+## 摸满 3 次就能领养（Arena 的提示条和 E 键共用这个判定）
+func can_adopt() -> bool:
+	return pet_count >= 3
 
 
 ## 按 E 摸猫：停下漫游 → 转向玩家 → 坐下 → 冒爱心；摸够 3 次会跟一小段。
@@ -146,15 +176,18 @@ func setup(anchor: Vector2, skin_data: Variant, seed_val: int, nav_data: NavGrid
 	_speed_k = float(skin.get("speed", 1.0))
 	_doze = float(skin.get("doze", 0.3))
 	_skin_name = str(skin.get("name", "猫咪"))
+	skin_index = maxi(0, SKINS.find(skin))
 	_nav = nav_data
 	home = anchor
 	# 初始落点也要查可走，别一出生就站在楼影里
 	pos = anchor
-	for i in 12:
-		var cand := anchor + Vector2(_rng.randf_range(-40.0, 40.0), _rng.randf_range(-24.0, 24.0))
-		if _can_walk(cand):
-			pos = cand
-			break
+	# 宿舍里的猫没有 nav，直接趴在窝上，别再随机抖到墙外
+	if _nav != null:
+		for i in 12:
+			var cand := anchor + Vector2(_rng.randf_range(-40.0, 40.0), _rng.randf_range(-24.0, 24.0))
+			if _can_walk(cand):
+				pos = cand
+				break
 	position = pos
 	_build_sprite(skin)
 	_play("stand", true)
@@ -219,7 +252,7 @@ func _process(delta: float) -> void:
 		if wait <= 0.0:
 			_leave_rest()
 	# 兜底：万一还是被挤到障碍格边缘，轻轻拉回自己的活动中心
-	if _nav != null and not _can_walk(pos) and _can_walk(home):
+	if _nav != null and not _can_walk(pos):
 		pos = home
 	position = pos
 	# 原图猫朝右；朝左时整个节点（连同 sprite）镜像
