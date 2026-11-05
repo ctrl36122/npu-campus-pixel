@@ -1943,9 +1943,6 @@ var _room_title := ""
 var _door_hint: Button          # 提示兼交互按钮（手机上点它就是按 E）
 var _voice_btn: Button          # 坐着时右下角的「进语音」按钮（只在 B1 组队房间里出现）
 var _voice_link_now := ""       # _voice_btn 当前指向的 OOPZ 链接（V 键用它）
-## OOPZ 客户端是否在跑的探测缓存（tasklist 要 ~0.2s，连按 V 不该反复起进程）
-var _oopz_probe_t := -999.0
-var _oopz_probe_alive := false
 var _door_clock := 0.0
 ## 座位：[{pos: Vector2(campus 局部坐标), face: String, kind: String, room: int}]
 var _seats_campus: Array = []
@@ -2527,7 +2524,10 @@ func _try_auto_room() -> void:
 			print("[test-voice] 输入=", tst)
 			print("[test-voice] 白名单过=", _safe_voice_link(tst))
 			print("[test-voice] 读回=", back, " 像邀请=", _looks_oopz_invite(back))
-			print("[test-voice] 客户端在跑=", _oopz_client_running())
+			var t_probe := Time.get_ticks_msec()
+			var running := _oopz_client_running()
+			print("[test-voice] 客户端在跑=", running,
+				" 探测耗时=", Time.get_ticks_msec() - t_probe, "ms")
 			_open_voice(back)
 
 
@@ -3618,26 +3618,38 @@ func _seat_room_at(pos: Vector2) -> int:
 	return best
 
 
+## 连一下本机端口看通不通（回环连接正常几毫秒，最坏 60ms 收手）。
+## OOPZ 主进程固定监听 127.0.0.1:10274（webview 壳）和 49266（健康检查），
+## 客户端没开时两个都连不上 —— 实测重启两次端口都不变（2026-11-05）。
+## 这里刻意**不用 tasklist**：那玩意儿在这台机器上要 1.1 秒，按一下 V 卡一秒，
+## 联机时位置同步会直接跳。
+func _port_open(port: int) -> bool:
+	var peer := StreamPeerTCP.new()
+	if peer.connect_to_host("127.0.0.1", port) != OK:
+		return false
+	var deadline := Time.get_ticks_msec() + 60
+	while Time.get_ticks_msec() < deadline:
+		peer.poll()
+		var st := peer.get_status()
+		if st == StreamPeerTCP.STATUS_CONNECTED:
+			peer.disconnect_from_host()
+			return true
+		if st == StreamPeerTCP.STATUS_ERROR:
+			peer.disconnect_from_host()
+			return false
+		OS.delay_msec(2)
+	peer.disconnect_from_host()
+	return false
+
+
 ## 本机 OOPZ 客户端有没有开着。
 ## 为什么要判：2026-11-05 实测，系统里根本没注册任何 oopz 协议
 ## （HKCR/HKCU 全无 oopz*），客户端也不认命令行参数，所以链接只能落浏览器。
 ## 客户端已经开着的时候再甩一个浏览器出来纯属添乱 —— 那种情况只把链接复制到剪贴板。
-## 判活用 tasklist：它输出的是系统本地化编码，我们只匹配 ASCII 的 "oopz.exe"，
-## 中文/乱码都不影响；查不到就当没开（退回打开邀请页，不会更糟）。
 func _oopz_client_running() -> bool:
 	if not OS.has_feature("windows"):
 		return false
-	var now := Time.get_ticks_msec() / 1000.0
-	if now - _oopz_probe_t < 2.0:
-		return _oopz_probe_alive
-	_oopz_probe_t = now
-	var out: Array = []
-	var code := OS.execute("tasklist", ["/FI", "IMAGENAME eq oopz.exe", "/NH"], out, false, false)
-	var text := ""
-	for line in out:
-		text += String(line) + "\n"
-	_oopz_probe_alive = code == 0 and text.to_lower().contains("oopz.exe")
-	return _oopz_probe_alive
+	return _port_open(10274) or _port_open(49266)
 
 
 ## 唤起 OOPZ。客户端开着 → 只复制链接（不抢焦点）；没开 → 打开邀请页（落 web.oopz.cn）。
