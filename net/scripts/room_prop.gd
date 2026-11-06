@@ -20,6 +20,9 @@ var kind: String = "table"
 var cell := Rect2()
 ## 亮房（图书馆自习空间）：墙/桌面换成浅色，宿舍与活动室保持原样。
 var bright := false
+## 桌面小物（书 / 水杯 / 笔记本 / 电脑 / 笔筒 / 台灯）。由数据挂在桌子 prop 上，
+## 跟桌面一起画；只有图书馆的自习桌带这个字段，其它房间的桌子保持空数组。
+var items: Array = []
 
 
 func setup(k: String, r: Rect2, z: int = 0) -> void:
@@ -194,6 +197,109 @@ func _table(o: Vector2, w: float, h: float) -> void:
 	while yy < o.y - RISE_TABLE + h - 3.0:
 		draw_rect(Rect2(o.x + 4.0, yy, w - 8.0, 1.0), Color(0.10, 0.08, 0.06, 0.22))
 		yy += 6.0
+	# 桌面小物：同一个节点、同一次 _draw()，永远压在桌面上、又不参与 y-sort。
+	# 独立 prop 的底边 y 比桌子小会被桌面盖掉；抬 z_index 又会盖住站在桌前的人。
+	for it in items:
+		if it is Dictionary:
+			_desktop_item(it, o)
+
+
+# ---------------------------------------------------------------- 桌面小物
+#
+# 图书馆每张桌一套不同的书 / 水杯 / 摊开的笔记本 / 笔记本电脑 / 笔筒 / 小台灯。
+# 尺寸都在 7~14px（人物约 18px 高），用实线色块画，不引入任何素材。
+# 坐标是「相对桌子 rect 左上角的像素」：桌面顶面画在 o.y-RISE_TABLE，
+# 所以 py 取 -5.5~0.5 正好落在桌面靠里的那半边。
+
+func _desktop_item(it: Dictionary, o: Vector2) -> void:
+	var r := Rect2(o.x + float(it.get("px", 0.0)), o.y + float(it.get("py", -4.0)),
+		float(it.get("pw", 10.0)), float(it.get("ph", 8.0)))
+	var tints := [Color("b8544a"), Color("3f7396"), Color("5c8a58"),
+		Color("c4933c"), Color("7a5a9c")]
+	var t := int(it.get("t", 0)) % tints.size()
+	var c: Color = tints[t]
+	match String(it.get("k", "book")):
+		"book":
+			_d_book(r, c, t)
+		"cup":
+			_d_cup(r, c)
+		"laptop":
+			_d_laptop(r, c)
+		"notebook":
+			_d_notebook(r, c)
+		"pen":
+			_d_pen(r, c, t)
+		"lamp":
+			_d_lamp(r)
+
+
+## 书堆：三本横叠，封面颜色错开，每本露一道书页白边
+func _d_book(r: Rect2, c: Color, t: int) -> void:
+	var shades := [c, c.darkened(0.24), c.lightened(0.16)]
+	var step := maxf(2.0, r.size.y / 3.4)
+	for i in range(3):
+		var yy := r.position.y + float(i) * step
+		var off := float((i + t) % 2)
+		draw_rect(Rect2(r.position.x + off, yy, r.size.x - off, 2.3), shades[i])
+		draw_rect(Rect2(r.position.x + off + 1.0, yy + 1.4, r.size.x - off - 2.0, 0.7), Color("f3ecdc"))
+		draw_rect(Rect2(r.position.x + off, yy, r.size.x - off, 0.6), Color(1, 1, 1, 0.25))
+
+
+## 水杯：白瓷杯身 + 有色饮品 + 杯口 + 把手
+func _d_cup(r: Rect2, c: Color) -> void:
+	var bw := r.size.x - 2.5
+	draw_rect(Rect2(r.position.x + 0.5, r.position.y + 1.5, bw, r.size.y - 2.0), Color("e9f1f3"))
+	draw_rect(Rect2(r.position.x + 0.5, r.position.y + 1.5, 1.0, r.size.y - 2.0), Color("ffffff"))
+	draw_rect(Rect2(r.position.x + bw - 0.5, r.position.y + 2.0, 1.2, r.size.y - 3.0), Color("a9bcc4"))
+	draw_rect(Rect2(r.position.x + 0.5, r.position.y + 1.5, bw, 1.2), c.darkened(0.12))
+	draw_rect(Rect2(r.position.x + 0.2, r.position.y, bw + 0.6, 1.5), Color("ffffff"))
+	draw_rect(Rect2(r.position.x + r.size.x - 2.0, r.position.y + 3.0, 1.8, 3.2), Color("d8e4e8"))
+
+
+## 笔记本电脑：立起来的屏幕 + 键盘底座
+func _d_laptop(r: Rect2, c: Color) -> void:
+	var sw := r.size.x - 1.0
+	var sh := r.size.y * 0.62
+	draw_rect(Rect2(r.position.x + 0.5, r.position.y, sw, sh), Color("3a464f"))
+	draw_rect(Rect2(r.position.x + 1.5, r.position.y + 1.0, sw - 2.0, sh - 2.0), Color("d5ecf5"))
+	draw_rect(Rect2(r.position.x + 1.5, r.position.y + 1.0, sw - 2.0, 1.2), c)
+	var ky := r.position.y + sh + 0.6
+	draw_rect(Rect2(r.position.x, ky, r.size.x, r.size.y - sh - 0.6), Color("b7c6cd"))
+	draw_rect(Rect2(r.position.x + 1.0, ky + 0.6, r.size.x - 2.0, 1.0), Color("8d9ea8"))
+
+
+## 摊开的笔记本：有色封面边 + 中缝 + 两页横线
+func _d_notebook(r: Rect2, c: Color) -> void:
+	draw_rect(Rect2(r.position.x, r.position.y, r.size.x, r.size.y - 1.0), Color("f6f2e7"))
+	draw_rect(Rect2(r.position.x, r.position.y, r.size.x, 0.8), Color("ffffff"))
+	draw_rect(Rect2(r.position.x, r.position.y, 2.0, r.size.y - 1.0), c)
+	draw_rect(Rect2(r.position.x + r.size.x * 0.5 - 0.5, r.position.y + 1.0, 1.0, r.size.y - 2.0), Color("c9c2b2"))
+	for i in range(2):
+		var yy := r.position.y + 2.4 + float(i) * 2.0
+		draw_rect(Rect2(r.position.x + 3.0, yy, r.size.x * 0.35, 0.7), Color(0.20, 0.26, 0.32, 0.42))
+		draw_rect(Rect2(r.position.x + r.size.x * 0.5 + 2.0, yy, r.size.x * 0.36, 0.7),
+			Color(0.20, 0.26, 0.32, 0.32))
+
+
+## 笔筒：三支不同颜色的笔从筒口伸出来
+func _d_pen(r: Rect2, c: Color, t: int) -> void:
+	var colors := [c, Color("d0a03c"), Color("4a6f9c")]
+	for i in range(3):
+		draw_rect(Rect2(r.position.x + 1.5 + float(i) * 2.0,
+			r.position.y - 1.0 + float(i % 2) * 1.5, 1.2, 5.0), colors[(t + i) % colors.size()])
+	draw_rect(Rect2(r.position.x + 0.8, r.position.y + 3.0, r.size.x - 1.6, r.size.y - 3.5), Color("627887"))
+	draw_rect(Rect2(r.position.x + 0.8, r.position.y + 3.0, r.size.x - 1.6, 0.8), Color("a8bcc6"))
+
+
+## 小台灯：底座 + 立杆 + 暖色灯罩（亮房里只给一点暖，不刺眼）
+func _d_lamp(r: Rect2) -> void:
+	var cx := r.position.x + r.size.x * 0.5
+	draw_rect(Rect2(cx - 0.6, r.position.y + 3.0, 1.2, r.size.y - 4.0), Color("7d8b95"))
+	draw_rect(Rect2(r.position.x + 1.0, r.position.y + r.size.y - 1.6, r.size.x - 2.0, 1.6), Color("596a75"))
+	draw_rect(Rect2(r.position.x + 1.0, r.position.y + 1.0, r.size.x - 2.0, 3.0), Color("f1dca9"))
+	draw_rect(Rect2(r.position.x + 2.2, r.position.y, r.size.x - 4.4, 1.2), Color("fff3d0"))
+	draw_rect(Rect2(r.position.x + 1.0, r.position.y + 4.0, r.size.x - 2.0, 0.8),
+		Color(1.0, 0.85, 0.52, 0.45))
 
 
 # ---------------------------------------------------------------- 工位（桌子 + 显示器 + 键盘）

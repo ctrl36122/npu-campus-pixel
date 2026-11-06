@@ -234,6 +234,10 @@ func _add_prop(kind: String, r: Dictionary, z: int = 0) -> void:
 	n.name = "%s_%d" % [kind, objects.get_child_count()]
 	objects.add_child(n)
 	n.set("bright", bright)
+	# 桌面小物挂在桌子数据里，由 RoomProp 跟桌面一次画完（不另起节点，
+	# 否则独立 prop 的底边 y 更小，会被桌面盖住；抬 z_index 又会压住玩家）
+	if r.has("items"):
+		n.set("items", r["items"])
 	n.call("setup", kind, Rect2(float(r["x"]), float(r["y"]), float(r["w"]), float(r["h"])), z)
 
 

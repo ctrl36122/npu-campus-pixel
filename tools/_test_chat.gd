@@ -22,12 +22,12 @@ func _process(_d: float) -> bool:
 			print("结果 FAIL：聊天层没创建")
 			quit(1)
 			return true
-		print("聊天层 OK，历史行数=%d" % chat._lines.size())
+		print("聊天层 OK，历史行数=%d" % chat._history.size())
 		# 直接走 Net 的 RPC（call_local，自己立刻收到）
 		net.call("post_message", "有人在吗？我在图书馆门口")
 	elif step == 350:
 		t_sent = Time.get_ticks_msec()
-		print("发送后 历史行数=%d" % chat._lines.size())
+		print("发送后 历史行数=%d" % chat._history.size())
 		var av = _local_avatar()
 		if av != null:
 			print("本机气泡 visible=%s 文本=%s" % [av.get_node("Bubble").visible, av.get_node("Bubble").text])

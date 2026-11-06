@@ -69,11 +69,10 @@ var wan_status: String = ""
 # ---------------------------------------------------------------- 聊天内容管理
 ## 被禁言的 uid。用 uid 而不是昵称：昵称随时能改，uid 才是本机固定的身份。
 var _muted: Dictionary = {}
-## uid -> 上一条消息的 ticks（刷屏节流）
-var _last_msg_ms: Dictionary = {}
-## uid -> 上一条内容 / 连续重复次数（复读机拦截）
-var _last_text: Dictionary = {}
-var _last_text_n: Dictionary = {}
+## uid -> 最近消息时间戳（毫秒）。ChatGuard.check_spam 靠它算间隔 + 60s 窗口条数
+var _msg_history: Dictionary = {}
+## uid -> 最近几条消息文本，用来拦复读机
+var _text_history: Dictionary = {}
 ## 管理员 uid 白名单，来自环境变量 XGD_ADMIN（逗号分隔）
 var _admin_uids: PackedStringArray = []
 ## XGD_ADMIN 没配时，第一个连上来的玩家兜底当管理员（小圈子共玩的默认约定）
@@ -467,7 +466,7 @@ func post_message(text: String) -> void:
 		return
 	note_received([text])
 	var speaker: String = str(peers[sender]["name"])
-	var clean := text.left(160)
+	var clean := text.left(ChatGuard.MAX_TEXT_LENGTH)
 
 	# 私信：前缀编码的定向消息。服务端只转发（不落盘、不改协议），
 	# 客户端只给收件人显示 —— 绝不能进 message_received，否则公屏就露出来了。
@@ -484,11 +483,18 @@ func post_message(text: String) -> void:
 			_handle_command(sender, clean)
 		return
 
-	# 违规词打码。客户端发送前已经过一遍同样的 filter（等长替换，幂等），
-	# 这里再兜一次，防止有人绕开客户端直接 rpc 上来。
-	var safe := ChatGuard.filter(clean)
+	# 分级扫描：Lv3 严重违规整条不转发，Lv1/Lv2 等长打码后发送。
+	# 客户端发送前已经用同一份 scan_full 过了一遍（等长替换，幂等），这里再兜一次，
+	# 防止有人绕开客户端直接 rpc 上来。客户端 call_local 那一趟也走同一规则，
+	# 所以「自己看到的」和「别人看到的」永远一致。
+	var scan := ChatGuard.scan_full(clean)
+	if int(scan["action"]) == ChatGuard.Action.BLOCK:
+		if is_server():
+			_notice_to(sender, String(scan["reason"]))
+		return
+	var safe: String = scan["filtered_text"]
 	if safe != clean and is_server():
-		_notice_to(sender, "消息里有不当用语，已用 * 代替")
+		_notice_to(sender, String(scan["reason"]))
 
 	# 只有服务端落盘（客户端各有一份副本，写多了会互相覆盖）
 	if is_server():
@@ -622,26 +628,28 @@ func _is_admin(uid: String) -> bool:
 
 
 ## 服务端：这条消息放不放行。不放行时已经给发送者回了提示。
+## 禁言是管理员手动处置；其余（间隔 / 窗口条数 / 复读）统一交给 ChatGuard.check_spam，
+## 和客户端本地用的是同一套阈值，不会出现「本地让发、服务端拦下」。
 func _accept_message(sender: int, text: String) -> bool:
 	var uid := str(peers.get(sender, {}).get("uid", ""))
 	if _muted.has(uid):
 		_notice_to(sender, "@MUTED")        # 客户端收到后置 local_muted 并提示
 		return false
 	var now := Time.get_ticks_msec()
-	if ChatGuard.too_fast(int(_last_msg_ms.get(uid, 0)), now):
-		_notice_to(sender, "说慢一点，别刷屏")
+	var hist: Array = _msg_history.get(uid, [])
+	var texts: Array = _text_history.get(uid, [])
+	var spam := ChatGuard.check_spam(now, hist, text, texts)
+	if bool(spam["spam"]):
+		_notice_to(sender, String(spam["reason"]))
 		return false
-	_last_msg_ms[uid] = now
-	if str(_last_text.get(uid, "")) == text:
-		var n := int(_last_text_n.get(uid, 0)) + 1
-		_last_text_n[uid] = n
-		if n >= ChatGuard.REPEAT_LIMIT:
-			_last_text_n[uid] = 1
-			_notice_to(sender, "同一句话别连着发")
-			return false
-	else:
-		_last_text[uid] = text
-		_last_text_n[uid] = 1
+	hist.append(now)
+	while hist.size() > 0 and int(hist[0]) < now - ChatGuard.RATE_WINDOW_MS:
+		hist.remove_at(0)
+	_msg_history[uid] = hist
+	texts.append(text)
+	while texts.size() > ChatGuard.REPEAT_LIMIT + 2:
+		texts.remove_at(0)
+	_text_history[uid] = texts
 	return true
 
 
@@ -661,7 +669,7 @@ func _handle_command(sender: int, raw: String) -> void:
 
 	if cmd == "/help":
 		_notice_to(sender, "好友：/friends 列表 · /friend 昵称 加好友 · /accept 昵称 · /deny 昵称 · /unfriend 昵称")
-		_notice_to(sender, "管理员：/who 在线名单 · /mute 昵称 · /unmute 昵称 · /clear 清空聊天记录")
+		_notice_to(sender, "管理员：/who 在线名单 · /mute 昵称 · /unmute 昵称 · /muted 禁言名单 · /clear 清空聊天记录")
 		return
 	# 好友命令人人可用，必须在管理员检查之前分流
 	if FRIEND_CMDS.has(cmd):
@@ -682,6 +690,18 @@ func _handle_command(sender: int, raw: String) -> void:
 				lines.append("%s(uid %s)" % [
 					str(peers[id].get("name", "?")), str(peers[id].get("uid", "?"))])
 			_notice_to(sender, "在线 %d 人：%s" % [peers.size(), " · ".join(lines)])
+		"/muted":
+			if _muted.is_empty():
+				_notice_to(sender, "当前没有禁言中的玩家")
+				return
+			var mnames := PackedStringArray()
+			for id in peers:
+				if _muted.has(str(peers[id].get("uid", ""))):
+					mnames.append(str(peers[id].get("name", "?")))
+			var listed := " · ".join(mnames)
+			if listed.is_empty():
+				listed = "（暂不在线）"
+			_notice_to(sender, "禁言中 %d 人：%s" % [_muted.size(), listed])
 		"/mute":
 			var t1 := _find_peer_by_name(arg)
 			if t1 <= 0:

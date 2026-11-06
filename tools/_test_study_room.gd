@@ -149,7 +149,7 @@ func _test_room() -> void:
 		_ok((mc.r + mc.g + mc.b) / 3.0 > (mo.r + mo.g + mo.b) / 3.0,
 			"小地图上也读得出中间那块方洞")
 
-	print("[4] 一张桌两把椅并排（不再面对面）")
+	print("[4] 一张桌两把椅并排、全部朝前（跟宿舍一样）")
 	var tables: Array = []
 	for p in d.get("props", []):
 		if String(p.get("k", "")) == "table" and float(p.get("w", 0)) == 9.0:
@@ -168,7 +168,7 @@ func _test_room() -> void:
 			if "study_lounge" in String(s.get("id", "")):
 				continue
 			if float(s["x"]) >= float(t["x"]) and float(s["x"]) + float(s["w"]) <= float(t["x"]) + float(t["w"]) \
-					and absf(float(s["y"]) - (float(t["y"]) - 2.0)) < 0.01:
+					and absf(float(s["y"]) - (float(t["y"]) + 3.0)) < 0.01:
 				pair.append(s)
 		if pair.size() != 2:
 			continue
@@ -176,20 +176,77 @@ func _test_room() -> void:
 			continue
 		if absf(float(pair[0]["x"]) - float(pair[1]["x"])) < 0.5:
 			continue
-		if String(pair[0].get("face", "")) == "down" and String(pair[1].get("face", "")) == "down":
+		if String(pair[0].get("face", "")) == "up" and String(pair[1].get("face", "")) == "up":
 			side_by_side += 1
-	_ok(side_by_side == 34, "34 张桌都是同侧并排、同朝向的两把椅", str(side_by_side))
-	var face_to_face := 0
+	_ok(side_by_side == 34, "34 张桌都是桌南侧并排、同朝前的两把椅", str(side_by_side))
+	var face_up := 0
 	for s in seats:
 		if String(s.get("face", "")) == "up":
-			face_to_face += 1
-	_ok(face_to_face == 0, "没有残留面对面（up）的椅子", str(face_to_face))
-	_ok((room.get("seats") as Array).size() == 72, "Room 实际建出 72 个可坐点")
+			face_up += 1
+	_ok(face_up == seats.size(), "全部座位统一 face=up（含 4 个讨论角坐垫）", str(face_up))
+	var room_seats: Array = room.get("seats") as Array
+	_ok(room_seats.size() == 72, "Room 实际建出 72 个可坐点")
+	var room_up := 0
+	for rs in room_seats:
+		if String(rs.get("face", "")) == "up":
+			room_up += 1
+	_ok(room_up == 72, "Room 里 72 个可坐点全是朝前（椅背落在南沿）", str(room_up))
 	var wins := 0
 	for p in d.get("props", []):
 		if String(p.get("k", "")) == "window":
 			wins += 1
 	_ok(wins == 8, "北墙 8 扇连续落地窗", str(wins))
+
+	print("[4b] 桌面小物：每桌一套、逐桌不重样")
+	var desk_props: Array = []
+	var item_kinds := {}
+	var item_total := 0
+	var sigs := {}
+	var dup := 0
+	var no_book := 0
+	var outside := 0
+	for p in d.get("props", []):
+		var its: Array = p.get("items", [])
+		if its.is_empty():
+			continue
+		desk_props.append(p)
+		var sig := ""
+		var has_book := false
+		var tw := float(p["w"]) * 8.0
+		var th := float(p["h"]) * 8.0
+		for it in its:
+			var k := String(it.get("k", ""))
+			item_kinds[k] = true
+			item_total += 1
+			if k == "book" or k == "notebook":
+				has_book = true
+			sig += "%s:%s:%s:%s|" % [k, str(it.get("t", 0)),
+				str(it.get("px", 0)), str(it.get("py", 0))]
+			var px := float(it.get("px", 0.0))
+			var py := float(it.get("py", 0.0))
+			if px < 1.0 or px + float(it.get("pw", 0.0)) > tw - 1.0 \
+					or py < -7.0 or py + float(it.get("ph", 0.0)) > th - 8.0 + 0.01:
+				outside += 1
+		if not has_book:
+			no_book += 1
+		if sigs.has(sig):
+			dup += 1
+		sigs[sig] = true
+	_ok(desk_props.size() >= 34, "34 张自习桌都摆了桌面小物", str(desk_props.size()))
+	_ok(item_total >= 34, "桌面小物不少于 34 件", str(item_total))
+	_ok(item_kinds.size() == 6, "书/水杯/笔记本/电脑/笔筒/台灯六种齐全", str(item_kinds.size()))
+	_ok(dup == 0, "没有两张桌摆得一模一样", str(dup))
+	_ok(no_book == 0, "每张桌都至少有一件书类", str(no_book))
+	_ok(outside == 0, "桌面小物都落在桌面范围内", str(outside))
+	var room_objs: Node2D = room.get("objects") as Node2D
+	var drawn := 0
+	if room_objs != null:
+		for n in room_objs.get_children():
+			# Object.get() 只吃一个参数；没有 items 的节点拿到 null 直接跳过
+			var av: Variant = n.get("items")
+			if av is Array and (av as Array).size() > 0:
+				drawn += 1
+	_ok(drawn >= 34, "Room 把 items 传给了桌子节点（会真的画出来）", str(drawn))
 
 	print("[5] 自习空间不混进宿舍 / B1 的东西")
 	_ok((d.get("beds", []) as Array).is_empty(), "没有床")

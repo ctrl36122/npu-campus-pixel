@@ -52,6 +52,8 @@ var _drag_finger := -1                # 正在拖消息区的手指
 var _drag_y0 := 0.0                   # 按下时的 y（用于按绝对位移算滚动）
 var _drag_scroll0 := 0
 var _last_send_ms := 0                # 本地节流：上一次成功发出的时间
+var _recent_ms: Array = []            # 最近消息时间戳：刷屏窗口统计
+var _recent_text: Array = []          # 最近消息文本：重复内容拦截
 
 
 func _ready() -> void:
@@ -386,13 +388,27 @@ func _send_now(text: String) -> bool:
 			_append_system("你已被禁言，暂时不能发言")
 			return false
 		var now := Time.get_ticks_msec()
-		if _last_send_ms > 0 and now - _last_send_ms < ChatGuard.MIN_INTERVAL_MS:
-			_append_system("说慢一点，别刷屏")
+		# 先做内容分级：Lv3 整条不发（输入框保留原文，让用户知道被拦了），
+		# Lv1/Lv2 打码后照发并给一句提示。
+		var scan := ChatGuard.scan_full(text)
+		if int(scan["action"]) == ChatGuard.Action.BLOCK:
+			_append_system(String(scan["reason"]))
 			return false
+		# 间隔 / 60s 窗口条数 / 复读，和服务端 check_spam 用同一套阈值
+		var spam := ChatGuard.check_spam(now, _recent_ms, text, _recent_text)
+		if bool(spam["spam"]):
+			_append_system(String(spam["reason"]))
+			return false
+		if int(scan["action"]) != ChatGuard.Action.PASS:
+			_append_system(String(scan["reason"]))
 		_last_send_ms = now
-		if ChatGuard.has_blocked(text):
-			_append_system("消息里有不当用语，已用 * 代替")
-		text = ChatGuard.filter(text)
+		_recent_ms.append(now)
+		while _recent_ms.size() > 0 and int(_recent_ms[0]) < now - ChatGuard.RATE_WINDOW_MS:
+			_recent_ms.remove_at(0)
+		_recent_text.append(text)
+		while _recent_text.size() > ChatGuard.REPEAT_LIMIT + 2:
+			_recent_text.remove_at(0)
+		text = String(scan["filtered_text"])
 	Net.post_message.rpc(text)      # call_local：自己也会立刻收到一条
 	_idle = 0.0
 	_panel.modulate.a = 1.0

@@ -7,7 +7,9 @@
    整层 120×120 格（原来 96×38，面积约 4 倍），外墙一圈正方形
    正中 60×60 格是**镂空的中庭**，四边用亮色矮护栏围住、走不进去
    环带里摆 34 张双人自习桌：北 12 / 南 6 / 西 8 / 东 8
-   **一张桌的两把椅并排在桌子同一侧**（都朝桌面），不再是南北面对面
+   **一张桌的两把椅并排在桌子南侧、统一面朝前方（face=up）**，跟宿舍一样，
+   既不南北面对面，也不会背对桌子
+   每张桌摆一套各不相同的书 / 水杯 / 笔记本 / 电脑 / 笔筒 / 台灯（items 挂桌子数据里）
    南侧留一整条入口大厅：沙发讨论角、白板、书架、贩卖机、门前地垫
    北墙 8 扇落地窗首尾相接；Room.gd 的 bright 主题保持浅木地板
 
@@ -22,6 +24,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import random
 import re
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -59,6 +62,62 @@ DOOR_X, DOOR_W = 56.0, 8.0
 # ── 南侧入口大厅 / 讨论角 ──────────────────────────────────────────────
 LOUNGE_L_X, LOUNGE_R_X = 6.0, 86.0
 LOUNGE_Y, LOUNGE_W, LOUNGE_H = 103.0, 28.0, 13.0
+
+
+# ── 桌面小物（像素坐标，相对桌子 rect 左上角）──────────────────────────
+# 每张自习桌摆一套不一样的东西：书堆 / 水杯 / 摊开的笔记本 / 笔记本电脑 /
+# 笔筒 / 小台灯。数据挂在桌子 prop 的 items 上，由 RoomProp._table() 顺手画完，
+# 不另建 prop 节点 —— 桌面物件与桌子天然共享同一个 y-sort 位置，既不会被
+# 桌面盖掉，也不用抬 z_index 去压住站在桌前的玩家；小地图也不会多出噪点。
+DESK_ITEM_SIZE = {
+    "book": (12.0, 7.5),
+    "cup": (7.5, 9.0),
+    "laptop": (14.0, 9.0),
+    "notebook": (12.0, 8.0),
+    "pen": (7.5, 9.0),
+    "lamp": (9.0, 10.0),
+}
+# 每套至少有一件「书类」（book / notebook），其余随意搭；
+# 件数 1~3 不等，桌面上有的清爽有的堆满，远看就不会像复制粘贴。
+DESK_SETS: tuple[tuple[str, ...], ...] = (
+    ("book",),
+    ("book", "pen"),
+    ("book", "cup"),
+    ("book", "laptop"),
+    ("notebook", "pen"),
+    ("book", "lamp", "cup"),
+    ("laptop", "notebook"),
+    ("book", "notebook", "cup"),
+    ("notebook", "lamp", "pen"),
+    ("notebook", "cup"),
+    ("book", "lamp"),
+    ("book", "cup", "pen"),
+)
+DESK_SEED = 20261106
+
+
+def desk_items(i: int, table_w: float, table_h: float) -> list[dict]:
+    """第 i 张桌的桌面套装。固定种子 → 每次生成完全一致，34 张互不重样。"""
+    rng = random.Random(DESK_SEED + i * 7919)
+    # i*5 与 12 互质，34 张桌能把 12 套走全；i//3 再打散一下相邻桌的重复感
+    kinds = list(DESK_SETS[(i * 5 + i // 3) % len(DESK_SETS)])
+    # 槽距 18px > 最宽的笔记本（14px）+ 抖动，保证同桌两件不会叠在一起
+    slots = [7.0, 25.0, 43.0] if table_w >= TABLE_W else [4.0, 22.0]
+    rng.shuffle(slots)
+    tw, th = table_w * 8.0, table_h * 8.0
+    out: list[dict] = []
+    for k, sx in zip(kinds, slots):
+        pw, ph = DESK_ITEM_SIZE[k]
+        # 桌面顶面画在 o.y-8 .. o.y+th-8（RISE_TABLE=8px），物件要整个落在里面
+        py_hi = min(0.5, th - 8.0 - ph - 0.5)
+        out.append({
+            "k": k,
+            "px": round(max(1.0, min(sx + rng.uniform(-1.0, 1.0), tw - pw - 2.0)), 2),
+            "py": round(rng.uniform(-5.5, py_hi) if py_hi > -5.5 else -5.5, 2),
+            "pw": pw, "ph": ph,
+            "t": rng.randrange(5),
+        })
+    return out
 
 
 def skyoffice_pattern() -> dict:
@@ -153,17 +212,20 @@ def build() -> dict:
              k="rail", solid=True),                                           # 东
     ]
 
-    # ── 双人自习桌：一桌两椅**并排**在桌子北侧，都面朝桌面（face=down）──
+    # ── 双人自习桌：一桌两椅**并排**在桌子南侧，统一朝前（face=up）──
+    # 和宿舍完全同款：宿舍的座位也是 desk 南边一格、face="up"（面朝屏幕上方）。
+    # 光把 face 翻成 up 而把椅子留在桌北侧，人会背对桌子坐，所以位置一起换到南侧。
     specs = table_specs()
     for i, (tx, ty, group) in enumerate(specs):
-        props.append(rect(tx, ty, TABLE_W, TABLE_H, k="table", solid=True))
+        props.append(rect(tx, ty, TABLE_W, TABLE_H, k="table", solid=True,
+                          items=desk_items(i, TABLE_W, TABLE_H)))
         pair_w = SEAT_W * 2.0 + SEAT_PAIR_GAP
         sx0 = tx + (TABLE_W - pair_w) * 0.5
-        sy = ty - SEAT_H - SEAT_GAP
+        sy = ty + TABLE_H + SEAT_GAP
         for j in range(2):
             seats.append(rect(sx0 + j * (SEAT_W + SEAT_PAIR_GAP), sy,
                               SEAT_W, SEAT_H,
-                              id="study_%s_%02d_%d" % (group, i, j), face="down"))
+                              id="study_%s_%02d_%d" % (group, i, j), face="up"))
         # 桌角一小盆绿植，隔一张放一盆，纯装饰不挡路
         if i % 2 == 0:
             props.append(rect(tx + TABLE_W - 1.5, ty + 0.5, 1.2, 1.2, k="plant"))
@@ -178,7 +240,8 @@ def build() -> dict:
     # 左侧讨论角
     props += [
         rect(8.0, 105.0, 8.0, 2.6, k="sofa", solid=True),
-        rect(10.6, 110.0, 5.0, 2.2, k="table", solid=True),
+        rect(10.6, 110.0, 5.0, 2.2, k="table", solid=True,
+             items=desk_items(100, 5.0, 2.2)),
         rect(8.6, 113.4, 2.0, 1.6, k="cushion"),
         rect(14.0, 113.4, 2.0, 1.6, k="cushion"),
         rect(20.0, 104.0, 7.0, 1.2, k="board"),
@@ -190,7 +253,8 @@ def build() -> dict:
     # 右侧讨论角（镜像，用书架代替贩卖机，两边不完全一样）
     props += [
         rect(98.0, 105.0, 8.0, 2.6, k="sofa", solid=True),
-        rect(100.6, 110.0, 5.0, 2.2, k="table", solid=True),
+        rect(100.6, 110.0, 5.0, 2.2, k="table", solid=True,
+             items=desk_items(101, 5.0, 2.2)),
         rect(98.6, 113.4, 2.0, 1.6, k="cushion"),
         rect(104.0, 113.4, 2.0, 1.6, k="cushion"),
         rect(90.0, 104.0, 7.0, 1.2, k="board"),
@@ -198,9 +262,10 @@ def build() -> dict:
         rect(87.0, 104.0, 1.6, 1.6, k="plant"),
         rect(112.0, 113.0, 1.6, 1.6, k="plant"),
     ]
+    # 讨论角的坐垫也统一朝前：沙发/茶几在北边，face=up 正好面朝它们
     for i, cx in enumerate((8.6, 14.0, 98.6, 104.0)):
         seats.append(rect(cx, 113.4, 2.0, 1.6,
-                          id="study_lounge_%d" % i, face="down"))
+                          id="study_lounge_%d" % i, face="up"))
 
     # ── 门前：两排矮书架 + 地垫 + 出口玻璃门 ─────────────────────────────
     props += [
@@ -215,7 +280,7 @@ def build() -> dict:
     return {
         "id": "study_space",
         "name": "图书馆",
-        "desc": "回字形的明亮自习大厅，中间是镂空的中庭，环带里全是并排的双人桌。",
+        "desc": "回字形的明亮自习大厅，中间是镂空的中庭，环带里全是并排朝前的双人桌。",
         "bright": True,
         "W": W, "H": H,
         "zoom": ZOOM,
@@ -264,6 +329,8 @@ def validate(d: dict) -> list[str]:
         problems.append("桌边座位 %d 与桌数×2 不符" % len(desk_seats))
 
     for s in d["seats"]:
+        if s.get("face") != "up":
+            problems.append("座位没统一朝前：%s" % s.get("id"))
         for p in d["props"]:
             if p.get("k") in ("table", "sofa", "block", "vending") and overlap(s, p):
                 problems.append("座位压家具：%s" % s.get("id"))
@@ -296,11 +363,41 @@ def validate(d: dict) -> list[str]:
                 problems.append("%s/%s 互相重叠 @%s"
                                 % (p.get("k"), q.get("k"), (p["x"], p["y"])))
 
-    # 每桌两把椅：同一侧（同 y）、并排（x 不同）、朝向相同
+    # ── 桌面小物：每张桌都有、组合不重样、都落在桌面里、同桌不互相压 ──
+    desk_props = [p for p in d["props"] if p.get("items")]
+    if len(desk_props) < len(tables):
+        problems.append("有桌子没摆桌面小物（%d/%d）" % (len(desk_props), len(tables)))
+    seen_desks = set()
+    desk_kinds = set()
+    for p in d["props"]:
+        its = p.get("items", [])
+        if not its:
+            continue
+        tw, th = float(p["w"]) * 8.0, float(p["h"]) * 8.0
+        sig = tuple((it["k"], it["t"], it["px"], it["py"]) for it in its)
+        if sig in seen_desks:
+            problems.append("两张桌的桌面摆设完全一样 @%s" % ((p["x"], p["y"]),))
+        seen_desks.add(sig)
+        if not any(it["k"] in ("book", "notebook") for it in its):
+            problems.append("桌面没放书 @%s" % ((p["x"], p["y"]),))
+        for it in its:
+            desk_kinds.add(it["k"])
+            if not (1.0 <= it["px"] and it["px"] + it["pw"] <= tw - 1.0
+                    and -7.0 <= it["py"] and it["py"] + it["ph"] <= th - 8.0 + 0.01):
+                problems.append("桌面小物越出桌面 @%s" % ((p["x"], p["y"]),))
+        for ai, a in enumerate(its):
+            for b in its[ai + 1:]:
+                if (a["px"] < b["px"] + b["pw"] and b["px"] < a["px"] + a["pw"]
+                        and a["py"] < b["py"] + b["ph"] and b["py"] < a["py"] + a["ph"]):
+                    problems.append("桌面小物互相压住 @%s" % ((p["x"], p["y"]),))
+    if len(desk_kinds) < 6:
+        problems.append("桌面小物种类太少（%d 种）" % len(desk_kinds))
+
+    # 每桌两把椅：都在桌子南侧（同 y）、并排（x 不同）、统一 face=up 朝前
     for t in tables:
         pair = [s for s in desk_seats
                 if t["x"] <= s["x"] and s["x"] + s["w"] <= t["x"] + t["w"]
-                and abs(s["y"] - (t["y"] - SEAT_H - SEAT_GAP)) < 0.01]
+                and abs(s["y"] - (t["y"] + TABLE_H + SEAT_GAP)) < 0.01]
         if len(pair) != 2:
             problems.append("双人桌 @%s 没配齐两把椅（%d 把）"
                             % ((t["x"], t["y"]), len(pair)))
@@ -308,8 +405,8 @@ def validate(d: dict) -> list[str]:
         pair.sort(key=lambda s: s["x"])
         if abs(pair[0]["y"] - pair[1]["y"]) > 0.01:
             problems.append("双人桌 @%s 的两把椅不是并排（南北错开）" % ((t["x"], t["y"]),))
-        if {s.get("face") for s in pair} != {"down"}:
-            problems.append("双人桌 @%s 的两把椅朝向不一致" % ((t["x"], t["y"]),))
+        if {s.get("face") for s in pair} != {"up"}:
+            problems.append("双人桌 @%s 的两把椅没统一朝前" % ((t["x"], t["y"]),))
         if pair[1]["x"] - (pair[0]["x"] + pair[0]["w"]) < 0.5:
             problems.append("双人桌 @%s 的两把椅黏在一起" % ((t["x"], t["y"]),))
         mid = ((pair[0]["x"] + pair[0]["w"] * 0.5)
@@ -333,20 +430,24 @@ def main() -> None:
     with io.open(OUT, "w", encoding="utf-8") as f:
         json.dump(d, f, ensure_ascii=False, indent=1)
     print("已生成 %s" % OUT)
-    print("整层 %g×%g 格（%.2f 倍于旧版），中庭 %g×%g 格镂空，%d 张双人桌（并排座），%d 个座位，%d 扇窗"
+    print("整层 %g×%g 格（%.2f 倍于旧版），中庭 %g×%g 格镂空，%d 张双人桌（并排朝前座），%d 个座位，%d 扇窗"
           % (d["W"], d["H"], d["W"] * d["H"] / (96.0 * 38.0),
              d["voids"][0]["w"], d["voids"][0]["h"],
              len([p for p in d["props"] if p.get("k") == "table"
                   and float(p["w"]) == TABLE_W]),
              len(d["seats"]),
              len([p for p in d["props"] if p.get("k") == "window"])))
+    items = [it for p in d["props"] for it in p.get("items", [])]
+    print("桌面小物 %d 件 / %d 张桌，%d 种，逐桌不重样"
+          % (len(items), len([p for p in d["props"] if p.get("items")]),
+             len({it["k"] for it in items})))
     print("参考：%s" % d["source"])
     if problems:
         print("!! 几何自检发现 %d 处问题：" % len(problems))
         for p in problems[:12]:
             print("   -", p)
         raise SystemExit(1)
-    print("几何自检通过：四倍正方形、中庭居中镂空、每桌两把并排椅、门洞对齐")
+    print("几何自检通过：四倍正方形、中庭居中镂空、每桌两把并排朝前椅、门洞对齐")
 
 
 if __name__ == "__main__":
