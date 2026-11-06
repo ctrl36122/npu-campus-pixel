@@ -1,7 +1,8 @@
 extends SceneTree
-## 图书馆自习空间回归测试。
+## 图书馆内景回归测试。
 ##
-## 覆盖：房间数据 / 亮色地板实际像素 / 两人一桌 / 内部楼层号 7 /
+## 覆盖：回字形大房间 / 中庭镂空（地板像素实测）/ 亮色主题只作用于本间 /
+## 一张桌两把并排椅 / 内部楼层号 7 / 不挂常驻招牌与标签 /
 ## 图书馆门口热点 → 进房 → 走回门口 → 出房 的完整闭环。
 ##
 ##   APPDATA=<临时目录> XGD_OFFLINE=1 XGD_NOHOME=1 XGD_ROOM=1 XGD_ROOM_FLOOR=7 \
@@ -45,7 +46,7 @@ func _ok(cond: bool, label: String, extra := "") -> void:
 
 func _finish() -> bool:
 	if fails.is_empty():
-		print("结果 PASS：自习空间 %d 项全过" % checks)
+		print("结果 PASS：图书馆内景 %d 项全过" % checks)
 		quit(0)
 	else:
 		print("结果 FAIL：%s" % ", ".join(fails))
@@ -98,53 +99,99 @@ func _test_room() -> void:
 		"楼层 7 映射到自习空间")
 	_ok(String(arena.call("_room_id_for", "res://assets/rooms/study_space.json")) == "study_space",
 		"房间 id 映射正确")
-	_ok(String((arena.get("_floor_label") as Label).text) == "图书馆 · 自习空间",
-		"楼层标签文案正确")
+	_ok(not String(d.get("name", "")).contains("自习空间"), "房间名不标自习空间",
+		String(d.get("name", "")))
+	_ok(not bool((arena.get("_floor_label") as Label).visible), "房内不挂楼层/空间标签")
+	_ok(float(d.get("zoom", 0.0)) > 0.0, "大房间自带镜头倍率",
+		"zoom=%.2f" % float(d.get("zoom", 0.0)))
 
 	print("[2] 明亮（直接量地板像素，不靠肉眼）")
 	var spr: Sprite2D = room.get_node_or_null("Floor") as Sprite2D
 	_ok(spr != null and spr.texture != null, "地板贴图已烘焙")
 	if spr != null and spr.texture != null:
 		var img: Image = spr.texture.get_image()
-		var px: Vector2i = Vector2i(int(img.get_width() * 0.5), int(img.get_height() * 0.5))
-		var c := img.get_pixel(px.x, px.y)
-		var lum := (c.r + c.g + c.b) / 3.0
-		_ok(lum > 0.60, "房间中央地板是浅色", "亮度 %.3f @%s" % [lum, px])
-		_ok(lum < 0.98, "没有亮到过曝成纯白", "亮度 %.3f" % lum)
+		_ok(img.get_width() == 960 and img.get_height() == 960,
+			"地板图是 120×120 格", "%d×%d" % [img.get_width(), img.get_height()])
+		# 固定像素避开每 12px 的木板拼缝 / 中庭 40px 的天窗格线，量的是面色
+		var wood := img.get_pixel(200, 203)
+		var hole := img.get_pixel(499, 503)
+		var lum_w := (wood.r + wood.g + wood.b) / 3.0
+		var lum_h := (hole.r + hole.g + hole.b) / 3.0
+		_ok(lum_w > 0.75, "环带地板是浅色", "亮度 %.3f" % lum_w)
+		_ok(lum_w < 0.98, "没有亮到过曝成纯白", "亮度 %.3f" % lum_w)
+		_ok(lum_h > 0.60, "中庭天光也是浅色（不破坏明亮氛围）", "亮度 %.3f" % lum_h)
+		_ok(hole.b - wood.b > 0.12, "中庭与木地板明显不同色（真的挖空了）",
+			"Δb=%.3f" % (hole.b - wood.b))
 
-	print("[3] 一整个大间 · 两个人一桌")
+	print("[3] 正方形套正方形 · 四倍面积 · 中间镂空")
+	_ok(float(d["W"]) == float(d["H"]), "外框是正方形")
+	var area_ratio := float(d["W"]) * float(d["H"]) / (96.0 * 38.0)
+	_ok(area_ratio > 3.7 and area_ratio < 4.3, "面积约为原来的 4 倍", "%.2f 倍" % area_ratio)
+	var voids: Array = d.get("voids", [])
+	_ok(voids.size() == 1, "有 1 块镂空中庭")
+	if not voids.is_empty():
+		var v: Dictionary = voids[0]
+		_ok(float(v["w"]) == float(v["h"]), "中庭也是正方形")
+		_ok(absf(float(v["x"]) + float(v["w"]) * 0.5 - float(d["W"]) * 0.5) < 0.01
+			and absf(float(v["y"]) + float(v["h"]) * 0.5 - float(d["H"]) * 0.5) < 0.01,
+			"中庭居中")
+		_ok(float(v["w"]) >= 48.0, "中庭够大，看得出来是回字", "%.0f 格" % float(v["w"]))
+	var rails := 0
+	for p in d.get("props", []):
+		if String(p.get("k", "")) == "rail" and bool(p.get("solid", false)):
+			rails += 1
+	_ok(rails == 4, "中庭四边都有带碰撞的护栏", str(rails))
+	var mm: Texture2D = room.get("minimap_tex")
+	if mm != null:
+		var mi: Image = mm.get_image()
+		var mc := mi.get_pixel(int(mi.get_width() * 0.5), int(mi.get_height() * 0.5))
+		var mo := mi.get_pixel(int(mi.get_width() * 0.13), int(mi.get_height() * 0.13))
+		_ok((mc.r + mc.g + mc.b) / 3.0 > (mo.r + mo.g + mo.b) / 3.0,
+			"小地图上也读得出中间那块方洞")
+
+	print("[4] 一张桌两把椅并排（不再面对面）")
 	var tables: Array = []
 	for p in d.get("props", []):
 		if String(p.get("k", "")) == "table" and float(p.get("w", 0)) == 9.0:
 			tables.append(p)
-	_ok(tables.size() == 12, "12 张双人桌", str(tables.size()))
+	_ok(tables.size() == 34, "环带里 34 张双人桌", str(tables.size()))
 	_ok((d.get("room_doors", []) as Array).is_empty(), "没有分隔单间的门")
 	_ok((d.get("team_boards", []) as Array).is_empty(), "没有组队板")
 	var walls: Array = d.get("walls", [])
 	_ok(walls.size() == 5, "只有四面外墙（南墙按门洞切两段）", str(walls.size()))
 	var seats: Array = d.get("seats", [])
-	_ok(seats.size() == 26, "26 个座位（12×2 + 2 个坐垫）", str(seats.size()))
-	var pairs := 0
+	_ok(seats.size() == 72, "72 个座位（34×2 + 4 个坐垫）", str(seats.size()))
+	var side_by_side := 0
 	for t in tables:
-		var fs: Array = []
+		var pair: Array = []
 		for s in seats:
-			if absf(float(s["x"]) + float(s["w"]) * 0.5
-					- (float(t["x"]) + float(t["w"]) * 0.5)) > 0.01:
+			if "study_lounge" in String(s.get("id", "")):
 				continue
-			if absf(float(s["y"]) + float(s["h"]) - float(t["y"])) < 1.0 \
-					or absf(float(s["y"]) - float(t["y"] + t["h"])) < 1.0:
-				fs.append(String(s.get("face", "")))
-		if fs.size() == 2 and fs.has("up") and fs.has("down"):
-			pairs += 1
-	_ok(pairs == 12, "12 张桌都配了南北对面的两把椅", str(pairs))
-	_ok((room.get("seats") as Array).size() == 26, "Room 实际建出 26 个可坐点")
+			if float(s["x"]) >= float(t["x"]) and float(s["x"]) + float(s["w"]) <= float(t["x"]) + float(t["w"]) \
+					and absf(float(s["y"]) - (float(t["y"]) - 2.0)) < 0.01:
+				pair.append(s)
+		if pair.size() != 2:
+			continue
+		if absf(float(pair[0]["y"]) - float(pair[1]["y"])) > 0.01:
+			continue
+		if absf(float(pair[0]["x"]) - float(pair[1]["x"])) < 0.5:
+			continue
+		if String(pair[0].get("face", "")) == "down" and String(pair[1].get("face", "")) == "down":
+			side_by_side += 1
+	_ok(side_by_side == 34, "34 张桌都是同侧并排、同朝向的两把椅", str(side_by_side))
+	var face_to_face := 0
+	for s in seats:
+		if String(s.get("face", "")) == "up":
+			face_to_face += 1
+	_ok(face_to_face == 0, "没有残留面对面（up）的椅子", str(face_to_face))
+	_ok((room.get("seats") as Array).size() == 72, "Room 实际建出 72 个可坐点")
 	var wins := 0
 	for p in d.get("props", []):
 		if String(p.get("k", "")) == "window":
 			wins += 1
-	_ok(wins == 6, "北墙 6 扇连续落地窗", str(wins))
+	_ok(wins == 8, "北墙 8 扇连续落地窗", str(wins))
 
-	print("[4] 自习空间不混进宿舍 / B1 的东西")
+	print("[5] 自习空间不混进宿舍 / B1 的东西")
 	_ok((d.get("beds", []) as Array).is_empty(), "没有床")
 	_ok((d.get("pod_floors", []) as Array).is_empty(), "没有深色机位地胶")
 	_ok(not d.has("elevator"), "没有电梯（自习空间不换层）")
@@ -157,7 +204,7 @@ func _test_room() -> void:
 			beds += 1
 	_ok(beds == 0, "公共空间不摆猫窝")
 
-	print("[4b] 回归：亮色主题只作用于自习空间")
+	print("[5b] 回归：亮色主题只作用于自习空间")
 	var RS = load("res://net/scenes/Room.gd")
 	for p in ["res://assets/rooms/dorm_space.json", "res://assets/rooms/activity_room.json"]:
 		var tmp := Node2D.new()
@@ -178,7 +225,7 @@ func _test_room() -> void:
 
 
 func _leave_and_probe_entry() -> void:
-	print("[5] 图书馆门口热点")
+	print("[6] 图书馆门口热点（不标牌，只靠近提示）")
 	var entries: Array = arena.get("_study_entries")
 	_ok(entries.size() == 1, "收集到 1 处图书馆入口", str(entries.size()))
 	if entries.is_empty():
@@ -189,7 +236,14 @@ func _leave_and_probe_entry() -> void:
 	_ok(String(e["name"]).contains("图书馆"), "入口挂在图书馆", String(e["name"]))
 	_ok(hotspot.y >= 375.0 and hotspot.y <= 390.0,
 		"门热点落在图书馆南沿广场", "y=%.1f" % hotspot.y)
-	_ok(e.get("sign") != null, "门口有可见招牌")
+	_ok(not e.has("sign"), "入口不再挂常驻招牌")
+	var objs: Node2D = arena.get("campus").get_node_or_null("Objects") as Node2D
+	var signs := 0
+	if objs != null:
+		for c in objs.get_children():
+			if String(c.name) == "StudySign":
+				signs += 1
+	_ok(signs == 0, "场景里没有 StudySign 节点")
 	# 走出去，再站到热点上
 	arena.call("leave_room")
 	left_once = true
@@ -200,18 +254,21 @@ func _leave_and_probe_entry() -> void:
 
 
 func _test_reentry() -> bool:
-	print("[6] 站在图书馆门口按 E 进自习空间")
-	_ok(left_once, "已从自习空间走出来")
+	print("[7] 站在图书馆门口按 E 进去")
+	_ok(left_once, "已从内景走出来")
 	_ok(not bool(arena.get("in_room")), "出房后回到校园")
 	_ok(String(arena.get("_near_study")) != "", "热点被识别",
 		String(arena.get("_near_study")))
 	var hint: Button = arena.get("_door_hint")
-	_ok(hint != null and hint.text.contains("自习空间"), "提示条写的是自习空间",
+	_ok(hint != null and hint.text.contains("图书馆"), "靠近时才给提示",
+		hint.text if hint != null else "")
+	_ok(hint != null and not hint.text.contains("自习空间"), "提示里也不标空间名",
 		hint.text if hint != null else "")
 	arena.call("_try_interact")
 	var room: Node = arena.get("room")
 	_ok(bool(arena.get("in_room")), "按 E 后重新进房")
 	_ok(room != null and String(room.get("data").get("id", "")) == "study_space",
-		"进的是自习空间而不是宿舍")
+		"进的是图书馆内景而不是宿舍")
 	_ok(int(arena.get("current_floor")) == 7, "楼层号回到 7")
+	_ok(not bool((arena.get("_floor_label") as Label).visible), "再进来依旧不挂标签")
 	return _finish()

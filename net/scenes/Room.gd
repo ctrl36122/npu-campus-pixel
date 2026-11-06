@@ -372,6 +372,16 @@ func _bake_floor() -> Image:
 			float(rg["w"]) * TS, float(rg["h"]) * TS
 		))
 
+	# ── 回字形中庭：把中间那块地板「挖掉」，换成天光色 + 井壁内阴影 ──
+	# 房间的地板是一整张静态图，中庭也画在这张图里；四周的护栏是独立 prop，
+	# 带碰撞，所以人只能沿环带走，中间读起来就是一块镂空的挑空。
+	for item in data.get("voids", []):
+		var vd: Dictionary = item
+		_paint_void(img, Rect2(
+			float(vd["x"]) * TS, float(vd["y"]) * TS,
+			float(vd["w"]) * TS, float(vd["h"]) * TS
+		))
+
 	# ── 边缘压暗：让地板嵌在暗处，而不是一块浮空的板 ──
 	# 亮房只留很轻的一圈，压太狠会把「靠窗明亮」又压回暗室。
 	var edge := 26
@@ -433,6 +443,7 @@ func _bake_minimap() -> Texture2D:
 		"sofa": Color("8b6a90"),
 		"cushion": Color("6b5a80"),
 		"pit": Color("232830"),
+		"rail": Color("9fb8c9"),
 	}
 
 	# 隔间地面：每间一块，小地图上就成了一排小格子 —— 一眼认得出这是「隔间房」
@@ -445,6 +456,11 @@ func _bake_minimap() -> Texture2D:
 		var rg: Dictionary = item
 		_fill_cells(img, Rect2(float(rg["x"]), float(rg["y"]), float(rg["w"]), float(rg["h"])),
 			k, Color("2c333d"))
+	# 中庭镂空：一块比地板更亮的方洞，小地图上一眼看出「回」字
+	for item in data.get("voids", []):
+		var vd: Dictionary = item
+		_fill_cells(img, Rect2(float(vd["x"]), float(vd["y"]), float(vd["w"]), float(vd["h"])),
+			k, Color("f2fbff") if bright else Color("141821"))
 
 	for item in data.get("walls", []):
 		var p: Dictionary = item
@@ -483,6 +499,52 @@ func _fill_cells(img: Image, r: Rect2, k: float, col: Color) -> void:
 	if x1 <= x0 or y1 <= y0:
 		return
 	img.fill_rect(Rect2i(x0, y0, x1 - x0, y1 - y0), col)
+
+
+## 回字形中庭的「镂空」：不摆地毯，而是把这一块地板直接换成天光色，
+## 四边压一圈向内衰减的井壁阴影 —— 远看就是地板被切掉一块、往下是挑空。
+## 只在亮房用；中间再嵌一圈细亮线，让「正方形套正方形」的层次读得出来。
+func _paint_void(img: Image, r: Rect2) -> void:
+	var x0 := maxi(0, int(r.position.x))
+	var y0 := maxi(0, int(r.position.y))
+	var x1 := mini(img.get_width(), int(r.end.x))
+	var y1 := mini(img.get_height(), int(r.end.y))
+	if x1 - x0 < 32 or y1 - y0 < 32:
+		return
+	var w := x1 - x0
+	var h := y1 - y0
+	# 切口外沿：上/左受光亮边，下/右一道暗缝，地板才像被切开而不是刷了块颜色
+	_blend(img, Rect2i(x0 - 3, y0 - 3, w + 6, 3), Color("f6fbfd"))
+	_blend(img, Rect2i(x0 - 3, y0, 3, h), Color("f6fbfd"))
+	_blend(img, Rect2i(x1, y0, 5, h), Color(0.05, 0.10, 0.14, 0.45))
+	_blend(img, Rect2i(x0, y1, w, 5), Color(0.05, 0.10, 0.14, 0.45))
+	# 天光：比浅木地板更冷更亮，保持整间房的明亮氛围
+	img.fill_rect(Rect2i(x0, y0, w, h), Color("cfe3ee"))
+	# 大方格（天窗分格），线要极淡，别抢掉「空」的感觉
+	var step := 40
+	var gx := x0 + step
+	while gx < x1:
+		_blend(img, Rect2i(gx, y0, 1, h), Color(0.35, 0.55, 0.65, 0.30))
+		gx += step
+	var gy := y0 + step
+	while gy < y1:
+		_blend(img, Rect2i(x0, gy, w, 1), Color(0.35, 0.55, 0.65, 0.30))
+		gy += step
+	# 井壁内阴影：四边各 26px，越靠切口越暗 —— 中间是亮的、四周往下沉，
+	# 这一圈深度是「镂空」读得出来的关键，只铺一块浅色地砖会像玻璃地板。
+	for i in range(26):
+		var t := 1.0 - float(i) / 26.0
+		var a := 0.58 * t * t
+		_blend(img, Rect2i(x0 + i, y0 + i, w - i * 2, 1), Color(0.08, 0.15, 0.21, a))
+		_blend(img, Rect2i(x0 + i, y1 - 1 - i, w - i * 2, 1), Color(0.08, 0.15, 0.21, a))
+		_blend(img, Rect2i(x0 + i, y0 + i, 1, h - i * 2), Color(0.08, 0.15, 0.21, a))
+		_blend(img, Rect2i(x1 - 1 - i, y0 + i, 1, h - i * 2), Color(0.08, 0.15, 0.21, a))
+	# 内嵌一圈细亮线：回字中回字，远看更像套了两个正方形
+	var inset := 30
+	_blend(img, Rect2i(x0 + inset, y0 + inset, w - inset * 2, 1), Color(1, 1, 1, 0.55))
+	_blend(img, Rect2i(x0 + inset, y1 - inset - 1, w - inset * 2, 1), Color(1, 1, 1, 0.55))
+	_blend(img, Rect2i(x0 + inset, y0 + inset, 1, h - inset * 2), Color(1, 1, 1, 0.55))
+	_blend(img, Rect2i(x1 - inset - 1, y0 + inset, 1, h - inset * 2), Color(1, 1, 1, 0.55))
 
 
 ## 隔间地胶：比外面的木地板深一档的灰蓝，带细密织纹和一圈内嵌包边。

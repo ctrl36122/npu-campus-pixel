@@ -43,6 +43,8 @@ func _draw() -> void:
 			_wall(o, w, h)
 		"window":
 			_window(o, w, h)
+		"rail":
+			_rail(o, w, h)
 		"desk":
 			_desk(o, w, h)
 		"board":
@@ -92,6 +94,33 @@ func _crate(o: Vector2, w: float, h: float, top: Color, face: Color) -> void:
 	draw_rect(Rect2(o.x + w - 1.0, o.y - RISE_BOX, 1.0, h), top.darkened(0.25))
 	# 包边十字
 	draw_rect(Rect2(o.x, o.y - RISE_BOX + h * 0.5 - 0.5, w, 1.0), top.darkened(0.30))
+
+
+# ---------------------------------------------------------------- 中庭护栏
+
+## 中庭四边的矮玻璃护栏：亮房里是浅蓝白，暗房里是灰金属。
+## 横向段（w>=h）画一根顶杆 + 等距立柱；纵向段反过来画一根侧杆 + 横档。
+## 它带碰撞但不画成实墙 —— 中庭要透得出去，才有「镂空」的感觉。
+func _rail(o: Vector2, w: float, h: float) -> void:
+	var glass := Color(0.82, 0.92, 0.96, 0.55) if bright else Color(0.30, 0.36, 0.42, 0.80)
+	var bar := Color("f7fcff") if bright else Color("8794a0")
+	var post := Color(0.62, 0.77, 0.85, 0.85) if bright else Color("5c6873")
+	draw_rect(Rect2(o.x, o.y + h - 2.0, w, 2.0), Color(0, 0, 0, 0.20))
+	if w >= h:
+		draw_rect(Rect2(o.x, o.y - 5.0, w, h + 5.0), glass)
+		draw_rect(Rect2(o.x, o.y - 6.0, w, 2.0), bar)
+		draw_rect(Rect2(o.x, o.y - 3.0, w, 1.0), post)
+		var xx := o.x
+		while xx < o.x + w:
+			draw_rect(Rect2(xx, o.y - 6.0, 2.0, h + 6.0), post)
+			xx += 12.0
+	else:
+		draw_rect(Rect2(o.x, o.y, w, h), glass)
+		draw_rect(Rect2(o.x, o.y, 2.0, h), bar)
+		var yy := o.y
+		while yy < o.y + h:
+			draw_rect(Rect2(o.x, yy, w, 2.0), post)
+			yy += 12.0
 
 
 # ---------------------------------------------------------------- 隔断墙

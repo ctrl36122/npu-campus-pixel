@@ -1998,7 +1998,8 @@ var _cam_limit := {}
 ## 可进入的建筑：[{name, rect}]。rect 是格坐标的包围盒外扩前原尺寸。
 var _dorms: Array = []
 var _near_dorm := ""
-## 图书馆自习空间入口：[{name, rect, sign}]。跟宿舍分开存，走的是另一份房间数据。
+## 图书馆入口：[{name, rect}]。跟宿舍分开存，走的是另一份房间数据。
+## 不挂常驻招牌、也不进顶部标签，只有靠近时给一条 E 提示。
 var _study_entries: Array = []
 var _near_study := ""
 ## 站在旁边的另一个玩家（加好友用），空字典 = 旁边没人
@@ -3341,6 +3342,13 @@ func _fit_room_zoom(avatar: Node) -> void:
 	if OS.has_environment("XGD_ZOOM"):
 		avatar.set("_cam_zoom_target", clampf(OS.get_environment("XGD_ZOOM").to_float(), 0.55, 3.0))
 		return
+	# 房间数据可以自带镜头倍率：特别大的房间（120×120 回字形自习大厅）如果
+	# 按高度硬 fit 全屋，人物会被缩成几个像素。给固定视距、靠走动和小地图看全貌。
+	var room_data: Dictionary = (room as Node2D).get("data")
+	var zoom_hint := float(room_data.get("zoom", 0.0))
+	if zoom_hint > 0.0:
+		avatar.set("_cam_zoom_target", clampf(zoom_hint, 0.55, ROOM_ZOOM))
+		return
 	var vp: Vector2 = get_viewport().get_visible_rect().size
 	var rw: Vector2 = (room as Node2D).get("size_px") * (room as Node2D).global_scale
 	var fit_h: float = vp.y / maxf(rw.y, 1.0) * 0.94
@@ -3401,34 +3409,8 @@ func _collect_study_entries() -> void:
 		_study_entries.append({
 			"name": nm,
 			"rect": Rect2(cx - 9.0, max_y, 18.0, 9.0),
-			"sign": _make_study_sign(cx, max_y),
 		})
-	print("[arena] 自习空间入口 %d 处" % _study_entries.size())
-
-
-## 门口一块世界空间的小招牌。挂在 campus/Objects（已经是 8px/格 的局部空间），
-## 字号 9 会被 campus 的 2 倍缩放抬到 18px，跟场景里的文字牌同一量级。
-func _make_study_sign(cx: float, door_y: float) -> Label:
-	var lb := Label.new()
-	lb.name = "StudySign"
-	lb.text = "自习空间 ↓"
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.96, 0.97, 0.92, 0.92)
-	sb.border_color = Color(0.30, 0.52, 0.68, 0.95)
-	sb.set_border_width_all(2)
-	sb.content_margin_left = 6
-	sb.content_margin_right = 6
-	sb.content_margin_top = 3
-	sb.content_margin_bottom = 3
-	lb.add_theme_stylebox_override("normal", sb)
-	lb.add_theme_font_size_override("font_size", 9)
-	lb.add_theme_color_override("font_color", Color("26404f"))
-	lb.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var objs: Node2D = campus.get_node_or_null("Objects") as Node2D
-	if objs != null:
-		objs.add_child(lb)
-		lb.position = Vector2(cx * TS - 34.0, (door_y - 2.4) * TS)
-	return lb
+	print("[arena] 图书馆入口 %d 处（不挂常驻招牌，只在靠近时提示）" % _study_entries.size())
 
 
 ## 提示条尺寸（逻辑像素）。够放「星天苑H座 · 按 E 进入「宿舍空间」」这一整行。
@@ -3731,8 +3713,8 @@ func _update_interact_hint(delta: float) -> void:
 	if study_hit != "":
 		_near_dorm = ""
 		_door_hint.visible = true
-		# 建筑全名「亚洲最大水上图书馆」会撑到半屏宽，门口只用短称
-		_door_hint.text = "图书馆 · 按 E 进入「自习空间」"
+		# 不在世界里立牌子、也不在 UI 上标空间名：只有走近了才给这一条提示
+		_door_hint.text = "图书馆 · 按 E 进入"
 		return
 	var hit := ""
 	for d in _dorms:
@@ -4252,10 +4234,12 @@ func _update_floor_label() -> void:
 			_floor_label.visible = false
 		return
 	_ensure_floor_ui()
-	_floor_label.visible = true
+	# 图书馆不挂楼层/空间名，门口的靠近提示就是唯一引导
 	if current_floor == STUDY_FLOOR:
-		_floor_label.text = "图书馆 · 自习空间"
-	elif current_floor == BASEMENT_FLOOR:
+		_floor_label.visible = false
+		return
+	_floor_label.visible = true
+	if current_floor == BASEMENT_FLOOR:
 		_floor_label.text = "B1 · 游戏活动室"
 	else:
 		_floor_label.text = "宿舍楼 · %d / %d 层" % [current_floor, FLOOR_COUNT]
