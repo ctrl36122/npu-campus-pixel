@@ -22,6 +22,9 @@ const EDGE_T := 24.0
 var node_scale := ROOM_SCALE
 
 var data: Dictionary = {}
+## 明亮主题：自习空间用浅木地板 / 浅墙 / 淡色地毯。宿舍与 B1 活动室保持原来的暗色调，
+## 靠房间数据里的 "bright": true 切换，一套绘制代码管两种气质。
+var bright := false
 var objects: Node2D          ## 家具与玩家的共同容器（y 排序）
 var glow: Node2D             ## 发光层（additive，画在家具之上）
 var solids: StaticBody2D     ## 家具/边界的碰撞
@@ -47,6 +50,7 @@ func load_room(path: String) -> bool:
 		push_error("[room] 房间数据不是 JSON 对象：%s" % path)
 		return false
 	data = parsed
+	bright = bool(data.get("bright", false))
 	_build()
 	_build_seats()
 	return true
@@ -229,6 +233,7 @@ func _add_prop(kind: String, r: Dictionary, z: int = 0) -> void:
 	var n := RoomProp.new()
 	n.name = "%s_%d" % [kind, objects.get_child_count()]
 	objects.add_child(n)
+	n.set("bright", bright)
 	n.call("setup", kind, Rect2(float(r["x"]), float(r["y"]), float(r["w"]), float(r["h"])), z)
 
 
@@ -294,6 +299,11 @@ func _setup_glow() -> void:
 					"r": 30.0,
 					"color": Color(0.86, 0.93, 1.0, 0.18),
 				})
+	if bright:
+		# additive 光打在浅色地板上会过曝成一片白；亮房里只留一点设备的冷反光
+		for s in spots:
+			var c: Color = s["color"]
+			s["color"] = Color(c.r, c.g, c.b, c.a * 0.45)
 	glow.call("setup", spots)
 
 
@@ -309,14 +319,16 @@ func _bake_floor() -> Image:
 	var w := int(round(size_px.x))
 	var h := int(round(size_px.y))
 	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
-	img.fill(Color("1e1812"))
+	# 亮房：浅枫木 + 冷灰边；暗房（宿舍 / 活动室）：原来的深棕。
+	# 只换颜色不换纹理尺度，两块房间远看仍是同一套像素语言。
+	img.fill(Color("cfd8dc") if bright else Color("1e1812"))
 
 	# ── 木板：12px 高 × 96px 长，横向铺、错缝 ──
 	# 每块板自己微调明度（±1 个色阶），而不是靠两种色块交替 ——
 	# 后者在大面积上会形成「砖墙」，前者才是木地板。
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 20261029
-	var base := Color("2a221a")
+	var base := Color("e8dcc0") if bright else Color("2a221a")
 	var y := 0
 	while y < h:
 		var x := 0
@@ -330,12 +342,15 @@ func _bake_floor() -> Image:
 	# ── 拼缝：横缝带一道高光，竖缝按行错开半块 ──
 	y = 0
 	var row := 0
+	var seam_a := 0.09 if bright else 0.24
+	var seam_hi := 0.07 if bright else 0.028
+	var joint_a := 0.10 if bright else 0.22
 	while y < h:
-		_blend(img, Rect2i(0, y, w, 1), Color(0, 0, 0, 0.24))
-		_blend(img, Rect2i(0, y + 1, w, 1), Color(1, 1, 1, 0.028))
+		_blend(img, Rect2i(0, y, w, 1), Color(0, 0, 0, seam_a))
+		_blend(img, Rect2i(0, y + 1, w, 1), Color(1, 1, 1, seam_hi))
 		var vx := 48 if row % 2 == 1 else 0
 		while vx < w:
-			_blend(img, Rect2i(vx, y, 1, 12), Color(0, 0, 0, 0.22))
+			_blend(img, Rect2i(vx, y, 1, 12), Color(0, 0, 0, joint_a))
 			vx += 96
 		y += 12
 		row += 1
@@ -358,10 +373,11 @@ func _bake_floor() -> Image:
 		))
 
 	# ── 边缘压暗：让地板嵌在暗处，而不是一块浮空的板 ──
+	# 亮房只留很轻的一圈，压太狠会把「靠窗明亮」又压回暗室。
 	var edge := 26
 	for i in range(edge):
 		var t := 1.0 - float(i) / float(edge)
-		var a := 0.62 * t * t
+		var a := (0.15 if bright else 0.62) * t * t
 		_blend(img, Rect2i(0, i, w, 1), Color(0, 0, 0, a))
 		_blend(img, Rect2i(0, h - 1 - i, w, 1), Color(0, 0, 0, a))
 		_blend(img, Rect2i(i, 0, 1, h), Color(0, 0, 0, a))
@@ -374,11 +390,13 @@ func _bake_floor() -> Image:
 		var ey := int(float(e["y"]) * TS)
 		var ew := int(float(e["w"]) * TS)
 		var eh := int(float(e["h"]) * TS)
-		img.fill_rect(Rect2i(ex, ey, ew, eh), Color("262c34"))
-		img.fill_rect(Rect2i(ex, ey, ew, 3), Color("5f574c"))
-		img.fill_rect(Rect2i(ex, ey + eh - 3, ew, 3), Color("5f574c"))
-		img.fill_rect(Rect2i(ex, ey, 3, eh), Color("5f574c"))
-		img.fill_rect(Rect2i(ex + ew - 3, ey, 3, eh), Color("5f574c"))
+		var mat_fill := Color("a9bcc9") if bright else Color("262c34")
+		var mat_edge := Color("6f8b9c") if bright else Color("5f574c")
+		img.fill_rect(Rect2i(ex, ey, ew, eh), mat_fill)
+		img.fill_rect(Rect2i(ex, ey, ew, 3), mat_edge)
+		img.fill_rect(Rect2i(ex, ey + eh - 3, ew, 3), mat_edge)
+		img.fill_rect(Rect2i(ex, ey, 3, eh), mat_edge)
+		img.fill_rect(Rect2i(ex + ew - 3, ey, 3, eh), mat_edge)
 		# 垫子里的斜纹
 		for i in range(1, 6):
 			var ly := ey + int(float(eh) * float(i) / 6.0)
@@ -399,11 +417,12 @@ func _bake_minimap() -> Texture2D:
 	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
 	# 小地图是「示意图」不是「截图」：底色抬到中等亮度，家具用饱和色块，
 	# 200px 宽的面板上一眼能分出机位区 / 会议区 / 白板。照搬地板的深棕只会糊成一团黑。
-	img.fill(Color("463e34"))
+	img.fill(Color("e6e2d4") if bright else Color("463e34"))
 
 	var k := px                # 格 → 小地图像素（data 里全是格坐标，直接乘 4）
 	var COL := {
-		"wall": Color("8b9bb3"),
+		"wall": Color("b9c6d2") if bright else Color("8b9bb3"),
+		"window": Color("bfe3f5"),
 		"table": Color("9a7a52"),
 		"desk": Color("5d93cc"),
 		"board": Color("eef4fa"),
@@ -520,7 +539,9 @@ func _paint_rug(img: Image, r: Rect2) -> void:
 	var y1 := mini(img.get_height(), int(r.end.y))
 	if x1 - x0 < 8 or y1 - y0 < 8:
 		return
-	var base := Color("454d63")
+	var base := Color("cfe0d6") if bright else Color("454d63")
+	var rim := Color("8aa79a") if bright else Color("23283a")
+	var inner := Color("f2faf5") if bright else Color("6b7699")
 	img.fill_rect(Rect2i(x0, y0, x1 - x0, y1 - y0), base)
 	# 织纹：细横线 + 一道更暗的内场，远看是绒面。
 	# 别用 8px 交错格 —— 在游戏视距下会变成一张棋盘，抢掉整个房间的注意力。
@@ -530,13 +551,13 @@ func _paint_rug(img: Image, r: Rect2) -> void:
 	# 双线包边：外圈暗、内圈亮
 	var w := x1 - x0
 	var h := y1 - y0
-	img.fill_rect(Rect2i(x0, y0, w, 2), Color("23283a"))
-	img.fill_rect(Rect2i(x0, y1 - 2, w, 2), Color("23283a"))
-	img.fill_rect(Rect2i(x0, y0, 2, h), Color("23283a"))
-	img.fill_rect(Rect2i(x1 - 2, y0, 2, h), Color("23283a"))
-	img.fill_rect(Rect2i(x0 + 3, y0 + 3, w - 6, 1), Color("6b7699"))
-	img.fill_rect(Rect2i(x0 + 3, y1 - 4, w - 6, 1), Color("6b7699"))
-	img.fill_rect(Rect2i(x0 + 3, y0 + 3, 1, h - 6), Color("6b7699"))
-	img.fill_rect(Rect2i(x1 - 4, y0 + 3, 1, h - 6), Color("6b7699"))
+	img.fill_rect(Rect2i(x0, y0, w, 2), rim)
+	img.fill_rect(Rect2i(x0, y1 - 2, w, 2), rim)
+	img.fill_rect(Rect2i(x0, y0, 2, h), rim)
+	img.fill_rect(Rect2i(x1 - 2, y0, 2, h), rim)
+	img.fill_rect(Rect2i(x0 + 3, y0 + 3, w - 6, 1), inner)
+	img.fill_rect(Rect2i(x0 + 3, y1 - 4, w - 6, 1), inner)
+	img.fill_rect(Rect2i(x0 + 3, y0 + 3, 1, h - 6), inner)
+	img.fill_rect(Rect2i(x1 - 4, y0 + 3, 1, h - 6), inner)
 
 

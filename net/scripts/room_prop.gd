@@ -18,6 +18,8 @@ const RISE_BOX := 7.0
 
 var kind: String = "table"
 var cell := Rect2()
+## 亮房（图书馆自习空间）：墙/桌面换成浅色，宿舍与活动室保持原样。
+var bright := false
 
 
 func setup(k: String, r: Rect2, z: int = 0) -> void:
@@ -39,6 +41,8 @@ func _draw() -> void:
 	match kind:
 		"wall":
 			_wall(o, w, h)
+		"window":
+			_window(o, w, h)
 		"desk":
 			_desk(o, w, h)
 		"board":
@@ -94,14 +98,21 @@ func _crate(o: Vector2, w: float, h: float, top: Color, face: Color) -> void:
 
 func _wall(o: Vector2, w: float, h: float) -> void:
 	_shadow(o, w, h)
+	# 亮房的墙是米白涂料，暗房是深灰隔板 —— 同一套挤出画法，只换色
+	var face := Color("b9c6d2") if bright else Color("39414b")
+	var face_lo := Color("a3b3c1") if bright else Color("2b323b")
+	var top := Color("e6eef4") if bright else Color("5a6470")
+	var top_hi := Color("ffffff") if bright else Color("7f8b99")
+	var top_l := Color("f2f7fb") if bright else Color("69737f")
+	var top_r := Color("c3d0db") if bright else Color("4b535e")
 	# 正面（背光）
-	draw_rect(Rect2(o.x, o.y + h - RISE_WALL, w, RISE_WALL), Color("39414b"))
-	draw_rect(Rect2(o.x, o.y + h - RISE_WALL, w, 1.0), Color("2b323b"))
+	draw_rect(Rect2(o.x, o.y + h - RISE_WALL, w, RISE_WALL), face)
+	draw_rect(Rect2(o.x, o.y + h - RISE_WALL, w, 1.0), face_lo)
 	# 顶面（受光）
-	draw_rect(Rect2(o.x, o.y - RISE_WALL, w, h), Color("5a6470"))
-	draw_rect(Rect2(o.x, o.y - RISE_WALL, w, 1.0), Color("7f8b99"))
-	draw_rect(Rect2(o.x, o.y - RISE_WALL, 1.0, h), Color("69737f"))
-	draw_rect(Rect2(o.x + w - 1.0, o.y - RISE_WALL, 1.0, h), Color("4b535e"))
+	draw_rect(Rect2(o.x, o.y - RISE_WALL, w, h), top)
+	draw_rect(Rect2(o.x, o.y - RISE_WALL, w, 1.0), top_hi)
+	draw_rect(Rect2(o.x, o.y - RISE_WALL, 1.0, h), top_l)
+	draw_rect(Rect2(o.x + w - 1.0, o.y - RISE_WALL, 1.0, h), top_r)
 	# 顶面的板缝：每 16px 一道，看得出是拼起来的隔板
 	var xx := 16.0
 	while xx < w - 2.0:
@@ -109,18 +120,46 @@ func _wall(o: Vector2, w: float, h: float) -> void:
 		xx += 16.0
 
 
+## 落地窗：贴在墙内侧、往上长出一截亮玻璃。不画落地阴影（窗不是家具），
+## 也不参与碰撞。只用在 bright 房间，暗房里没有这个 kind。
+func _window(o: Vector2, w: float, h: float) -> void:
+	var top := o.y - 16.0
+	var wh := h + 16.0
+	# 外框
+	draw_rect(Rect2(o.x, top, w, wh), Color("f4f8fb"))
+	# 玻璃：上半是天空、下半略暖（窗外地面反光）
+	draw_rect(Rect2(o.x + 2.0, top + 2.0, w - 4.0, wh - 4.0), Color("bfe3f5"))
+	draw_rect(Rect2(o.x + 2.0, top + 2.0, w - 4.0, wh * 0.42), Color("e2f4ff"))
+	draw_rect(Rect2(o.x + 2.0, top + wh * 0.62, w - 4.0, wh * 0.22), Color("d7ecdf"))
+	# 窗棂：竖向每 24px 一道 + 中间一道横档
+	var xx := o.x + 24.0
+	while xx < o.x + w - 4.0:
+		draw_rect(Rect2(xx, top + 2.0, 2.0, wh - 4.0), Color("f4f8fb"))
+		xx += 24.0
+	draw_rect(Rect2(o.x + 2.0, top + wh * 0.5, w - 4.0, 2.0), Color("f4f8fb"))
+	# 窗台：一条亮边把窗和地板接起来
+	draw_rect(Rect2(o.x - 1.0, o.y + h - 2.0, w + 2.0, 2.0), Color("ffffff"))
+
+
 # ---------------------------------------------------------------- 桌子
 
 func _table(o: Vector2, w: float, h: float) -> void:
 	_shadow(o, w, h)
+	# 亮房是浅枫木自习桌，暗房是深胡桃木 —— 木纹画法两边共用
+	var side := Color("9c8560") if bright else Color("4a3a28")
+	var side_lo := Color("7e6b4c") if bright else Color("3a2d1e")
+	var top := Color("dcc39a") if bright else Color("7a6144")
+	var top_hi := Color("f0dcb8") if bright else Color("9c7f5b")
+	var top_l := Color("e8d2ac") if bright else Color("8a6f4e")
+	var top_r := Color("b89e78") if bright else Color("5f4a33")
 	# 桌体侧面
-	draw_rect(Rect2(o.x, o.y + h - RISE_TABLE, w, RISE_TABLE), Color("4a3a28"))
-	draw_rect(Rect2(o.x, o.y + h - RISE_TABLE, w, 1.0), Color("3a2d1e"))
+	draw_rect(Rect2(o.x, o.y + h - RISE_TABLE, w, RISE_TABLE), side)
+	draw_rect(Rect2(o.x, o.y + h - RISE_TABLE, w, 1.0), side_lo)
 	# 桌面
-	draw_rect(Rect2(o.x, o.y - RISE_TABLE, w, h), Color("7a6144"))
-	draw_rect(Rect2(o.x, o.y - RISE_TABLE, w, 1.0), Color("9c7f5b"))
-	draw_rect(Rect2(o.x, o.y - RISE_TABLE, 1.0, h), Color("8a6f4e"))
-	draw_rect(Rect2(o.x + w - 1.0, o.y - RISE_TABLE, 1.0, h), Color("5f4a33"))
+	draw_rect(Rect2(o.x, o.y - RISE_TABLE, w, h), top)
+	draw_rect(Rect2(o.x, o.y - RISE_TABLE, w, 1.0), top_hi)
+	draw_rect(Rect2(o.x, o.y - RISE_TABLE, 1.0, h), top_l)
+	draw_rect(Rect2(o.x + w - 1.0, o.y - RISE_TABLE, 1.0, h), top_r)
 	# 木纹
 	var yy := o.y - RISE_TABLE + 5.0
 	while yy < o.y - RISE_TABLE + h - 3.0:
@@ -300,20 +339,30 @@ func _chair_seat(o: Vector2, w: float, h: float) -> void:
 	var cx := o.x + w * 0.5
 	_shadow(o, w, h, 2.0)
 
+	# 亮房用浅蓝灰布椅，暗房用深灰电竞椅。椅子是画面里数量最多的物件，
+	# 不跟着换色的话 26 把深色椅子会把整间亮房戳成一片黑点。
+	var foot_c := Color("8b9299") if bright else Color("22262c")
+	var base_c := Color("767e86") if bright else Color("1b1f24")
+	var rim_c := Color("7d8b99") if bright else Color("2b3038")
+	var seat_c := Color("a9bcc9") if bright else Color("4a545f")
+	var hi_c := Color("d5e4ee") if bright else Color("5c6774")
+	var inner_c := Color("98adbc") if bright else Color("3b434e")
+	var front_c := Color("6d7c89") if bright else Color("21262c")
+
 	# 椅脚：立柱 + 底盘（五爪椅在这个尺寸上分不出来）
-	draw_rect(Rect2(cx - 2.0, o.y + seat_h, 4.0, foot - 1.5), Color("22262c"))
-	draw_rect(Rect2(cx - 5.0, o.y + h - 1.5, 10.0, 1.5), Color("1b1f24"))
+	draw_rect(Rect2(cx - 2.0, o.y + seat_h, 4.0, foot - 1.5), foot_c)
+	draw_rect(Rect2(cx - 5.0, o.y + h - 1.5, 10.0, 1.5), base_c)
 
 	# 坐垫比占地左右各宽 1px：椅背 13px、坐垫 18px，两侧各露 2px 坐垫，
 	# 才不会被误读成「一个箱子」。
 	var sx := o.x - 1.0
 	var sw := w + 2.0
-	draw_rect(Rect2(sx, o.y, sw, seat_h), Color("2b3038"))              # 外沿（暗）
-	draw_rect(Rect2(sx + 1.0, o.y, sw - 2.0, seat_h - 2.0), Color("4a545f"))
-	draw_rect(Rect2(sx + 1.0, o.y, sw - 2.0, 1.0), Color("5c6774"))     # 受光边
-	draw_rect(Rect2(sx + 2.0, o.y + 2.0, sw - 4.0, seat_h - 4.0), Color("3b434e"))
+	draw_rect(Rect2(sx, o.y, sw, seat_h), rim_c)                         # 外沿（暗）
+	draw_rect(Rect2(sx + 1.0, o.y, sw - 2.0, seat_h - 2.0), seat_c)
+	draw_rect(Rect2(sx + 1.0, o.y, sw - 2.0, 1.0), hi_c)                 # 受光边
+	draw_rect(Rect2(sx + 2.0, o.y + 2.0, sw - 4.0, seat_h - 4.0), inner_c)
 	# 前沿压暗，坐垫才有厚度
-	draw_rect(Rect2(sx + 1.0, o.y + seat_h - 2.0, sw - 2.0, 2.0), Color("21262c"))
+	draw_rect(Rect2(sx + 1.0, o.y + seat_h - 2.0, sw - 2.0, 2.0), front_c)
 
 
 ## 椅背：一块立起来的软包板，比坐垫高、比人窄 —— 坐着时正好挡住臀腿、
@@ -324,12 +373,13 @@ func _chair_back(o: Vector2, w: float, h: float) -> void:
 	var bot := o.y + h - 1.5
 	if bot - top < 5.0:
 		bot = top + 5.0
-	var body := Color("333a45")
-	var hi := Color("6d7a89")
-	var lo := Color("1f242a")
+	var body := Color("7d8b99") if bright else Color("333a45")
+	var hi := Color("d5e4ee") if bright else Color("6d7a89")
+	var lo := Color("5f7180") if bright else Color("1f242a")
 
 	# 连接件（椅背插进坐垫那一截）
-	draw_rect(Rect2(cx - 2.0, bot, 4.0, 1.5), Color("1d2126"))
+	draw_rect(Rect2(cx - 2.0, bot, 4.0, 1.5),
+		Color("5f7180") if bright else Color("1d2126"))
 
 	# 板体：内缩矩形 + 补一层，凑出 2px 圆角
 	draw_rect(Rect2(o.x + 2.0, top, w - 4.0, bot - top), body)
@@ -441,9 +491,11 @@ func _elevator(o: Vector2, w: float, h: float) -> void:
 func _sofa(o: Vector2, w: float, h: float) -> void:
 	var arm := clampf(w * 0.10, 2.0, 5.0)
 	var back_h := clampf(h * 0.72, 6.0, 12.0)
-	var body := Color("6b4f6f")
-	var hi := Color("8b6a90")
-	var lo := Color("4e3a52")
+	var body := Color("7fa8b8") if bright else Color("6b4f6f")
+	var hi := Color("a9cbd7") if bright else Color("8b6a90")
+	var lo := Color("5f8497") if bright else Color("4e3a52")
+	var seat := Color("8fb9c7") if bright else Color("7d5d81")
+	var seat_hi := Color("b5d8e2") if bright else Color("95739a")
 	_shadow(o, w, h, 3.0)
 
 	# 靠背（往画面上方立）
@@ -458,8 +510,8 @@ func _sofa(o: Vector2, w: float, h: float) -> void:
 			Color(0, 0, 0, 0.16))
 
 	# 座面（被靠背压住上半截）
-	draw_rect(Rect2(o.x + arm, o.y + 1.0, w - arm * 2.0, h - 1.0), Color("7d5d81"))
-	draw_rect(Rect2(o.x + arm, o.y + 1.0, w - arm * 2.0, 1.0), Color("95739a"))
+	draw_rect(Rect2(o.x + arm, o.y + 1.0, w - arm * 2.0, h - 1.0), seat)
+	draw_rect(Rect2(o.x + arm, o.y + 1.0, w - arm * 2.0, 1.0), seat_hi)
 	draw_rect(Rect2(o.x + arm, o.y + h - 2.0, w - arm * 2.0, 2.0), lo)
 	# 坐垫分两块
 	draw_rect(Rect2(o.x + arm + (w - arm * 2.0) * 0.5 - 0.5, o.y + 3.0, 1.0, h - 6.0),
@@ -537,7 +589,7 @@ func _plant(o: Vector2, w: float, h: float) -> void:
 
 ## 地上的坐垫：几乎平铺，只有 2px 厚度 + 一圈包边
 func _cushion(o: Vector2, w: float, h: float) -> void:
-	draw_rect(Rect2(o.x, o.y - 2.0, w, h), Color("5a4a6e"))
-	draw_rect(Rect2(o.x, o.y - 2.0, w, 1.0), Color("7a6890"))
-	draw_rect(Rect2(o.x, o.y + h - 2.0, w, 2.0), Color("453a55"))
+	draw_rect(Rect2(o.x, o.y - 2.0, w, h), Color("7fa8b8") if bright else Color("5a4a6e"))
+	draw_rect(Rect2(o.x, o.y - 2.0, w, 1.0), Color("b5d8e2") if bright else Color("7a6890"))
+	draw_rect(Rect2(o.x, o.y + h - 2.0, w, 2.0), Color("5f8497") if bright else Color("453a55"))
 	draw_rect(Rect2(o.x + 2.0, o.y - 1.0, w - 4.0, h - 4.0), Color(0, 0, 0, 0.10))

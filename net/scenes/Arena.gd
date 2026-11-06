@@ -190,6 +190,7 @@ func _ready() -> void:
 	queue_redraw()
 
 	_collect_dorms()
+	_collect_study_entries()
 	_collect_campus_seats()
 	_build_door_hint()
 	_build_voice_btn()
@@ -1997,6 +1998,9 @@ var _cam_limit := {}
 ## 可进入的建筑：[{name, rect}]。rect 是格坐标的包围盒外扩前原尺寸。
 var _dorms: Array = []
 var _near_dorm := ""
+## 图书馆自习空间入口：[{name, rect, sign}]。跟宿舍分开存，走的是另一份房间数据。
+var _study_entries: Array = []
+var _near_study := ""
 ## 站在旁边的另一个玩家（加好友用），空字典 = 旁边没人
 var _near_buddy: Dictionary = {}
 var _room_title := ""
@@ -2061,8 +2065,13 @@ const FLOOR_COUNT := 5
 ## 用 6 就能让组队公告板直接复用现成的联机同步，不必改服务端协议。
 ## 界面上只显示「B1 · 游戏活动室」，玩家看不到这个数字。
 const BASEMENT_FLOOR := 6
+## 图书馆自习空间内部用 7：它跟宿舍楼不是同一栋楼，但复用 _room_path_for 的
+## 房间分发和 _update_floor_visibility 的「同层才互相可见」，服务端协议一行没改。
+## 电梯面板只列 1~5 + B1，所以玩家看不到这个数字，也换不到这一层。
+const STUDY_FLOOR := 7
 const ACTIVITY_PATH := "res://assets/rooms/activity_room.json"
 const DORM_PATH := "res://assets/rooms/dorm_space.json"
+const STUDY_PATH := "res://assets/rooms/study_space.json"
 ## 本地玩家当前楼层（1 起；6 = B1）。异层玩家互相隐藏（见 _update_floor_visibility）。
 var current_floor: int = 1
 ## 楼层 UI（指示 + 电梯选层面板 + 换层黑场）
@@ -2290,6 +2299,10 @@ func _try_interact() -> bool:
 		if boat_idx >= 0:
 			_try_board(boat_idx)
 			return true
+	# 图书馆自习空间：内部楼层号 7，走同一套 enter_room，但换成完全不同的房间数据
+	if _near_study != "":
+		enter_room(STUDY_PATH, STUDY_FLOOR)
+		return true
 	if _near_dorm != "":
 		enter_room("res://assets/rooms/dorm_space.json")
 		return true
@@ -2602,7 +2615,8 @@ func _confirm_adopt() -> void:
 ## 自己认领的那间房里。直接挂进 room.anchor() 的 Objects —— 它本身就是 y-sort
 ## 容器，单独套一层 Node2D 会让整层被当成 y=0 的一个节点，猫窝永远压在家具后面。
 func _setup_room_cats() -> void:
-	if room == null or not is_instance_valid(room) or current_floor == BASEMENT_FLOOR:
+	# 6(B1) / 7(自习空间) 都是公共空间，没有「自己的单间」，不摆猫窝
+	if room == null or not is_instance_valid(room) or current_floor >= BASEMENT_FLOOR:
 		return
 	var host: Node2D = room.call("anchor") as Node2D
 	if host == null:
@@ -2869,12 +2883,16 @@ func _face_code(face: String) -> int:
 	return 1
 
 
-## 楼层号 → 房间数据。B1 用独立活动室布局，地上 1~5 层共用宿舍。
+## 楼层号 → 房间数据。7 = 图书馆自习空间，6 = B1 活动室，1~5 共用宿舍。
 func _room_path_for(n: int) -> String:
+	if n == STUDY_FLOOR:
+		return STUDY_PATH
 	return ACTIVITY_PATH if n == BASEMENT_FLOOR else DORM_PATH
 
 
 func _room_id_for(path: String) -> String:
+	if path == STUDY_PATH:
+		return "study_space"
 	return "activity_room" if path == ACTIVITY_PATH else "dorm_space"
 
 
@@ -2923,7 +2941,7 @@ func enter_room(path: String, floor_n: int = 1) -> bool:
 		return false
 	if _my_boat >= 0:
 		return false                      # 划船中不能直接进宿舍（先下船）
-	var want := clampi(floor_n, 1, BASEMENT_FLOOR)
+	var want := clampi(floor_n, 1, STUDY_FLOOR)
 	if not _ensure_room_for_floor(want):
 		return false
 
@@ -3233,10 +3251,10 @@ func _auto_walk_sync() -> void:
 
 
 func _try_auto_room() -> void:
-	# 调试：XGD_ROOM_FLOOR=6 直接落到 B1 活动室（配合 XGD_ROOM=1 截图用）
+	# 调试：XGD_ROOM_FLOOR=6 落 B1 活动室、=7 落图书馆自习空间（配合 XGD_ROOM=1 截图用）
 	var f := 1
 	if OS.has_environment("XGD_ROOM_FLOOR"):
-		f = clampi(OS.get_environment("XGD_ROOM_FLOOR").to_int(), 1, BASEMENT_FLOOR)
+		f = clampi(OS.get_environment("XGD_ROOM_FLOOR").to_int(), 1, STUDY_FLOOR)
 	if not enter_room("res://assets/rooms/dorm_space.json", f):
 		push_warning("[arena] 自动进房间失败")
 	else:
@@ -3357,6 +3375,60 @@ func _collect_dorms() -> void:
 			"rect": Rect2(cen - Vector2(w, h) * 0.5, Vector2(w, h)),
 		})
 	print("[arena] 可进入的宿舍 %d 栋" % _dorms.size())
+
+
+## 图书馆正门口的「自习空间」入口。热点按建筑南沿算，不写死坐标 ——
+## OSM 重跑后图书馆形状变了，门会跟着走，不用回来改数字。
+## 和宿舍入口分开存：两者进的是完全不同的两份房间数据、两个楼层号。
+func _collect_study_entries() -> void:
+	_study_entries.clear()
+	if campus == null:
+		return
+	for b in MapData.buildings():
+		var nm := str(b.get("name", ""))
+		if str(b.get("cat", "")) != "lib" and not nm.contains("图书馆"):
+			continue
+		var poly: Array = b.get("poly", [])
+		if poly.is_empty():
+			continue
+		var max_y := -1e9
+		var sum_x := 0.0
+		for p in poly:
+			var v := p as Vector2
+			max_y = maxf(max_y, v.y)
+			sum_x += v.x
+		var cx := sum_x / float(poly.size())
+		_study_entries.append({
+			"name": nm,
+			"rect": Rect2(cx - 9.0, max_y, 18.0, 9.0),
+			"sign": _make_study_sign(cx, max_y),
+		})
+	print("[arena] 自习空间入口 %d 处" % _study_entries.size())
+
+
+## 门口一块世界空间的小招牌。挂在 campus/Objects（已经是 8px/格 的局部空间），
+## 字号 9 会被 campus 的 2 倍缩放抬到 18px，跟场景里的文字牌同一量级。
+func _make_study_sign(cx: float, door_y: float) -> Label:
+	var lb := Label.new()
+	lb.name = "StudySign"
+	lb.text = "自习空间 ↓"
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.96, 0.97, 0.92, 0.92)
+	sb.border_color = Color(0.30, 0.52, 0.68, 0.95)
+	sb.set_border_width_all(2)
+	sb.content_margin_left = 6
+	sb.content_margin_right = 6
+	sb.content_margin_top = 3
+	sb.content_margin_bottom = 3
+	lb.add_theme_stylebox_override("normal", sb)
+	lb.add_theme_font_size_override("font_size", 9)
+	lb.add_theme_color_override("font_color", Color("26404f"))
+	lb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var objs: Node2D = campus.get_node_or_null("Objects") as Node2D
+	if objs != null:
+		objs.add_child(lb)
+		lb.position = Vector2(cx * TS - 34.0, (door_y - 2.4) * TS)
+	return lb
 
 
 ## 提示条尺寸（逻辑像素）。够放「星天苑H座 · 按 E 进入「宿舍空间」」这一整行。
@@ -3496,6 +3568,7 @@ func _update_interact_hint(delta: float) -> void:
 	if _door_clock > 0.0:
 		return
 	_door_clock = 1.0 / DOOR_CHECK_HZ
+	_near_study = ""
 
 	var me: Node = _local_avatar()
 	if me == null:
@@ -3595,6 +3668,10 @@ func _update_interact_hint(delta: float) -> void:
 			_door_hint.visible = true
 			_door_hint.text = "按 E 离开「%s」" % _room_title
 		else:
+			# 自习空间没有单间门 / 组队板，房间中间不该挂着任何提示
+			if current_floor == STUDY_FLOOR:
+				_door_hint.visible = false
+				return
 			if current_floor == BASEMENT_FLOOR:
 				var tb := _nearest_team_board(pos)
 				if tb.is_empty():
@@ -3643,6 +3720,20 @@ func _update_interact_hint(delta: float) -> void:
 		return
 
 	var cell: Vector2 = pos / TS
+	# 图书馆先判：它是独立的热点，和宿舍楼不重合，但优先级要给在前面
+	var study_hit := ""
+	for e in _study_entries:
+		var sr: Rect2 = e["rect"]
+		if sr.grow(DOOR_RADIUS * 0.5).has_point(cell):
+			study_hit = String(e["name"])
+			break
+	_near_study = study_hit
+	if study_hit != "":
+		_near_dorm = ""
+		_door_hint.visible = true
+		# 建筑全名「亚洲最大水上图书馆」会撑到半屏宽，门口只用短称
+		_door_hint.text = "图书馆 · 按 E 进入「自习空间」"
+		return
 	var hit := ""
 	for d in _dorms:
 		var r: Rect2 = d["rect"]
@@ -3975,9 +4066,10 @@ func _ensure_floor_ui() -> void:
 	_floor_layer.add_child(host)
 	_door_plates_holder = host
 
-	# 楼层指示（左上角）
+	# 楼层指示：从 x=84 起 —— 桌面端左上那排 56px 快捷按钮占 x 14~70，
+	# 原来的 x=12 会被第一颗按钮压掉「图书」两个字。
 	_floor_label = Label.new()
-	_floor_label.position = Vector2(12, 10)
+	_floor_label.position = Vector2(84, 10)
 	_floor_label.add_theme_font_size_override("font_size", 18)
 	_floor_label.add_theme_color_override("font_color", Color("#e8f2ff"))
 	_floor_label.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
@@ -4073,6 +4165,9 @@ func _layout_floor_panel() -> void:
 
 
 func _open_floor_panel() -> void:
+	# 自习空间不是宿舍楼，没有电梯也没有楼层可换
+	if current_floor == STUDY_FLOOR:
+		return
 	if _floor_open:
 		return
 	_ensure_floor_ui()
@@ -4094,6 +4189,8 @@ func _on_floor_picked(n: int) -> void:
 ## 换层的全部事情：改楼层号（广播给别人）+ 站到新楼层的电梯口 + 刷新门牌 + 黑场淡入。
 ## 地上 1~5 层布局相同，只换层号；地上 ↔ B1 则连房间布局一起换（4 个大单间 vs 14 间小隔间）。
 func _go_floor(n: int) -> void:
+	if current_floor == STUDY_FLOOR:
+		return
 	var want: int = clampi(n, 1, BASEMENT_FLOOR)
 	_close_floor_panel()
 	if want == current_floor:
@@ -4156,7 +4253,9 @@ func _update_floor_label() -> void:
 		return
 	_ensure_floor_ui()
 	_floor_label.visible = true
-	if current_floor == BASEMENT_FLOOR:
+	if current_floor == STUDY_FLOOR:
+		_floor_label.text = "图书馆 · 自习空间"
+	elif current_floor == BASEMENT_FLOOR:
 		_floor_label.text = "B1 · 游戏活动室"
 	else:
 		_floor_label.text = "宿舍楼 · %d / %d 层" % [current_floor, FLOOR_COUNT]
