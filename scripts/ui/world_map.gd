@@ -88,7 +88,7 @@ func _build_layers() -> void:
 	_btn_close.focus_mode = Control.FOCUS_NONE
 	_btn_close.mouse_filter = Control.MOUSE_FILTER_STOP
 	_btn_close.add_theme_font_override("font", font)
-	_btn_close.add_theme_font_size_override("font_size", 14)
+	_btn_close.add_theme_font_size_override("font_size", GameTheme.fs(14))
 	_btn_close.add_theme_color_override("font_color", Color("#e8eef5"))
 	_btn_close.add_theme_color_override("font_hover_color", Color("#ffffff"))
 	_btn_close.add_theme_color_override("font_pressed_color", Color("#ffffff"))
@@ -101,10 +101,10 @@ func _build_layers() -> void:
 		sb.content_margin_right = 8.0
 		_btn_close.add_theme_stylebox_override(st, sb)
 	_btn_close.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-	_btn_close.offset_left = -110.0
-	_btn_close.offset_top = 14.0
-	_btn_close.offset_right = -14.0
-	_btn_close.offset_bottom = 58.0
+	_btn_close.offset_left = -GameTheme.px(110.0)
+	_btn_close.offset_top = GameTheme.px(14.0)
+	_btn_close.offset_right = -GameTheme.px(14.0)
+	_btn_close.offset_bottom = GameTheme.px(58.0)
 	_btn_close.pressed.connect(func(): closed.emit())
 	add_child(_btn_close)
 

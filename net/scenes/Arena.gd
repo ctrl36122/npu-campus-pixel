@@ -2536,11 +2536,11 @@ func _build_adopt_panel() -> void:
 	pc.add_theme_stylebox_override("panel", sb)
 	host.add_child(pc)
 	var vb := VBoxContainer.new()
-	vb.add_theme_constant_override("separation", 10)
+	vb.add_theme_constant_override("separation", int(GameTheme.px(10.0)))
 	pc.add_child(vb)
 	var title := Label.new()
 	title.text = "领养猫咪 · 给它起个名字"
-	title.add_theme_font_size_override("font_size", 18)
+	title.add_theme_font_size_override("font_size", GameTheme.fs(18))
 	title.add_theme_color_override("font_color", Color("f2e3c4"))
 	vb.add_child(title)
 	_adopt_edit = LineEdit.new()
@@ -3422,6 +3422,15 @@ const HINT_LIFT := 34.0
 
 ## 把提示条摆到人物头顶正上方。CanvasLayer 里的坐标是屏幕像素，
 ## 所以用 canvas_transform 把世界坐标换算过去（自动带上相机位置和视距）。
+## 提示宽度：手机竖屏字号放大 1.6 倍后，固定 420 装不下整行，按屏宽一起放宽。
+func _hint_w() -> float:
+	return minf(get_viewport().get_visible_rect().size.x * 0.94, GameTheme.px(HINT_W))
+
+
+func _hint_h() -> float:
+	return GameTheme.px(HINT_H)
+
+
 func _place_hint_above_player() -> void:
 	if _door_hint == null or not _door_hint.visible:
 		return
@@ -3437,9 +3446,10 @@ func _place_hint_above_player() -> void:
 		anchor_y = nm.get_global_rect().position.y - 6.0
 	var world := Vector2((me as Node2D).global_position.x, anchor_y)
 	var screen: Vector2 = vp.get_canvas_transform() * world
-	var half := HINT_W * 0.5
+	var half := _hint_w() * 0.5
 	var x := clampf(screen.x, half + 6.0, vp.get_visible_rect().size.x - half - 6.0)
-	var y := clampf(screen.y - HINT_H, 6.0, vp.get_visible_rect().size.y - HINT_H - 6.0)
+	var hh := _hint_h()
+	var y := clampf(screen.y - hh, 6.0, vp.get_visible_rect().size.y - hh - 6.0)
 	_door_hint.position = Vector2(x - half, y)
 
 
@@ -3461,7 +3471,7 @@ func _build_door_hint() -> void:
 	_door_hint.pressed.connect(_on_hint_pressed)
 	_door_hint.visible = false
 	_door_hint.alignment = HORIZONTAL_ALIGNMENT_CENTER   # Button 叫 alignment，不是 Label 的 horizontal_alignment
-	_door_hint.add_theme_font_size_override("font_size", 20)
+	_door_hint.add_theme_font_size_override("font_size", GameTheme.fs(20))
 	_door_hint.add_theme_color_override("font_color", Color("#eaf3fb"))
 	_door_hint.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
 	# 20px 的字配 6px 描边，笔画会被糊成一坨（「离」几乎认不出），4px 刚好压住背景又不吃笔画
@@ -3470,7 +3480,7 @@ func _build_door_hint() -> void:
 	# 之前钉在屏幕上方居中：换场景/换分辨率都还好，但玩家眼睛盯着人物时
 	# 根本注意不到上方那行字 —— 提示就该长在人物头上。
 	_door_hint.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
-	_door_hint.size = Vector2(HINT_W, HINT_H)
+	_door_hint.size = Vector2(_hint_w(), _hint_h())
 	layer.add_child(_door_hint)
 
 
@@ -3480,7 +3490,7 @@ func _build_voice_btn() -> void:
 	_voice_btn = Button.new()
 	_voice_btn.focus_mode = Control.FOCUS_NONE
 	_voice_btn.mouse_filter = Control.MOUSE_FILTER_STOP
-	_voice_btn.add_theme_font_size_override("font_size", 17)
+	_voice_btn.add_theme_font_size_override("font_size", GameTheme.fs(17))
 	_voice_btn.add_theme_color_override("font_color", Color("#d8ffe8"))
 	_voice_btn.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
 	_voice_btn.add_theme_constant_override("outline_size", 3)
@@ -3490,10 +3500,10 @@ func _build_voice_btn() -> void:
 		sb.bg_color = Color(0.07, 0.16, 0.12, 0.94) if st == "normal" else Color(0.10, 0.22, 0.16, 0.97)
 		sb.border_color = Color(0.42, 0.90, 0.66, 0.95)
 		sb.set_border_width_all(2)
-		sb.content_margin_left = 14
-		sb.content_margin_right = 14
-		sb.content_margin_top = 8
-		sb.content_margin_bottom = 8
+		sb.content_margin_left = int(GameTheme.px(14.0))
+		sb.content_margin_right = int(GameTheme.px(14.0))
+		sb.content_margin_top = int(GameTheme.px(8.0))
+		sb.content_margin_bottom = int(GameTheme.px(8.0))
 		_voice_btn.add_theme_stylebox_override(st, sb)
 	_voice_btn.pressed.connect(_on_voice_btn_pressed)
 	_voice_btn.visible = false
@@ -4051,8 +4061,17 @@ func _ensure_floor_ui() -> void:
 	# 楼层指示：从 x=84 起 —— 桌面端左上那排 56px 快捷按钮占 x 14~70，
 	# 原来的 x=12 会被第一颗按钮压掉「图书」两个字。
 	_floor_label = Label.new()
-	_floor_label.position = Vector2(84, 10)
-	_floor_label.add_theme_font_size_override("font_size", 18)
+	if GameTheme.touch_ui():
+		# 手机竖屏左上角被聊天窗占着，楼层标签改挂到小地图下方、靠右对齐
+		_floor_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+		_floor_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		_floor_label.offset_left = -GameTheme.px(300.0)
+		_floor_label.offset_right = -GameTheme.px(14.0)
+		_floor_label.offset_top = GameTheme.px(318.0)
+		_floor_label.offset_bottom = GameTheme.px(354.0)
+	else:
+		_floor_label.position = Vector2(84, 10)
+	_floor_label.add_theme_font_size_override("font_size", GameTheme.fs(18))
 	_floor_label.add_theme_color_override("font_color", Color("#e8f2ff"))
 	_floor_label.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
 	_floor_label.add_theme_constant_override("outline_size", 4)
@@ -4061,7 +4080,7 @@ func _ensure_floor_ui() -> void:
 
 	# 底部提示条（认领成功 / 已被别人占了）
 	_notice_label = Label.new()
-	_notice_label.add_theme_font_size_override("font_size", 17)
+	_notice_label.add_theme_font_size_override("font_size", GameTheme.fs(17))
 	_notice_label.add_theme_color_override("font_color", Color("#ffe9a8"))
 	_notice_label.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
 	_notice_label.add_theme_constant_override("outline_size", 4)
@@ -4096,10 +4115,10 @@ func _build_floor_panel() -> PanelContainer:
 	sb.bg_color = Color(0.07, 0.09, 0.14, 0.96)
 	sb.border_color = Color(0.62, 0.70, 0.82, 0.95)
 	sb.set_border_width_all(2)
-	sb.content_margin_left = 16
-	sb.content_margin_right = 16
-	sb.content_margin_top = 14
-	sb.content_margin_bottom = 14
+	sb.content_margin_left = int(GameTheme.px(16.0))
+	sb.content_margin_right = int(GameTheme.px(16.0))
+	sb.content_margin_top = int(GameTheme.px(14.0))
+	sb.content_margin_bottom = int(GameTheme.px(14.0))
 	pc.add_theme_stylebox_override("panel", sb)
 
 	var vb := VBoxContainer.new()
@@ -4109,7 +4128,7 @@ func _build_floor_panel() -> PanelContainer:
 	var title := Label.new()
 	title.text = "电梯 · 选择楼层"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 20)
+	title.add_theme_font_size_override("font_size", GameTheme.fs(20))
 	title.add_theme_color_override("font_color", Color("#dfeaff"))
 	title.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
 	title.add_theme_constant_override("outline_size", 4)
@@ -4117,23 +4136,23 @@ func _build_floor_panel() -> PanelContainer:
 
 	var g := GridContainer.new()
 	g.columns = 3                       # 5 个地上层 + B1 = 6 个按钮，两行三列
-	g.add_theme_constant_override("h_separation", 8)
-	g.add_theme_constant_override("v_separation", 8)
+	g.add_theme_constant_override("h_separation", int(GameTheme.px(8.0)))
+	g.add_theme_constant_override("v_separation", int(GameTheme.px(8.0)))
 	vb.add_child(g)
 	for i in FLOOR_COUNT:
 		var b := Button.new()
 		b.text = "%d 层" % (i + 1)
-		b.custom_minimum_size = Vector2(88, 42)
+		b.custom_minimum_size = Vector2(GameTheme.px(88.0), GameTheme.px(42.0))
 		b.focus_mode = Control.FOCUS_NONE
-		b.add_theme_font_size_override("font_size", 17)
+		b.add_theme_font_size_override("font_size", GameTheme.fs(17))
 		b.add_theme_color_override("font_color", Color("#e8f4ff"))
 		b.pressed.connect(_on_floor_picked.bind(i + 1))
 		g.add_child(b)
 	var bb := Button.new()
 	bb.text = "B1 · 活动室"
-	bb.custom_minimum_size = Vector2(88, 42)
+	bb.custom_minimum_size = Vector2(GameTheme.px(88.0), GameTheme.px(42.0))
 	bb.focus_mode = Control.FOCUS_NONE
-	bb.add_theme_font_size_override("font_size", 17)
+	bb.add_theme_font_size_override("font_size", GameTheme.fs(17))
 	bb.add_theme_color_override("font_color", Color("#ffd88a"))
 	bb.pressed.connect(_on_floor_picked.bind(BASEMENT_FLOOR))
 	g.add_child(bb)
@@ -4629,7 +4648,7 @@ func _build_door_plates() -> void:
 		sb.content_margin_bottom = 2
 		pc.add_theme_stylebox_override("panel", sb)
 		var lb := Label.new()
-		lb.add_theme_font_size_override("font_size", 13)
+		lb.add_theme_font_size_override("font_size", GameTheme.fs(13))
 		lb.add_theme_color_override("font_color", Color("#cfe2f5"))
 		lb.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
 		lb.add_theme_constant_override("outline_size", 3)
@@ -4677,14 +4696,14 @@ func _build_note_panel() -> PanelContainer:
 	vb.add_theme_constant_override("separation", 9)
 	pc.add_child(vb)
 	_note_title = Label.new()
-	_note_title.add_theme_font_size_override("font_size", 17)
+	_note_title.add_theme_font_size_override("font_size", GameTheme.fs(17))
 	_note_title.add_theme_color_override("font_color", Color("#ffe9a8"))
 	_note_title.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
 	_note_title.add_theme_constant_override("outline_size", 4)
 	vb.add_child(_note_title)
 	_note_hint = Label.new()
 	_note_hint.text = "写点自我介绍：叫什么、哪个学院、作息、想认识什么样的人…（最多 160 字）"
-	_note_hint.add_theme_font_size_override("font_size", 12)
+	_note_hint.add_theme_font_size_override("font_size", GameTheme.fs(12))
 	_note_hint.add_theme_color_override("font_color", Color(0.62, 0.70, 0.80))
 	vb.add_child(_note_hint)
 
@@ -4696,13 +4715,13 @@ func _build_note_panel() -> PanelContainer:
 	vb.add_child(_oopz_box)
 	var ol := Label.new()
 	ol.text = "OOPZ 语音频道邀请 · 选填（只认语音频道的邀请）"
-	ol.add_theme_font_size_override("font_size", 12)
+	ol.add_theme_font_size_override("font_size", GameTheme.fs(12))
 	ol.add_theme_color_override("font_color", Color(0.55, 0.86, 0.72))
 	_oopz_box.add_child(ol)
 	_oopz_edit = LineEdit.new()
 	_oopz_edit.placeholder_text = "粘贴「语音频道」的邀请链接（不是域的邀请）"
 	_oopz_edit.custom_minimum_size = Vector2(460, 38)
-	_oopz_edit.add_theme_font_size_override("font_size", 14)
+	_oopz_edit.add_theme_font_size_override("font_size", GameTheme.fs(14))
 	_oopz_edit.add_theme_color_override("font_color", Color("#dff5e8"))
 	_oopz_box.add_child(_oopz_edit)
 	# 这一行是重点：域邀请和频道邀请的 URL 长得一模一样，程序分辨不出来，
@@ -4712,7 +4731,7 @@ func _build_note_panel() -> PanelContainer:
 	oh.text = "在 OOPZ 里点开要用的那个语音频道 → 复制邀请 → 粘到这里。\n" \
 		+ "别贴「域」的邀请：打开后卡片写「你收到了一个域邀请」就是贴错了，\n" \
 		+ "那样只能进到域首页，队员还得自己找频道、点了也听不到人。"
-	oh.add_theme_font_size_override("font_size", 11)
+	oh.add_theme_font_size_override("font_size", GameTheme.fs(11))
 	oh.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	oh.custom_minimum_size = Vector2(460, 0)
 	oh.add_theme_color_override("font_color", Color(0.58, 0.66, 0.74))
@@ -4721,7 +4740,7 @@ func _build_note_panel() -> PanelContainer:
 	_note_edit = TextEdit.new()
 	_note_edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
 	_note_edit.custom_minimum_size = Vector2(460, 150)
-	_note_edit.add_theme_font_size_override("font_size", 15)
+	_note_edit.add_theme_font_size_override("font_size", GameTheme.fs(15))
 	_note_edit.add_theme_color_override("font_color", Color("#e6effb"))
 	_note_edit.text_changed.connect(_update_note_count)
 	vb.add_child(_note_edit)
@@ -4729,7 +4748,7 @@ func _build_note_panel() -> PanelContainer:
 	hb.add_theme_constant_override("separation", 10)
 	vb.add_child(hb)
 	_note_count = Label.new()
-	_note_count.add_theme_font_size_override("font_size", 12)
+	_note_count.add_theme_font_size_override("font_size", GameTheme.fs(12))
 	_note_count.add_theme_color_override("font_color", Color(0.55, 0.62, 0.72))
 	hb.add_child(_note_count)
 	var spacer := Control.new()
@@ -4740,7 +4759,7 @@ func _build_note_panel() -> PanelContainer:
 		b.text = String(cfg[0])
 		b.custom_minimum_size = Vector2(96, 46)      # 手机上 34px 高的按钮太难点
 		b.focus_mode = Control.FOCUS_NONE
-		b.add_theme_font_size_override("font_size", 16)
+		b.add_theme_font_size_override("font_size", GameTheme.fs(16))
 		b.pressed.connect(cfg[1] as Callable)
 		hb.add_child(b)
 	# 退房（= 撕下名牌）。桌面上按 F 就行，但手机没有 F 键，必须给个能点的入口，
@@ -4749,7 +4768,7 @@ func _build_note_panel() -> PanelContainer:
 	_note_bye_btn.text = "退房"
 	_note_bye_btn.custom_minimum_size = Vector2(96, 46)
 	_note_bye_btn.focus_mode = Control.FOCUS_NONE
-	_note_bye_btn.add_theme_font_size_override("font_size", 16)
+	_note_bye_btn.add_theme_font_size_override("font_size", GameTheme.fs(16))
 	_note_bye_btn.add_theme_color_override("font_color", Color("#ff9a84"))
 	_note_bye_btn.pressed.connect(_leave_my_room)
 	hb.add_child(_note_bye_btn)
@@ -4800,7 +4819,7 @@ func _build_note_view() -> PanelContainer:
 	vb.add_theme_constant_override("separation", 10)
 	pc.add_child(vb)
 	_note_view_title = Label.new()
-	_note_view_title.add_theme_font_size_override("font_size", 17)
+	_note_view_title.add_theme_font_size_override("font_size", GameTheme.fs(17))
 	_note_view_title.add_theme_color_override("font_color", Color("#ffe9a8"))
 	_note_view_title.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
 	_note_view_title.add_theme_constant_override("outline_size", 4)
@@ -4808,7 +4827,7 @@ func _build_note_view() -> PanelContainer:
 	_note_view_body = Label.new()
 	_note_view_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_note_view_body.custom_minimum_size = Vector2(420, 0)
-	_note_view_body.add_theme_font_size_override("font_size", 15)
+	_note_view_body.add_theme_font_size_override("font_size", GameTheme.fs(15))
 	_note_view_body.add_theme_color_override("font_color", Color("#dbe7f5"))
 	vb.add_child(_note_view_body)
 	# 队长留了 OOPZ 频道才显示：站在板前就能直接进语音（不用先坐下）
@@ -4816,7 +4835,7 @@ func _build_note_view() -> PanelContainer:
 	_note_view_voice.text = "加入 OOPZ 语音频道"
 	_note_view_voice.custom_minimum_size = Vector2(0, 48)
 	_note_view_voice.focus_mode = Control.FOCUS_NONE
-	_note_view_voice.add_theme_font_size_override("font_size", 16)
+	_note_view_voice.add_theme_font_size_override("font_size", GameTheme.fs(16))
 	_note_view_voice.add_theme_color_override("font_color", Color("#d8ffe8"))
 	for st in ["normal", "hover", "pressed", "focus"]:
 		var vsb := StyleBoxFlat.new()
@@ -4835,7 +4854,7 @@ func _build_note_view() -> PanelContainer:
 	vb.add_child(foot_row)
 	var foot := Label.new()
 	foot.text = "按 E / Esc 关闭"
-	foot.add_theme_font_size_override("font_size", 12)
+	foot.add_theme_font_size_override("font_size", GameTheme.fs(12))
 	foot.add_theme_color_override("font_color", Color(0.55, 0.62, 0.72))
 	foot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	foot_row.add_child(foot)
@@ -4844,7 +4863,7 @@ func _build_note_view() -> PanelContainer:
 	close_btn.text = "关闭"
 	close_btn.custom_minimum_size = Vector2(96, 44)
 	close_btn.focus_mode = Control.FOCUS_NONE
-	close_btn.add_theme_font_size_override("font_size", 16)
+	close_btn.add_theme_font_size_override("font_size", GameTheme.fs(16))
 	close_btn.pressed.connect(_close_note_view)
 	foot_row.add_child(close_btn)
 	return pc

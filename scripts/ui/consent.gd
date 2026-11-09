@@ -50,19 +50,19 @@ func _build() -> void:
 
 	var vs := get_viewport().get_visible_rect().size
 	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(minf(vs.x * 0.92, 620.0), 0)
+	panel.custom_minimum_size = Vector2(minf(vs.x * 0.92, GameTheme.px(620.0)), 0)
 	panel.add_theme_stylebox_override("panel", _box())
 	center.add_child(panel)
 
 	var pad := MarginContainer.new()
 	for m in ["margin_left", "margin_right"]:
-		pad.add_theme_constant_override(m, 20)
+		pad.add_theme_constant_override(m, int(GameTheme.px(20.0)))
 	for m in ["margin_top", "margin_bottom"]:
-		pad.add_theme_constant_override(m, 16)
+		pad.add_theme_constant_override(m, int(GameTheme.px(16.0)))
 	panel.add_child(pad)
 
 	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 10)
+	col.add_theme_constant_override("separation", int(GameTheme.px(10.0)))
 	pad.add_child(col)
 
 	col.add_child(_label("开始之前", 20, "#e8eef2", true))
@@ -70,7 +70,8 @@ func _build() -> void:
 	# 正文放进滚动区：手机上屏幕矮，内容一屏放不下也不能把按钮顶出去
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.custom_minimum_size = Vector2(0, clampf(vs.y * 0.62, 220.0, 575.0))
+	scroll.custom_minimum_size = Vector2(0,
+		clampf(vs.y * 0.62, GameTheme.px(220.0), GameTheme.px(575.0)))
 	col.add_child(scroll)
 
 	var body := RichTextLabel.new()
@@ -81,19 +82,19 @@ func _build() -> void:
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	body.add_theme_font_override("normal_font", _font)
 	body.add_theme_font_override("bold_font", GameTheme.font_bold())
-	body.add_theme_font_size_override("normal_font_size", GameTheme.FS_BODY)
-	body.add_theme_font_size_override("bold_font_size", GameTheme.FS_BODY)
+	body.add_theme_font_size_override("normal_font_size", GameTheme.fs(GameTheme.FS_BODY))
+	body.add_theme_font_size_override("bold_font_size", GameTheme.fs(GameTheme.FS_BODY))
 	body.add_theme_color_override("default_color", Color("#cfd9e2"))
-	body.add_theme_constant_override("line_separation", 6)
+	body.add_theme_constant_override("line_separation", int(GameTheme.px(6.0)))
 	body.text = _body_text()
 	scroll.add_child(body)
 
 	var ok := Button.new()
 	ok.text = "我已阅读并知晓"
 	ok.focus_mode = Control.FOCUS_NONE
-	ok.custom_minimum_size = Vector2(0, 40)
+	ok.custom_minimum_size = Vector2(0, GameTheme.px(40.0))
 	ok.add_theme_font_override("font", _font)
-	ok.add_theme_font_size_override("font_size", GameTheme.FS_BODY)
+	ok.add_theme_font_size_override("font_size", GameTheme.fs(GameTheme.FS_BODY))
 	ok.add_theme_color_override("font_color", Color("#8ec5ff"))
 	ok.add_theme_stylebox_override("normal", _btn_box(Color(0.24, 0.44, 0.62, 0.30)))
 	ok.add_theme_stylebox_override("hover", _btn_box(Color(0.24, 0.44, 0.62, 0.55)))
@@ -136,7 +137,7 @@ func _label(text: String, size: int, color: String, bold := false) -> Label:
 	var l := Label.new()
 	l.text = text
 	l.add_theme_font_override("font", GameTheme.font_bold() if bold else _font)
-	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_font_size_override("font_size", GameTheme.fs(size))
 	l.add_theme_color_override("font_color", Color(color))
 	return l
 

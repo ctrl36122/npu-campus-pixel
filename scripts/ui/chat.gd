@@ -17,11 +17,9 @@ const IDLE_FADE := 12.0         # 多久没消息开始变淡
 const FADE_ALPHA := 0.68
 
 const SMALL_W_RATIO := 0.42     # 收起时的窗口宽度（占视口宽的比例）
-const SMALL_H_RATIO := 0.13     # 收起时的窗口高度（占视口高的比例）
+const SMALL_H_RATIO := 0.16     # 收起时的窗口高度（占视口高的比例）
 const DESK_W := 392.0           # 收起时的窗口尺寸（桌面）
 const DESK_H := 212.0
-const TOUCH_FS := 20            # 触屏字号：视口逻辑宽恒为 1280，13 落到手机上只有 11px
-const TOUCH_FS_BIG := 24
 
 const C_SELF := "#8ec5ff"
 const C_OTHER := "#e6eef6"
@@ -159,10 +157,10 @@ func _apply_layout() -> void:
 			clampf((avail - _panel.size.y) * 0.5, 8.0, maxf(8.0, avail - _panel.size.y - 8.0)))
 	else:
 		if touch:
-			# 按视口比例算：逻辑宽恒为 1280，写死 304 落到手机上只有屏宽的两成
-			var w := clampf(vs.x * SMALL_W_RATIO, 360.0, 660.0)
-			var h := clampf(vs.y * SMALL_H_RATIO, 150.0, 280.0)
-			_panel.position = Vector2(12.0, 14.0)
+			# 按视口比例算：手机上文字放大 1.6 倍，窗口也得跟着变大，否则只能塞两行
+			var w := clampf(vs.x * SMALL_W_RATIO, GameTheme.px(300.0), GameTheme.px(660.0))
+			var h := clampf(vs.y * SMALL_H_RATIO, GameTheme.px(170.0), GameTheme.px(280.0))
+			_panel.position = Vector2(GameTheme.px(12.0), GameTheme.px(14.0))
 			_panel.size = Vector2(w, h)
 		else:
 			_panel.position = Vector2(12.0, vs.y - DESK_H - 46.0)
@@ -183,22 +181,22 @@ func _apply_layout() -> void:
 func _layout_children() -> void:
 	var w := _panel.size.x
 	var h := _panel.size.y
-	var pad := 10.0
-	var head_h := 46.0 if _is_touch() else 28.0
-	var comp_h := 50.0 if _is_touch() else 30.0
-	var close_w := 44.0
+	var pad := GameTheme.px(10.0)
+	var head_h := GameTheme.px(46.0 if _is_touch() else 28.0)
+	var comp_h := GameTheme.px(50.0 if _is_touch() else 30.0)
+	var close_w := GameTheme.px(44.0)
 
-	var top := 4.0 + head_h + 8.0
-	_title_btn.position = Vector2(pad, 4.0)
+	var top := GameTheme.px(4.0) + head_h + GameTheme.px(8.0)
+	_title_btn.position = Vector2(pad, GameTheme.px(4.0))
 	_title_btn.size = Vector2(w - pad * 2.0 - (close_w if _expanded else 0.0), head_h)
-	_close_btn.position = Vector2(w - pad - close_w, 4.0)
+	_close_btn.position = Vector2(w - pad - close_w, GameTheme.px(4.0))
 	_close_btn.size = Vector2(close_w, head_h)
-	_rule.position = Vector2(pad, 4.0 + head_h + 2.0)
+	_rule.position = Vector2(pad, GameTheme.px(4.0) + head_h + GameTheme.px(2.0))
 	_rule.size = Vector2(maxf(0.0, w - pad * 2.0), 1.0)
 
 	var bottom := pad
 	if _expanded:
-		bottom += comp_h + 8.0
+		bottom += comp_h + GameTheme.px(8.0)
 		_composer.position = Vector2(pad, h - pad - comp_h)
 		_composer.size = Vector2(w - pad * 2.0, comp_h)
 	_scroll.position = Vector2(pad, top)
@@ -221,16 +219,19 @@ func _vk_inset() -> float:
 
 func _apply_font() -> void:
 	var touch := _is_touch()
-	var fs := TOUCH_FS if touch else GameTheme.FS_BODY
+	# 触屏靠 GameTheme.fs() 统一放大（竖屏 720 基准下 13px 只有 1.2mm 高），
+	# 桌面保持原字号。
+	var fs := GameTheme.fs(GameTheme.FS_BODY)
 	if _expanded:
-		fs = TOUCH_FS_BIG if touch else 18
+		fs = GameTheme.fs(17) if touch else 18
 	if is_instance_valid(_log):
 		_log.add_theme_font_size_override("normal_font_size", fs)
 		_log.add_theme_font_size_override("bold_font_size", fs)
 	if is_instance_valid(_edit):
 		_edit.add_theme_font_size_override("font_size", fs)
 	if is_instance_valid(_title_btn):
-		_title_btn.add_theme_font_size_override("font_size", (15 if touch else GameTheme.FS_SMALL) + (1 if _expanded else 0))
+		_title_btn.add_theme_font_size_override("font_size",
+			GameTheme.fs(14) if touch else GameTheme.FS_SMALL)
 
 
 func _refresh_head() -> void:
@@ -255,7 +256,7 @@ func _build() -> void:
 	_title_btn.focus_mode = Control.FOCUS_NONE
 	_title_btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	_title_btn.add_theme_font_override("font", _font)
-	_title_btn.add_theme_font_size_override("font_size", GameTheme.FS_SMALL)
+	_title_btn.add_theme_font_size_override("font_size", GameTheme.fs(GameTheme.FS_SMALL))
 	_title_btn.add_theme_color_override("font_color", Color("#93a3b0"))
 	_title_btn.add_theme_color_override("font_hover_color", Color("#cfdae4"))
 	_title_btn.add_theme_color_override("font_pressed_color", Color("#ffffff"))
@@ -267,7 +268,7 @@ func _build() -> void:
 	_close_btn.flat = true
 	_close_btn.focus_mode = Control.FOCUS_NONE
 	_close_btn.add_theme_font_override("font", _font)
-	_close_btn.add_theme_font_size_override("font_size", 22)
+	_close_btn.add_theme_font_size_override("font_size", GameTheme.fs(22))
 	_close_btn.add_theme_color_override("font_color", Color("#9fb0bf"))
 	_close_btn.add_theme_color_override("font_hover_color", Color("#ffffff"))
 	_close_btn.add_theme_color_override("font_pressed_color", Color("#ffffff"))
@@ -296,14 +297,15 @@ func _build() -> void:
 	_log.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_log.add_theme_font_override("normal_font", _font)
 	_log.add_theme_font_override("bold_font", _font)
-	_log.add_theme_font_size_override("normal_font_size", GameTheme.FS_BODY)
+	_log.add_theme_font_size_override("normal_font_size", GameTheme.fs(GameTheme.FS_BODY))
 	_log.add_theme_color_override("default_color", Color(C_OTHER))
-	_log.add_theme_constant_override("line_separation", 8 if _is_touch() else 3)
+	_log.add_theme_constant_override("line_separation",
+		int(GameTheme.px(8.0 if _is_touch() else 3.0)))
 	_scroll.add_child(_log)
 
 	# ── 输入行：只在大窗里出现，贴在面板底部（键盘弹出时面板跟着变矮） ──
 	_composer = HBoxContainer.new()
-	_composer.add_theme_constant_override("separation", 6)
+	_composer.add_theme_constant_override("separation", int(GameTheme.px(6.0)))
 	_composer.visible = false
 	_panel.add_child(_composer)
 
@@ -311,9 +313,9 @@ func _build() -> void:
 	_edit.placeholder_text = "说点什么…（键盘上的发送键＝发出）" if _is_touch() else "对所有人说…（回车发送，Esc 取消）"
 	_edit.max_length = 160
 	_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_edit.custom_minimum_size = Vector2(0, 50 if _is_touch() else 30)
+	_edit.custom_minimum_size = Vector2(0, GameTheme.px(50.0 if _is_touch() else 30.0))
 	_edit.add_theme_font_override("font", _font)
-	_edit.add_theme_font_size_override("font_size", GameTheme.FS_BODY)
+	_edit.add_theme_font_size_override("font_size", GameTheme.fs(GameTheme.FS_BODY))
 	_edit.add_theme_color_override("font_color", Color("#e6eef6"))
 	_edit.add_theme_color_override("font_placeholder_color", Color("#6d7d8b"))
 	_edit.text_submitted.connect(_on_submitted)
@@ -322,7 +324,7 @@ func _build() -> void:
 	_send_btn = Button.new()
 	_send_btn.text = "发送"
 	_send_btn.focus_mode = Control.FOCUS_NONE
-	_send_btn.custom_minimum_size = Vector2(72, 50)
+	_send_btn.custom_minimum_size = Vector2(GameTheme.px(72.0), GameTheme.px(50.0))
 	_send_btn.add_theme_font_override("font", _font)
 	_send_btn.add_theme_font_size_override("font_size", GameTheme.FS_BODY)
 	_send_btn.add_theme_color_override("font_color", Color("#8ec5ff"))

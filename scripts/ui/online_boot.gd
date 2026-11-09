@@ -457,7 +457,9 @@ func _on_session_ready() -> void:
 	_booting = false
 	_online = true
 	_card.visible = false
-	_hud.visible = true
+	# 手机竖屏只有 720 逻辑宽：在线名单会和左上聊天窗叠在一起，索性不显示
+	# （人数在聊天标题里，谁在线去好友面板看）
+	_hud.visible = not is_touch_ui()
 	_refresh_roster()
 	_wait_world()
 	# 玩家节点是进世界之后才生成的，_add_consent 那次 block 时它还不存在 ——
@@ -492,7 +494,7 @@ func _on_session_closed(reason: String) -> void:
 	_card_sub.text = reason if not reason.is_empty() else "主机可能退出了游戏"
 	_settings.visible = false
 	_set_local_blocked(false)
-	await get_tree().create_timer(1.2).timeout
+	await get_tree().create_timer(6.0).timeout
 	if _online:
 		return
 	_boot()                                      # 自动重新找房间
@@ -530,6 +532,7 @@ func _build_ui() -> void:
 	# 全局字体：挂在根窗口上，名牌 / NPC 名 / 所有面板统一继承
 	_font = GameTheme.font()
 	GameTheme.apply_root_theme(get_tree().root)
+	var vs := get_viewport().get_visible_rect().size
 
 	# ---- 启动 / 断线提示卡（居中）----
 	var card_wrap := CenterContainer.new()
@@ -539,18 +542,18 @@ func _build_ui() -> void:
 
 	_card = PanelContainer.new()
 	_card.add_theme_stylebox_override("panel", _box("#0f141a", "#25313d", 10))
-	_card.custom_minimum_size = Vector2(430, 0)
+	_card.custom_minimum_size = Vector2(minf(vs.x * 0.90, GameTheme.px(430.0)), 0)
 	_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	card_wrap.add_child(_card)
 
 	var pad := MarginContainer.new()
 	pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	for m in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
-		pad.add_theme_constant_override(m, 22)
+		pad.add_theme_constant_override(m, int(GameTheme.px(22.0)))
 	_card.add_child(pad)
 
 	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 8)
+	col.add_theme_constant_override("separation", int(GameTheme.px(8.0)))
 	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	pad.add_child(col)
 
@@ -561,16 +564,16 @@ func _build_ui() -> void:
 	_card_sub = _label("", 13, "#7f8f9c")
 	_card_sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_card_sub.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_card_sub.custom_minimum_size = Vector2(380, 0)
+	_card_sub.custom_minimum_size = Vector2(minf(vs.x * 0.80, GameTheme.px(380.0)), 0)
 	col.add_child(_card_sub)
 
 	# ---- 右上角：在线名单 ----
 	_hud = PanelContainer.new()
 	_hud.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-	_hud.offset_left = -196.0
-	_hud.offset_top = 12.0
-	_hud.offset_right = -12.0
-	_hud.offset_bottom = 12.0
+	_hud.offset_left = -GameTheme.px(196.0)
+	_hud.offset_top = GameTheme.px(12.0)
+	_hud.offset_right = -GameTheme.px(12.0)
+	_hud.offset_bottom = GameTheme.px(12.0)
 	_hud.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	_hud.add_theme_stylebox_override("panel", _box("#0d1218b8", "#2a3845", 6))
 	# 纯展示面板，鼠标事件全部穿透，否则鼠标停在名单上滚轮就缩不了镜头
@@ -580,23 +583,23 @@ func _build_ui() -> void:
 
 	var hud_pad := MarginContainer.new()
 	for m in ["margin_left", "margin_right"]:
-		hud_pad.add_theme_constant_override(m, 10)
+		hud_pad.add_theme_constant_override(m, int(GameTheme.px(10.0)))
 	for m in ["margin_top", "margin_bottom"]:
-		hud_pad.add_theme_constant_override(m, 7)
+		hud_pad.add_theme_constant_override(m, int(GameTheme.px(7.0)))
 	_hud.add_child(hud_pad)
 
 	_roster = _label("", 12, "#cfd9e2")
 	_roster.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_roster.custom_minimum_size = Vector2(160, 0)
+	_roster.custom_minimum_size = Vector2(GameTheme.px(160.0), 0)
 	hud_pad.add_child(_roster)
 
 	# ---- 左下角：操作提示（带半透明底，压在楼上也看得清）----
 	var hint_wrap := PanelContainer.new()
 	hint_wrap.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
-	hint_wrap.offset_left = 12.0
-	hint_wrap.offset_top = -38.0
-	hint_wrap.offset_right = 412.0
-	hint_wrap.offset_bottom = -10.0
+	hint_wrap.offset_left = GameTheme.px(12.0)
+	hint_wrap.offset_top = -GameTheme.px(38.0)
+	hint_wrap.offset_right = GameTheme.px(412.0)
+	hint_wrap.offset_bottom = -GameTheme.px(10.0)
 	hint_wrap.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	hint_wrap.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hint_wrap.add_theme_stylebox_override("panel", _box("#0d1218a8", "#26313c", 5))
@@ -615,7 +618,7 @@ func _build_ui() -> void:
 	var clock_panel := PanelContainer.new()
 	clock_panel.name = "ClockPanel"
 	clock_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
-	clock_panel.custom_minimum_size = Vector2(156, 30)
+	clock_panel.custom_minimum_size = Vector2(GameTheme.px(156.0), GameTheme.px(30.0))
 	clock_panel.add_theme_stylebox_override("panel", _box("#0d1418b8", "#2a3845", 6))
 	clock_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(clock_panel)
@@ -627,7 +630,13 @@ func _build_ui() -> void:
 	_build_settings(layer)
 
 
-func _build_settings(layer: CanvasLayer) -> void:
+func _build_settings(_layer: CanvasLayer) -> void:
+	var vs := get_viewport().get_visible_rect().size
+	# 单独一层：设置面板和小地图都在 layer 10 时，后建的居中小地图会盖住面板右上角
+	# （手机上表现为「保存」按钮只剩一条边）
+	var layer := CanvasLayer.new()
+	layer.layer = 13
+	add_child(layer)
 	var wrap := CenterContainer.new()
 	wrap.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	# 这个全屏容器只是用来把设置面板居中的，必须 IGNORE。
@@ -638,17 +647,17 @@ func _build_settings(layer: CanvasLayer) -> void:
 
 	_settings = PanelContainer.new()
 	_settings.add_theme_stylebox_override("panel", _box("#0f141a", "#31414f", 10))
-	_settings.custom_minimum_size = Vector2(400, 0)
+	_settings.custom_minimum_size = Vector2(minf(vs.x * 0.90, GameTheme.px(400.0)), 0)
 	_settings.visible = false
 	wrap.add_child(_settings)
 
 	var pad := MarginContainer.new()
 	for m in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
-		pad.add_theme_constant_override(m, 18)
+		pad.add_theme_constant_override(m, int(GameTheme.px(18.0)))
 	_settings.add_child(pad)
 
 	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 10)
+	col.add_theme_constant_override("separation", int(GameTheme.px(10.0)))
 	pad.add_child(col)
 
 	col.add_child(_label("设置", GameTheme.FS_TITLE, "#e8eef2", true))
@@ -656,15 +665,15 @@ func _build_settings(layer: CanvasLayer) -> void:
 	# 昵称
 	col.add_child(_label("昵称", 12, "#8a99a6"))
 	var nr := HBoxContainer.new()
-	nr.add_theme_constant_override("separation", 8)
+	nr.add_theme_constant_override("separation", int(GameTheme.px(8.0)))
 	col.add_child(nr)
 
 	_nick_edit = LineEdit.new()
 	_nick_edit.max_length = 12
-	_nick_edit.custom_minimum_size = Vector2(0, 30)
+	_nick_edit.custom_minimum_size = Vector2(0, GameTheme.px(30.0))
 	_nick_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_nick_edit.add_theme_font_override("font", _font)
-	_nick_edit.add_theme_font_size_override("font_size", GameTheme.FS_BODY)
+	_nick_edit.add_theme_font_size_override("font_size", GameTheme.fs(GameTheme.FS_BODY))
 	nr.add_child(_nick_edit)
 
 	var save_btn := _button("保存", 70)
@@ -676,15 +685,15 @@ func _build_settings(layer: CanvasLayer) -> void:
 	col.add_child(_label("外观", 12, "#8a99a6"))
 	var hr := GridContainer.new()
 	hr.columns = 6
-	hr.add_theme_constant_override("h_separation", 6)
-	hr.add_theme_constant_override("v_separation", 6)
+	hr.add_theme_constant_override("h_separation", int(GameTheme.px(6.0)))
+	hr.add_theme_constant_override("v_separation", int(GameTheme.px(6.0)))
 	col.add_child(hr)
 	var HeroDB := preload("res://scripts/sandbox/hero_db.gd")
 	for i in HeroDB.HEROES.size():
 		var hero: Dictionary = HeroDB.HEROES[i]
 		var b := Button.new()
 		b.flat = true
-		b.custom_minimum_size = Vector2(52, 70)
+		b.custom_minimum_size = Vector2(GameTheme.px(52.0), GameTheme.px(70.0))
 		b.icon = _portrait(str(hero["sheet"]))
 		b.expand_icon = true
 		b.focus_mode = Control.FOCUS_NONE
@@ -695,7 +704,7 @@ func _build_settings(layer: CanvasLayer) -> void:
 	# 联机信息：当主机时，这里显示「同一 WiFi 填什么 / 异地填什么」，点复制直接发给同学
 	col.add_child(_label("联机地址", 12, "#8a99a6"))
 	var ir := HBoxContainer.new()
-	ir.add_theme_constant_override("separation", 8)
+	ir.add_theme_constant_override("separation", int(GameTheme.px(8.0)))
 	col.add_child(ir)
 	_net_info = _label("", GameTheme.FS_SMALL, "#9fb0bd")
 	_net_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -711,15 +720,15 @@ func _build_settings(layer: CanvasLayer) -> void:
 	# 手动地址
 	col.add_child(_label("服务器地址（留空则自动搜索）", 12, "#8a99a6"))
 	var ar := HBoxContainer.new()
-	ar.add_theme_constant_override("separation", 8)
+	ar.add_theme_constant_override("separation", int(GameTheme.px(8.0)))
 	col.add_child(ar)
 
 	_addr_edit = LineEdit.new()
 	_addr_edit.placeholder_text = "例如 192.168.1.20"
-	_addr_edit.custom_minimum_size = Vector2(0, 30)
+	_addr_edit.custom_minimum_size = Vector2(0, GameTheme.px(30.0))
 	_addr_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_addr_edit.add_theme_font_override("font", _font)
-	_addr_edit.add_theme_font_size_override("font_size", GameTheme.FS_BODY)
+	_addr_edit.add_theme_font_size_override("font_size", GameTheme.fs(GameTheme.FS_BODY))
 	ar.add_child(_addr_edit)
 
 	var re_btn := _button("重连", 70)
@@ -730,7 +739,10 @@ func _build_settings(layer: CanvasLayer) -> void:
 	close_btn.pressed.connect(func(): _toggle_settings(false))
 	col.add_child(close_btn)
 
-	col.add_child(_label("Tab 或 Esc 关闭", GameTheme.FS_SMALL, "#5f6f7c"))
+	var foot_text := "Tab 或 Esc 关闭"
+	if is_touch_ui():
+		foot_text = "点「返回游戏」关闭"
+	col.add_child(_label(foot_text, GameTheme.FS_SMALL, "#5f6f7c"))
 
 
 func _label(text: String, size: int, color: String, bold := false) -> Label:
@@ -740,7 +752,7 @@ func _label(text: String, size: int, color: String, bold := false) -> Label:
 		l.add_theme_font_override("font", GameTheme.font_bold())
 	else:
 		l.add_theme_font_override("font", _font)
-	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_font_size_override("font_size", GameTheme.fs(size))
 	l.add_theme_color_override("font_color", Color(color))
 	return l
 
@@ -750,9 +762,9 @@ func _button(text: String, width: int) -> Button:
 	b.text = text
 	b.focus_mode = Control.FOCUS_NONE
 	if width > 0:
-		b.custom_minimum_size = Vector2(width, 30)
+		b.custom_minimum_size = Vector2(GameTheme.px(float(width)), GameTheme.px(30.0))
 	b.add_theme_font_override("font", _font)
-	b.add_theme_font_size_override("font_size", GameTheme.FS_BODY)
+	b.add_theme_font_size_override("font_size", GameTheme.fs(GameTheme.FS_BODY))
 	b.add_theme_color_override("font_color", Color("#dce6ee"))
 	b.add_theme_color_override("font_hover_color", Color("#ffffff"))
 	b.add_theme_stylebox_override("normal", _box("#1b2330", "#2f3d4d", 4))
@@ -767,10 +779,10 @@ func _box(bg: String, border: String, radius: int) -> StyleBoxFlat:
 	sb.border_color = Color(border)
 	sb.set_border_width_all(1)
 	sb.set_corner_radius_all(radius)
-	sb.content_margin_left = 10.0
-	sb.content_margin_right = 10.0
-	sb.content_margin_top = 6.0
-	sb.content_margin_bottom = 6.0
+	sb.content_margin_left = GameTheme.px(10.0)
+	sb.content_margin_right = GameTheme.px(10.0)
+	sb.content_margin_top = GameTheme.px(6.0)
+	sb.content_margin_bottom = GameTheme.px(6.0)
 	return sb
 
 
@@ -829,8 +841,9 @@ func _build_map_ui(arena: Node) -> void:
 	_mini_panel.anchor_right = 1.0
 	_mini_panel.offset_left = -12.0 - panel_w
 	_mini_panel.offset_right = -12.0
-	_mini_panel.offset_top = 118.0
-	_mini_panel.offset_bottom = 118.0 + panel_h
+	var mini_top := 118.0 if not is_touch_ui() else 12.0
+	_mini_panel.offset_top = mini_top
+	_mini_panel.offset_bottom = mini_top + panel_h
 	_mini_panel.mouse_filter = Control.MOUSE_FILTER_PASS
 	_mini_panel.add_theme_stylebox_override("panel", _map_panel_box())
 	_ui_layer.add_child(_mini_panel)
@@ -989,7 +1002,7 @@ func touch_toggle_pets() -> void:
 ## 顶部状态条、时钟、小地图都被压在下面，叠着看很乱，先藏起来。
 func set_overlay(v: bool) -> void:
 	if _hud != null and is_instance_valid(_hud):
-		_hud.visible = not v
+		_hud.visible = (not v) and not is_touch_ui()
 	if _mini_panel != null and is_instance_valid(_mini_panel):
 		_mini_panel.visible = not v
 	if _clock != null and is_instance_valid(_clock):

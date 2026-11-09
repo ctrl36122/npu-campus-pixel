@@ -113,19 +113,19 @@ func _build() -> void:
 
 	var vs := get_viewport().get_visible_rect().size
 	_panel = PanelContainer.new()
-	_panel.custom_minimum_size = Vector2(minf(vs.x * 0.88, 460.0), 0)
+	_panel.custom_minimum_size = Vector2(minf(vs.x * 0.88, GameTheme.px(460.0)), 0)
 	_panel.add_theme_stylebox_override("panel", _box())
 	center.add_child(_panel)
 
 	var pad := MarginContainer.new()
 	for m in ["margin_left", "margin_right"]:
-		pad.add_theme_constant_override(m, 16)
+		pad.add_theme_constant_override(m, int(GameTheme.px(16.0)))
 	for m in ["margin_top", "margin_bottom"]:
-		pad.add_theme_constant_override(m, 12)
+		pad.add_theme_constant_override(m, int(GameTheme.px(12.0)))
 	_panel.add_child(pad)
 
 	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 8)
+	col.add_theme_constant_override("separation", int(GameTheme.px(8.0)))
 	pad.add_child(col)
 
 	# 标题行
@@ -150,12 +150,13 @@ func _build() -> void:
 	_scroll = ScrollContainer.new()
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	_scroll.custom_minimum_size = Vector2(0, clampf(vs.y * 0.28, 150.0, 250.0))
+	_scroll.custom_minimum_size = Vector2(0,
+		clampf(vs.y * 0.28, GameTheme.px(150.0), GameTheme.px(250.0)))
 	col.add_child(_scroll)
 
 	_list = VBoxContainer.new()
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_list.add_theme_constant_override("separation", 6)
+	_list.add_theme_constant_override("separation", int(GameTheme.px(6.0)))
 	_scroll.add_child(_list)
 
 	_empty = _label("还没聊过。打个招呼吧。", 13, "#6f7f8c")
@@ -163,16 +164,18 @@ func _build() -> void:
 
 	# 输入行
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 8)
+	row.add_theme_constant_override("separation", int(GameTheme.px(8.0)))
 	col.add_child(row)
 
 	_edit = LineEdit.new()
 	_edit.max_length = Net.DM_MAX
 	_edit.placeholder_text = "私信内容…（回车发送）"
+	if GameTheme.touch_ui():
+		_edit.placeholder_text = "私信内容…（点「发送」发出）"
 	_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_edit.custom_minimum_size = Vector2(0, 34)
+	_edit.custom_minimum_size = Vector2(0, GameTheme.px(34.0))
 	_edit.add_theme_font_override("font", _font)
-	_edit.add_theme_font_size_override("font_size", GameTheme.FS_BODY)
+	_edit.add_theme_font_size_override("font_size", GameTheme.fs(GameTheme.FS_BODY))
 	_edit.add_theme_color_override("font_color", Color("#e6eef6"))
 	_edit.add_theme_color_override("font_placeholder_color", Color("#6d7d8b"))
 	_edit.text_submitted.connect(func(_t: String) -> void: _send_now())
@@ -181,7 +184,7 @@ func _build() -> void:
 	_send = Button.new()
 	_send.text = "发送"
 	_send.focus_mode = Control.FOCUS_NONE
-	_send.custom_minimum_size = Vector2(72, 34)
+	_send.custom_minimum_size = Vector2(GameTheme.px(72.0), GameTheme.px(34.0))
 	_style_btn(_send, Color(0.20, 0.42, 0.34, 0.65))
 	_send.pressed.connect(_send_now)
 	row.add_child(_send)
@@ -254,9 +257,10 @@ func _append_row(mine: bool, text: String) -> void:
 	var lb := Label.new()
 	lb.text = text
 	lb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	lb.custom_minimum_size = Vector2(220, 0)     # 给自动换行一个确定的宽度
+	# 给自动换行一个确定的宽度；跟着 UI 倍率走，手机上气泡才不会挤成一条
+	lb.custom_minimum_size = Vector2(GameTheme.px(220.0), 0)
 	lb.add_theme_font_override("font", _font)
-	lb.add_theme_font_size_override("font_size", GameTheme.FS_BODY)
+	lb.add_theme_font_size_override("font_size", GameTheme.fs(GameTheme.FS_BODY))
 	lb.add_theme_color_override("font_color", Color("#e6eef6") if mine else Color("#cfe0ee"))
 	box.add_child(lb)
 
@@ -273,14 +277,14 @@ func _label(text: String, size: int, color: String, bold := false) -> Label:
 	var l := Label.new()
 	l.text = text
 	l.add_theme_font_override("font", GameTheme.font_bold() if bold else _font)
-	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_font_size_override("font_size", GameTheme.fs(size))
 	l.add_theme_color_override("font_color", Color(color))
 	return l
 
 
 func _style_btn(b: Button, c: Color) -> void:
 	b.add_theme_font_override("font", _font)
-	b.add_theme_font_size_override("font_size", 13)
+	b.add_theme_font_size_override("font_size", GameTheme.fs(13))
 	b.add_theme_color_override("font_color", Color("#dbe6ef"))
 	b.add_theme_stylebox_override("normal", _btn_box(c))
 	b.add_theme_stylebox_override("hover", _btn_box(c.lightened(0.18)))
@@ -305,10 +309,10 @@ func _bubble(mine: bool) -> StyleBoxFlat:
 	sb.border_color = Color("#2f4a63") if mine else Color("#2b3642")
 	sb.set_border_width_all(1)
 	sb.set_corner_radius_all(6)
-	sb.content_margin_left = 10.0
-	sb.content_margin_right = 10.0
-	sb.content_margin_top = 6.0
-	sb.content_margin_bottom = 6.0
+	sb.content_margin_left = GameTheme.px(10.0)
+	sb.content_margin_right = GameTheme.px(10.0)
+	sb.content_margin_top = GameTheme.px(6.0)
+	sb.content_margin_bottom = GameTheme.px(6.0)
 	return sb
 
 
@@ -318,8 +322,8 @@ func _btn_box(c: Color) -> StyleBoxFlat:
 	sb.border_color = Color(0.29, 0.53, 0.78, 0.9)
 	sb.set_border_width_all(1)
 	sb.set_corner_radius_all(6)
-	sb.content_margin_left = 10.0
-	sb.content_margin_right = 10.0
-	sb.content_margin_top = 4.0
-	sb.content_margin_bottom = 4.0
+	sb.content_margin_left = GameTheme.px(10.0)
+	sb.content_margin_right = GameTheme.px(10.0)
+	sb.content_margin_top = GameTheme.px(4.0)
+	sb.content_margin_bottom = GameTheme.px(4.0)
 	return sb

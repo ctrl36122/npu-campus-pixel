@@ -38,7 +38,7 @@ func _build_ui() -> void:
 	title.text = "像素工大"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.add_theme_font_override("font", font)
-	title.add_theme_font_size_override("font_size", 44)
+	title.add_theme_font_size_override("font_size", GameTheme.fs(44))
 	title.add_theme_color_override("font_color", Color("#e8eef2"))
 	col.add_child(title)
 
@@ -46,7 +46,7 @@ func _build_ui() -> void:
 	sub.text = "西北工业大学 · 长安校区"
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	sub.add_theme_font_override("font", font)
-	sub.add_theme_font_size_override("font_size", 15)
+	sub.add_theme_font_size_override("font_size", GameTheme.fs(15))
 	sub.add_theme_color_override("font_color", Color("#7f8f9c"))
 	col.add_child(sub)
 
@@ -63,7 +63,7 @@ func _build_ui() -> void:
 	_hint.text = ""
 	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_hint.add_theme_font_override("font", font)
-	_hint.add_theme_font_size_override("font_size", 12)
+	_hint.add_theme_font_size_override("font_size", GameTheme.fs(12))
 	_hint.add_theme_color_override("font_color", Color("#5f6f7c"))
 	col.add_child(_hint)
 

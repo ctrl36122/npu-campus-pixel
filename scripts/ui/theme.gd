@@ -11,6 +11,41 @@ const FS_HEAD := 15    # 分区标题 / HUD 主信息
 const FS_BODY := 13    # 正文、输入框、按钮、在线名单
 const FS_SMALL := 11   # 提示条、次要说明
 
+## 手机 UI 放大倍率。手机竖屏的基准视口是 720×1280（见 online_boot.is_portrait_ui），
+## 13px 字号落到 1080 宽的手机屏上只有约 1.2mm 高 —— 按桌面字号做出来的面板
+## 在手机上是「框子很大、字很小」。这里统一放大字号与点击区域，桌面端恒为 1.0。
+const TOUCH_UI_SCALE := 1.6
+
+static var _ui_scale := 0.0
+
+
+## 触屏环境（Android/iOS 包，或桌面用 XGD_TOUCH=1 模拟）
+static func touch_ui() -> bool:
+	return OS.has_feature("mobile") or OS.has_environment("XGD_TOUCH")
+
+
+## 当前 UI 缩放倍率。XGD_UI_SCALE 可覆盖（调试 / 截图核对用）。
+static func ui_scale() -> float:
+	if _ui_scale <= 0.0:
+		_ui_scale = 1.0
+		if OS.has_environment("XGD_UI_SCALE"):
+			var raw := OS.get_environment("XGD_UI_SCALE").strip_edges()
+			if raw.is_valid_float():
+				_ui_scale = clampf(raw.to_float(), 0.5, 3.0)
+		elif touch_ui():
+			_ui_scale = TOUCH_UI_SCALE
+	return _ui_scale
+
+
+## 字号：所有 add_theme_font_size_override 都过这一层，别再写死数字。
+static func fs(base: int) -> int:
+	return maxi(1, roundi(float(base) * ui_scale()))
+
+
+## 尺寸（内边距、行高、图标块）：和字号同一倍率才不会「字大了框没大」。
+static func px(v: float) -> float:
+	return v * ui_scale()
+
 static var _font: SystemFont
 static var _font_bold: SystemFont
 
@@ -41,5 +76,5 @@ static func font_bold() -> SystemFont:
 static func apply_root_theme(root: Window) -> void:
 	var t := Theme.new()
 	t.default_font = font()
-	t.default_font_size = FS_BODY
+	t.default_font_size = fs(FS_BODY)
 	root.theme = t

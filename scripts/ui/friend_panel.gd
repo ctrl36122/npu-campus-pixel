@@ -108,19 +108,20 @@ func _build() -> void:
 
 	var vs := get_viewport().get_visible_rect().size
 	_panel = PanelContainer.new()
-	_panel.custom_minimum_size = Vector2(minf(vs.x * 0.86, 480.0), 0)
+	# 上限也过一遍 px()：手机上字放大 1.6 倍后 480 宽塞不下「昵称+在线+两个按钮」
+	_panel.custom_minimum_size = Vector2(minf(vs.x * 0.86, GameTheme.px(480.0)), 0)
 	_panel.add_theme_stylebox_override("panel", _box())
 	center.add_child(_panel)
 
 	var pad := MarginContainer.new()
 	for m in ["margin_left", "margin_right"]:
-		pad.add_theme_constant_override(m, 18)
+		pad.add_theme_constant_override(m, int(GameTheme.px(18.0)))
 	for m in ["margin_top", "margin_bottom"]:
-		pad.add_theme_constant_override(m, 14)
+		pad.add_theme_constant_override(m, int(GameTheme.px(14.0)))
 	_panel.add_child(pad)
 
 	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 10)
+	col.add_theme_constant_override("separation", int(GameTheme.px(10.0)))
 	pad.add_child(col)
 
 	# 标题行
@@ -140,7 +141,7 @@ func _build() -> void:
 	_req_title = _label("待你接受", 14, "#ffd479", true)
 	col.add_child(_req_title)
 	_req_box = VBoxContainer.new()
-	_req_box.add_theme_constant_override("separation", 6)
+	_req_box.add_theme_constant_override("separation", int(GameTheme.px(6.0)))
 	col.add_child(_req_box)
 
 	col.add_child(HSeparator.new())
@@ -149,20 +150,26 @@ func _build() -> void:
 
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.custom_minimum_size = Vector2(0, clampf(vs.y * 0.34, 120.0, 260.0))
+	scroll.custom_minimum_size = Vector2(0,
+		clampf(vs.y * 0.34, GameTheme.px(120.0), GameTheme.px(260.0)))
 	col.add_child(scroll)
 
 	_friend_box = VBoxContainer.new()
 	_friend_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_friend_box.add_theme_constant_override("separation", 6)
+	_friend_box.add_theme_constant_override("separation", int(GameTheme.px(6.0)))
 	scroll.add_child(_friend_box)
 
-	_empty = _label("还没有好友。走到同学旁边按 E，或在聊天框输入 /friend 昵称。",
-		13, "#8a99a6")
+	var empty_text := "还没有好友。走到同学旁边按 E，或在聊天框输入 /friend 昵称。"
+	if GameTheme.touch_ui():
+		empty_text = "还没有好友。走到同学旁边点他，或在聊天框输入 /friend 昵称。"
+	_empty = _label(empty_text, 13, "#8a99a6")
 	_empty.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	col.add_child(_empty)
 
-	col.add_child(_label("按 P 开关这个面板 · 在线好友可以私信（不进公屏）", 12, "#5f6f7c"))
+	var foot := "按 P 开关这个面板 · 在线好友可以私信（不进公屏）"
+	if GameTheme.touch_ui():
+		foot = "点右下「友」开关本面板 · 在线好友可以私信（不进公屏）"
+	col.add_child(_label(foot, 12, "#5f6f7c"))
 
 
 ## 重建列表。数据只读 Net.my_friends，不缓存 —— 每次变了就整块重画，
@@ -201,9 +208,10 @@ func _friend_demo() -> void:
 
 func _request_row(uid: String, nm: String) -> Control:
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 8)
+	row.add_theme_constant_override("separation", int(GameTheme.px(8.0)))
 	var lb := _label(nm, 14, "#ffe9a8")
 	lb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lb.clip_text = true
 	row.add_child(lb)
 	var yes := Button.new()
 	yes.text = "接受"
@@ -226,9 +234,10 @@ func _request_row(uid: String, nm: String) -> Control:
 
 func _friend_row(uid: String, nm: String) -> Control:
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 8)
+	row.add_theme_constant_override("separation", int(GameTheme.px(8.0)))
 	var lb := _label(nm, 14, "#dbe6ef")
 	lb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lb.clip_text = true
 	row.add_child(lb)
 	var st := _label("在线" if _online(uid) else "离线", 12,
 		"#9ff0d0" if _online(uid) else "#6f7f8c")
@@ -273,14 +282,14 @@ func _label(text: String, size: int, color: String, bold := false) -> Label:
 	var l := Label.new()
 	l.text = text
 	l.add_theme_font_override("font", GameTheme.font_bold() if bold else _font)
-	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_font_size_override("font_size", GameTheme.fs(size))
 	l.add_theme_color_override("font_color", Color(color))
 	return l
 
 
 func _style_btn(b: Button, c: Color) -> void:
 	b.add_theme_font_override("font", _font)
-	b.add_theme_font_size_override("font_size", 13)
+	b.add_theme_font_size_override("font_size", GameTheme.fs(13))
 	b.add_theme_color_override("font_color", Color("#dbe6ef"))
 	b.add_theme_stylebox_override("normal", _btn_box(c))
 	b.add_theme_stylebox_override("hover", _btn_box(c.lightened(0.18)))
@@ -299,14 +308,15 @@ func _box() -> StyleBoxFlat:
 	return sb
 
 
+## 按钮内边距跟着 UI 倍率走：手机上 4px 上下太窄，手指按不准
 func _btn_box(c: Color) -> StyleBoxFlat:
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = c
 	sb.border_color = Color(0.29, 0.53, 0.78, 0.9)
 	sb.set_border_width_all(1)
 	sb.set_corner_radius_all(6)
-	sb.content_margin_left = 10.0
-	sb.content_margin_right = 10.0
-	sb.content_margin_top = 4.0
-	sb.content_margin_bottom = 4.0
+	sb.content_margin_left = GameTheme.px(10.0)
+	sb.content_margin_right = GameTheme.px(10.0)
+	sb.content_margin_top = GameTheme.px(4.0)
+	sb.content_margin_bottom = GameTheme.px(4.0)
 	return sb
