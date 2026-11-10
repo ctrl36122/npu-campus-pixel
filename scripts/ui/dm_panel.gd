@@ -324,6 +324,7 @@ func _btn_box(c: Color) -> StyleBoxFlat:
 	sb.set_corner_radius_all(6)
 	sb.content_margin_left = GameTheme.px(10.0)
 	sb.content_margin_right = GameTheme.px(10.0)
-	sb.content_margin_top = GameTheme.px(4.0)
-	sb.content_margin_bottom = GameTheme.px(4.0)
+	var vpad := GameTheme.px(9.0 if GameTheme.touch_ui() else 4.0)
+	sb.content_margin_top = vpad
+	sb.content_margin_bottom = vpad
 	return sb

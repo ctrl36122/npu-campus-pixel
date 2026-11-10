@@ -150,8 +150,12 @@ func _build() -> void:
 
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	# 手机竖屏 1280 高：0.34 会把列表撑到 400+ 逻辑高，两三个好友时下面全是空白。
+	# 触屏给一截矮列表，人多了照样能滚。
+	var list_ratio := 0.20 if GameTheme.touch_ui() else 0.34
+	var list_cap := GameTheme.px(170.0) if GameTheme.touch_ui() else GameTheme.px(260.0)
 	scroll.custom_minimum_size = Vector2(0,
-		clampf(vs.y * 0.34, GameTheme.px(120.0), GameTheme.px(260.0)))
+		clampf(vs.y * list_ratio, GameTheme.px(120.0), list_cap))
 	col.add_child(scroll)
 
 	_friend_box = VBoxContainer.new()
@@ -168,7 +172,7 @@ func _build() -> void:
 
 	var foot := "按 P 开关这个面板 · 在线好友可以私信（不进公屏）"
 	if GameTheme.touch_ui():
-		foot = "点右下「友」开关本面板 · 在线好友可以私信（不进公屏）"
+		foot = "点右下「友」按钮开关 · 在线好友可以私信（不进公屏）"
 	col.add_child(_label(foot, 12, "#5f6f7c"))
 
 
@@ -317,6 +321,8 @@ func _btn_box(c: Color) -> StyleBoxFlat:
 	sb.set_corner_radius_all(6)
 	sb.content_margin_left = GameTheme.px(10.0)
 	sb.content_margin_right = GameTheme.px(10.0)
-	sb.content_margin_top = GameTheme.px(4.0)
-	sb.content_margin_bottom = GameTheme.px(4.0)
+	# 手机上「私信 / 删除」按钮太矮不好点，纵向内边距单独加一档；桌面保持原值
+	var vpad := GameTheme.px(9.0 if GameTheme.touch_ui() else 4.0)
+	sb.content_margin_top = vpad
+	sb.content_margin_bottom = vpad
 	return sb

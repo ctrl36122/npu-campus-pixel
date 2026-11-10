@@ -131,36 +131,68 @@ func _toggle() -> void:
 
 
 # ---------------------------------------------------------------- 布局
+## 版面尺寸集中在这里：_layout_children / _fit_scroll / _fit_panel 三处共用。
+## 之前三处各写各的裸数字，触屏统一放大 1.6 倍后 _fit_scroll 还停在旧值，
+## 消息区底部正好压进输入行 —— 表现就是最后一条消息被输入框盖住半截。
+func _pad() -> float:
+	return GameTheme.px(10.0)
+
+
+func _head_h() -> float:
+	return GameTheme.px(46.0 if _is_touch() else 28.0)
+
+
+func _comp_h() -> float:
+	return GameTheme.px(50.0 if _is_touch() else 30.0)
+
+
+func _top_h() -> float:
+	return GameTheme.px(4.0) + _head_h() + GameTheme.px(8.0)
+
+
+func _bottom_h() -> float:
+	return _pad() + (_comp_h() + GameTheme.px(8.0) if _expanded else 0.0)
+
+
 func _apply_layout() -> void:
 	if _panel == null:
 		return
 	var touch := _is_touch()
 	var vs := get_viewport().get_visible_rect().size
 	var vk := _vk_inset()
+	var safe := GameTheme.safe_insets(vs)
 
 	# 一律按左上角定位 + 绝对尺寸：锚点组合太多容易互相打架，只有 4 个数反而不出错
 	_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
 	if _expanded:
 		# 展开不等于铺满：手机上占半屏就够，露出下面还能看见自己在哪
-		var avail := vs.y - vk
+		# 键盘弹起时它可能已经吞掉了底部手势区，别再扣一次 safe_bottom
+		var sb := safe.w if vk <= 0.0 else 0.0
+		var avail := vs.y - vk - safe.y - sb
 		var w: float
 		var h: float
 		if touch:
 			w = vs.x * 0.94
-			h = minf(vs.y * 0.54, avail - 24.0)
+			h = minf(vs.y * 0.54, avail - GameTheme.px(24.0))
 		else:
 			w = vs.x * 0.62
 			h = minf(vs.y * 0.80, avail - 40.0)
-		_panel.size = Vector2(w, maxf(h, 200.0))
+		_panel.size = Vector2(w, maxf(h, GameTheme.px(200.0)))
+		var lo := safe.y + GameTheme.px(8.0)
 		_panel.position = Vector2(
 			(vs.x - w) * 0.5,
-			clampf((avail - _panel.size.y) * 0.5, 8.0, maxf(8.0, avail - _panel.size.y - 8.0)))
+			clampf((avail - _panel.size.y) * 0.5 + safe.y, lo,
+				maxf(lo, avail + safe.y - _panel.size.y - GameTheme.px(8.0))))
 	else:
 		if touch:
 			# 按视口比例算：手机上文字放大 1.6 倍，窗口也得跟着变大，否则只能塞两行
 			var w := clampf(vs.x * SMALL_W_RATIO, GameTheme.px(300.0), GameTheme.px(660.0))
-			var h := clampf(vs.y * SMALL_H_RATIO, GameTheme.px(170.0), GameTheme.px(280.0))
-			_panel.position = Vector2(GameTheme.px(12.0), GameTheme.px(14.0))
+			# 消息区现在正确地从标题栏下方开始（旧值把它压在标题栏上才显得「能多显示几行」），
+			# 所以小窗要略高一点，手机上才不至于只剩三条消息
+			var h := clampf(vs.y * 0.26, GameTheme.px(210.0), GameTheme.px(340.0))
+			# 顶部中央还有一条时间条：小窗整体让到它下面，不然黑框叠黑框
+			_panel.position = Vector2(GameTheme.px(12.0) + safe.x,
+				GameTheme.px(14.0) + safe.y + GameTheme.top_hud_reserve())
 			_panel.size = Vector2(w, h)
 		else:
 			_panel.position = Vector2(12.0, vs.y - DESK_H - 46.0)
@@ -181,12 +213,12 @@ func _apply_layout() -> void:
 func _layout_children() -> void:
 	var w := _panel.size.x
 	var h := _panel.size.y
-	var pad := GameTheme.px(10.0)
-	var head_h := GameTheme.px(46.0 if _is_touch() else 28.0)
-	var comp_h := GameTheme.px(50.0 if _is_touch() else 30.0)
+	var pad := _pad()
+	var head_h := _head_h()
+	var comp_h := _comp_h()
 	var close_w := GameTheme.px(44.0)
 
-	var top := GameTheme.px(4.0) + head_h + GameTheme.px(8.0)
+	var top := _top_h()
 	_title_btn.position = Vector2(pad, GameTheme.px(4.0))
 	_title_btn.size = Vector2(w - pad * 2.0 - (close_w if _expanded else 0.0), head_h)
 	_close_btn.position = Vector2(w - pad - close_w, GameTheme.px(4.0))
@@ -194,9 +226,8 @@ func _layout_children() -> void:
 	_rule.position = Vector2(pad, GameTheme.px(4.0) + head_h + GameTheme.px(2.0))
 	_rule.size = Vector2(maxf(0.0, w - pad * 2.0), 1.0)
 
-	var bottom := pad
+	var bottom := _bottom_h()
 	if _expanded:
-		bottom += comp_h + GameTheme.px(8.0)
 		_composer.position = Vector2(pad, h - pad - comp_h)
 		_composer.size = Vector2(w - pad * 2.0, comp_h)
 	_scroll.position = Vector2(pad, top)
@@ -310,7 +341,7 @@ func _build() -> void:
 	_panel.add_child(_composer)
 
 	_edit = LineEdit.new()
-	_edit.placeholder_text = "说点什么…（键盘上的发送键＝发出）" if _is_touch() else "对所有人说…（回车发送，Esc 取消）"
+	_edit.placeholder_text = "说点什么…（点「发送」或键盘回车）" if _is_touch() else "对所有人说…（回车发送，Esc 取消）"
 	_edit.max_length = 160
 	_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_edit.custom_minimum_size = Vector2(0, GameTheme.px(50.0 if _is_touch() else 30.0))
@@ -326,7 +357,7 @@ func _build() -> void:
 	_send_btn.focus_mode = Control.FOCUS_NONE
 	_send_btn.custom_minimum_size = Vector2(GameTheme.px(72.0), GameTheme.px(50.0))
 	_send_btn.add_theme_font_override("font", _font)
-	_send_btn.add_theme_font_size_override("font_size", GameTheme.FS_BODY)
+	_send_btn.add_theme_font_size_override("font_size", GameTheme.fs(GameTheme.FS_BODY))
 	_send_btn.add_theme_color_override("font_color", Color("#8ec5ff"))
 	_send_btn.add_theme_stylebox_override("normal", _send_box(Color(0.24, 0.44, 0.62, 0.30)))
 	_send_btn.add_theme_stylebox_override("hover", _send_box(Color(0.24, 0.44, 0.62, 0.55)))
@@ -341,7 +372,6 @@ func _panel_box(alpha: float) -> StyleBoxFlat:
 	box.border_color = Color(0.22, 0.30, 0.39, 1.0)
 	box.set_border_width_all(2)                          # 项目约定：2px 实线 + 无圆角
 	return box
-	return box
 
 
 func _send_box(c: Color) -> StyleBoxFlat:
@@ -349,8 +379,8 @@ func _send_box(c: Color) -> StyleBoxFlat:
 	sb.bg_color = c
 	sb.border_color = Color(0.29, 0.53, 0.78, 0.9)
 	sb.set_border_width_all(1)
-	sb.content_margin_left = 8.0
-	sb.content_margin_right = 8.0
+	sb.content_margin_left = GameTheme.px(8.0)
+	sb.content_margin_right = GameTheme.px(8.0)
 	return sb
 
 
@@ -619,17 +649,19 @@ func _fit_panel() -> void:
 	if not _expanded or not is_instance_valid(_log) or not is_instance_valid(_panel):
 		return
 	var vs := get_viewport().get_visible_rect().size
-	var avail := vs.y - _vk_inset()
-	var pad := 10.0
-	var head_h := 46.0 if _is_touch() else 28.0
-	var comp_h := 50.0 if _is_touch() else 30.0
-	var chrome := (4.0 + head_h + 8.0) + (pad + comp_h + 8.0)
-	var content := float(_log.get_content_height()) + 6.0
+	var safe := GameTheme.safe_insets(vs)
+	var vk := _vk_inset()
+	var sb := safe.w if vk <= 0.0 else 0.0
+	var avail := vs.y - vk - safe.y - sb
+	var chrome := _top_h() + _bottom_h()
+	var content := float(_log.get_content_height()) + GameTheme.px(6.0)
 	var cap := avail * (0.54 if _is_touch() else 0.80)
-	var want := clampf(content + chrome, 240.0, cap)
+	var want := clampf(content + chrome, GameTheme.px(240.0), cap)
 	if absf(_panel.size.y - want) > 2.0:
 		_panel.size.y = want
-		_panel.position.y = clampf((avail - want) * 0.5, 8.0, maxf(8.0, avail - want - 8.0))
+		var lo := safe.y + GameTheme.px(8.0)
+		_panel.position.y = clampf((avail - want) * 0.5 + safe.y, lo,
+			maxf(lo, avail + safe.y - want - GameTheme.px(8.0)))
 		_layout_children()
 
 
@@ -640,13 +672,11 @@ func _fit_scroll() -> void:
 		return
 	var w := _panel.size.x
 	var h := _panel.size.y
-	var pad := 10.0
-	var head_h := 46.0 if _is_touch() else 28.0
-	var comp_h := 50.0 if _is_touch() else 30.0
-	var top := 4.0 + head_h + 8.0
-	var bottom := pad + (comp_h + 8.0 if _expanded else 0.0)
+	var pad := _pad()
+	var top := _top_h()
+	var bottom := _bottom_h()
 	var avail := maxf(0.0, h - top - bottom)
-	var content := float(_log.get_content_height()) + 6.0
+	var content := float(_log.get_content_height()) + GameTheme.px(6.0)
 	var use := avail if _expanded else minf(content, avail)
 	_scroll.size = Vector2(maxf(0.0, w - pad * 2.0), maxf(0.0, use))
 	_scroll.position = Vector2(pad, maxf(top, h - bottom - use))

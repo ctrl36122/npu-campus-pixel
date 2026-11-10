@@ -78,7 +78,7 @@ func _add_button(parent: Node, font: Font, text: String, desc: String, cb: Calla
 	btn.custom_minimum_size = Vector2(340, 48)
 	btn.focus_mode = Control.FOCUS_NONE
 	btn.add_theme_font_override("font", font)
-	btn.add_theme_font_size_override("font_size", GameTheme.FS_HEAD + 2)
+	btn.add_theme_font_size_override("font_size", GameTheme.fs(GameTheme.FS_HEAD + 2))
 	# 默认主题在纯深色背景上按钮字偏暗，显式给三态配色才看得清
 	btn.add_theme_color_override("font_color", Color("#dce6ee"))
 	btn.add_theme_color_override("font_hover_color", Color("#ffffff"))
@@ -94,7 +94,7 @@ func _add_button(parent: Node, font: Font, text: String, desc: String, cb: Calla
 	d.text = desc
 	d.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	d.add_theme_font_override("font", font)
-	d.add_theme_font_size_override("font_size", GameTheme.FS_BODY)
+	d.add_theme_font_size_override("font_size", GameTheme.fs(GameTheme.FS_BODY))
 	d.add_theme_color_override("font_color", Color("#66757f"))
 	parent.add_child(d)
 

@@ -145,10 +145,12 @@ func _draw() -> void:
 	# 房间视图：顶部居中标题，不画楼名（房间没有「楼」）
 	if _room_mode and _room != null and is_instance_valid(_room) and font != null:
 		_outlined_text(String(_room.get("data").get("name", "内景")),
-			Vector2(size.x * 0.5, 22.0), 18, Color(0.95, 0.97, 1.0, 0.96))
+			Vector2(size.x * 0.5, GameTheme.px(22.0)), GameTheme.fs(18),
+			Color(0.95, 0.97, 1.0, 0.96))
 	# 放大到一定程度才画楼名，否则会糊成一团（阈值和网页版 picker 的 1.5 一致）
 	if not _room_mode and zoom >= 1.5 and font != null:
-		var fs := clampi(int(round(10.0 * zoom)), 10, 20)
+		var fs := clampi(int(round(float(GameTheme.fs(10)) * zoom)),
+			GameTheme.fs(10), GameTheme.fs(20))
 		var placed: Array[Rect2] = []
 		for b in _buildings:
 			var nm := str(b["name"])
@@ -200,9 +202,19 @@ func _draw() -> void:
 				hint = "缩放 %d%%　·　点任意位置传送　·　单指拖动　·　双指缩放　·　右上角关闭" % int(round(zoom * 100.0))
 			else:
 				hint = "缩放 %d%%　·　点击任意位置传送　·　滚轮缩放　·　拖拽平移　·　M / Esc 关闭" % int(round(zoom * 100.0))
-		draw_rect(Rect2(0, size.y - 40, size.x, 40), Color(0.02, 0.03, 0.045, 0.92))
-		draw_string(font, Vector2(0, size.y - 18), hint,
-			HORIZONTAL_ALIGNMENT_CENTER, size.x, 13, Color("#9fb0bd"))
+		# 手绘的字号最容易漏掉统一缩放：手机上 13px 只有约 1.2mm 高，
+		# 底条和基线一起按 ui_scale 走，桌面（倍率 1.0）结果和原来完全一致。
+		var hint_h := GameTheme.px(40.0)
+		var hint_fs := GameTheme.fs(13)
+		# 字放大后整句可能比屏宽还长，居中绘制会把首尾两端裁掉：
+		# 按实际文本宽度往回收一点，保证「缩放 / 关闭」这些首尾词都完整。
+		var tw := font.get_string_size(hint, HORIZONTAL_ALIGNMENT_CENTER, -1, hint_fs).x
+		var room := size.x - GameTheme.px(12.0)
+		if tw > room and tw > 0.0:
+			hint_fs = maxi(GameTheme.fs(11), int(float(hint_fs) * room / tw))
+		draw_rect(Rect2(0, size.y - hint_h, size.x, hint_h), Color(0.02, 0.03, 0.045, 0.92))
+		draw_string(font, Vector2(0, size.y - hint_h * 0.45), hint,
+			HORIZONTAL_ALIGNMENT_CENTER, size.x, hint_fs, Color("#9fb0bd"))
 
 
 ## 描边字：四向偏移画一层深色再压亮色，避免草地底色把白字吃掉

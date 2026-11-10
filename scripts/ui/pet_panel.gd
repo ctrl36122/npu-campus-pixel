@@ -154,7 +154,9 @@ func _build() -> void:
 
 	_empty = _label("", 13, "#8a99a6")
 	_empty.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_empty.custom_minimum_size = Vector2(GameTheme.px(360.0), 0)
+	# 别写死 360：手机上 px(360)=576 比面板内容区还宽，Label 按 576 算只给一行高，
+	# 实际渲染换行成两行时第二行就被面板底边裁掉（说明文字只剩半截）。
+	_empty.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	col.add_child(_empty)
 
 	col.add_child(HSeparator.new())
@@ -163,7 +165,7 @@ func _build() -> void:
 		tip_text = "在校园里点猫摸三次就能领养 · 进宿舍后点猫可以摸它"
 	var tip := _label(tip_text, 12, "#5f6f7c")
 	tip.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	tip.custom_minimum_size = Vector2(GameTheme.px(360.0), 0)
+	tip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	col.add_child(tip)
 
 
@@ -282,6 +284,7 @@ func _btn_box(c: Color) -> StyleBoxFlat:
 	sb.set_corner_radius_all(6)
 	sb.content_margin_left = GameTheme.px(10.0)
 	sb.content_margin_right = GameTheme.px(10.0)
-	sb.content_margin_top = GameTheme.px(4.0)
-	sb.content_margin_bottom = GameTheme.px(4.0)
+	var vpad := GameTheme.px(9.0 if GameTheme.touch_ui() else 4.0)
+	sb.content_margin_top = vpad
+	sb.content_margin_bottom = vpad
 	return sb

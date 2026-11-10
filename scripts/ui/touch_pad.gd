@@ -174,7 +174,9 @@ func _viewport_size() -> Vector2:
 
 func _joy_radius_center() -> Vector2:
 	var s := _viewport_size()
-	return Vector2(JOY_LEFT + JOY_R, s.y - JOY_BOTTOM - JOY_R)
+	# 让开刘海与底部手势条：桌面 inset 全 0，位置不变
+	var safe := GameTheme.safe_insets(s)
+	return Vector2(JOY_LEFT + JOY_R + safe.x, s.y - JOY_BOTTOM - JOY_R - safe.w)
 
 
 ## 当前平台的按钮直径
@@ -184,6 +186,7 @@ func _btn_size() -> float:
 
 func _btn_center(id: String) -> Vector2:
 	var s := _viewport_size()
+	var safe := GameTheme.safe_insets(s)
 	var r := _btn_size() * 0.5
 	for b in BUTTONS:
 		if b["id"] != id:
@@ -191,10 +194,10 @@ func _btn_center(id: String) -> Vector2:
 		var slot := int(b.get("slot", 0))
 		if _touch_mode:
 			# 右下横排：最右那颗贴边，往左每颗退一个「直径 + 间隙」
-			return Vector2(s.x - BTN_RIGHT - r - slot * (_btn_size() + BTN_GAP),
-				s.y - BTN_BOTTOM - r)
+			return Vector2(s.x - BTN_RIGHT - r - safe.z - slot * (_btn_size() + BTN_GAP),
+				s.y - BTN_BOTTOM - r - safe.w)
 		# 桌面：左上竖排
-		return Vector2(BTN_LEFT + r, BTN_TOP + r + slot * (_btn_size() + BTN_GAP_DESK))
+		return Vector2(BTN_LEFT + r + safe.x, BTN_TOP + r + safe.y + slot * (_btn_size() + BTN_GAP_DESK))
 	return Vector2.ZERO
 
 

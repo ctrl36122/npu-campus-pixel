@@ -618,6 +618,9 @@ func _build_ui() -> void:
 	var clock_panel := PanelContainer.new()
 	clock_panel.name = "ClockPanel"
 	clock_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	# 让开刘海 / 状态栏；桌面 inset 为 0，位置不变
+	var clock_safe_top := GameTheme.safe_insets(get_viewport().get_visible_rect().size).y
+	clock_panel.offset_top = clock_safe_top + (GameTheme.px(6.0) if is_touch_ui() else 0.0)
 	clock_panel.custom_minimum_size = Vector2(GameTheme.px(156.0), GameTheme.px(30.0))
 	clock_panel.add_theme_stylebox_override("panel", _box("#0d1418b8", "#2a3845", 6))
 	clock_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -841,7 +844,8 @@ func _build_map_ui(arena: Node) -> void:
 	_mini_panel.anchor_right = 1.0
 	_mini_panel.offset_left = -12.0 - panel_w
 	_mini_panel.offset_right = -12.0
-	var mini_top := 118.0 if not is_touch_ui() else 12.0
+	var mini_safe_top := GameTheme.safe_insets(get_viewport().get_visible_rect().size).y
+	var mini_top := (118.0 if not is_touch_ui() else 12.0) + mini_safe_top
 	_mini_panel.offset_top = mini_top
 	_mini_panel.offset_bottom = mini_top + panel_h
 	_mini_panel.mouse_filter = Control.MOUSE_FILTER_PASS

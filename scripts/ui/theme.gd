@@ -46,6 +46,30 @@ static func fs(base: int) -> int:
 static func px(v: float) -> float:
 	return v * ui_scale()
 
+
+## 系统安全区（状态栏 / 刘海 / 底部手势条）换算成视口逻辑像素。
+## 桌面恒为 0，所以加了 inset 也不会改变桌面布局；返回 (left, top, right, bottom)。
+static func safe_insets(vp_size: Vector2) -> Vector4:
+	if not OS.has_feature("mobile"):
+		return Vector4.ZERO
+	var ws := Vector2(DisplayServer.window_get_size())
+	if ws.x <= 0.0 or ws.y <= 0.0 or vp_size.x <= 0.0 or vp_size.y <= 0.0:
+		return Vector4.ZERO
+	var sa := DisplayServer.get_display_safe_area()
+	var kx := vp_size.x / ws.x
+	var ky := vp_size.y / ws.y
+	return Vector4(
+		maxf(0.0, float(sa.position.x) * kx),
+		maxf(0.0, float(sa.position.y) * ky),
+		maxf(0.0, float(ws.x - (sa.position.x + sa.size.x)) * kx),
+		maxf(0.0, float(ws.y - (sa.position.y + sa.size.y)) * ky))
+
+
+## 手机竖屏顶部时间条 + 间隙占的高度。聊天小窗要整体让到它下面，
+## 不然两个半透明黑框会叠成一团（桌面没有这条占位，返回 0）。
+static func top_hud_reserve() -> float:
+	return px(46.0) if touch_ui() else 0.0
+
 static var _font: SystemFont
 static var _font_bold: SystemFont
 
