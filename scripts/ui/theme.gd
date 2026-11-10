@@ -47,6 +47,21 @@ static func px(v: float) -> float:
 	return v * ui_scale()
 
 
+## 焦点在文本输入里：全局快捷键一律让路。
+## Godot 在中文输入法组合期不一定替 LineEdit 吃掉按键，事件会继续穿到各个
+## _unhandled_input —— 于是打个「m」就呼出全屏地图、打个「e」就顺手摸猫。
+## 这里只看焦点归属，不猜 IME 状态，桌面 / 手机都成立。
+static func is_typing(vp: Viewport) -> bool:
+	if vp == null:
+		return false
+	var f := vp.gui_get_focus_owner()
+	if not (f is LineEdit or f is TextEdit):
+		return false
+	# 面板收起后焦点偶尔还挂在隐藏的输入框上（设置 / 领养 / 写公告 / 聊天都可能）。
+	# 不能让一个看不见的输入框把整局的 M / Tab / E / F 全锁死。
+	return (f as Control).is_visible_in_tree()
+
+
 ## 系统安全区（状态栏 / 刘海 / 底部手势条）换算成视口逻辑像素。
 ## 桌面恒为 0，所以加了 inset 也不会改变桌面布局；返回 (left, top, right, bottom)。
 static func safe_insets(vp_size: Vector2) -> Vector4:

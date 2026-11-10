@@ -457,6 +457,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey) or not event.pressed or event.echo:
 		return
 	var key: int = event.keycode
+	# 焦点在别的输入框（设置面板昵称、给猫起名）时别把回车抢来展开聊天窗
+	if GameTheme.is_typing(get_viewport()) and key != KEY_ESCAPE:
+		return
 	if key == KEY_ESCAPE:
 		if _active:
 			_close_input(false)

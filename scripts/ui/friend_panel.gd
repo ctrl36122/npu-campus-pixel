@@ -55,8 +55,7 @@ func _input(event: InputEvent) -> void:
 
 ## 焦点在文本输入里时不抢按键（否则聊天框里打不出 p）
 func _typing() -> bool:
-	var f := get_viewport().gui_get_focus_owner()
-	return f is LineEdit or f is TextEdit
+	return GameTheme.is_typing(get_viewport())
 
 
 func toggle() -> void:

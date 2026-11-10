@@ -1748,6 +1748,12 @@ func _restore_cached_claim() -> void:
 		return
 	if cur.is_empty():
 		room_claims[key] = {"name": String(my_room_cache.get("name", local_name)), "uid": local_uid}
+	else:
+		# 这间明明是我的，服务端快照却还挂着旧昵称（改名请求没赶上广播、或对面是
+		# 不认识新请求的旧服务端）：以本地镜像为准，否则每次重连牌子又退回随机名。
+		var cached := String(my_room_cache.get("name", ""))
+		if not cached.is_empty() and String(cur.get("name", "")) != cached:
+			room_claims[key]["name"] = cached
 	var note := String(my_room_cache.get("note", ""))
 	if not note.is_empty():
 		room_claims[key]["note"] = note
@@ -1935,10 +1941,37 @@ func set_my_name(new_name: String) -> void:
 	var clean: String = new_name.strip_edges().left(24)
 	if clean.is_empty():
 		return
+	# local_name 是本机权威昵称：存档、房间认领、私信发件人都从它取。以前只改了
+	# peers 里的在线名单，结果改完名再认领房间 / 写存档 / 重连，门牌上挂的还是
+	# 首次进游戏随机生成的那个昵称（_random_nick）。这里必须先落地。
+	local_name = clean
 	if is_server():
 		_apply_name(1, clean)
 	elif has_session():
 		_request_name.rpc_id(1, clean)
+	_rename_my_claims(clean)
+
+
+## 门牌读的是 room_claims 里**认领那一刻写死的名字快照**，不是 roster；光改名
+## 不会动它。复用现成的 claim_room 通道把新名字重写一遍即可 —— 不改任何 @rpc
+## 签名，旧服务端也认得这条请求：
+##   · 本地预写 emit room_claims_changed → 本机门牌立刻刷新
+##   · 服务端 _apply_claim 后广播全量快照 → 别人看到的牌子也跟着变
+##   · _write_claim 原样保留门口公告，my_room_cache 同步换成新名字
+## 只处理宿舍；6 层组队板的名字是队名，不该跟着昵称走。
+func _rename_my_claims(nm: String) -> void:
+	if local_uid.is_empty():
+		return
+	var key := claim_of_uid(local_uid)       # 已经跳过 "6:" 组队板
+	if key.is_empty():
+		return
+	var parts := key.split(":")
+	if parts.size() != 2:
+		return
+	var cur: Dictionary = room_claims.get(key, {})
+	if String(cur.get("name", "")) == nm:
+		return                               # 一致就别发无意义的包
+	claim_room(int(parts[0]), int(parts[1]), nm)
 
 
 @rpc("any_peer", "call_remote", "reliable", 0)

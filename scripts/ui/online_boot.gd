@@ -1055,6 +1055,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey) or not event.pressed or event.echo:
 		return
 	var key: int = event.keycode
+	# 正在输入框里打字（含中文输入法拼 m）：Tab / M 这些全局快捷键全部让路，
+	# 只保留 Esc 关面板。否则改昵称、给猫起名、写门口公告时会突然弹出地图。
+	if GameTheme.is_typing(get_viewport()) and key != KEY_ESCAPE:
+		return
 	if key == KEY_TAB:
 		_toggle_settings(not _settings.visible)
 		get_viewport().set_input_as_handled()

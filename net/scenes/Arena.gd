@@ -2121,6 +2121,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	var k := event as InputEventKey
 	if not k.pressed or k.echo:
 		return
+	# 焦点在输入框（含 IME 组合期）时交互键让路：给猫起名、写公告、填 OOPZ 链接
+	# 时打 e/f/v 不该顺手摸猫、牵绳或认领房间。Esc 仍可取消命名面板。
+	if GameTheme.is_typing(get_viewport()) and k.keycode != KEY_ESCAPE:
+		return
 	if k.keycode == KEY_E and _try_interact():
 		get_viewport().set_input_as_handled()
 		return
