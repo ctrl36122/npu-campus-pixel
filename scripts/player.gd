@@ -3,7 +3,7 @@ extends CharacterBody2D
 ## 贴图由网页版 drawPerson 烘焙而来，脚底锚点在 (32, 52)。
 
 const SPEED := 118.0
-const RUN_SPEED := 205.0
+const RUN_SPEED := 225.0
 const ANCHOR := Vector2(32, 52)
 
 @onready var sprite: Sprite2D = $Sprite

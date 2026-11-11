@@ -62,6 +62,38 @@ static func is_typing(vp: Viewport) -> bool:
 	return (f as Control).is_visible_in_tree()
 
 
+## 移动冻结：按「来源」记数，别再让多个面板抢同一个 bool。
+## 以前 chat / online_boot 各自直接写 PlayerAvatar.ui_blocked：
+##   · 打开全屏地图置 true，聊天收起又被写回 false（或反过来互相清掉）；
+##   · 某个置 true 的分支漏了置 false，那个 true 就永远留着 —— 人在校园里
+##     忽然一步都动不了，看着像掉进碰撞体，其实和碰撞完全无关。
+## 现在每个面板只管自己那一位，is_move_blocked() 汇总；带 node 的来源在面板
+## 隐藏 / 节点销毁时自动失效，等于给「关闭事件没来」再加一层兜底。
+static var _move_blocks: Dictionary = {}
+
+
+static func set_move_blocked(source: String, on: bool, node: Node = null) -> void:
+	if on:
+		_move_blocks[source] = weakref(node) if node != null else null
+	else:
+		_move_blocks.erase(source)
+
+
+static func is_move_blocked() -> bool:
+	for src in _move_blocks.keys():
+		var w: Variant = _move_blocks[src]
+		if w == null:
+			continue
+		var n: Variant = w.get_ref()
+		if n == null or not (n is Node) or not (n as Node).is_visible_in_tree():
+			_move_blocks.erase(src)
+	return not _move_blocks.is_empty()
+
+
+static func clear_move_blocks() -> void:
+	_move_blocks.clear()
+
+
 ## 系统安全区（状态栏 / 刘海 / 底部手势条）换算成视口逻辑像素。
 ## 桌面恒为 0，所以加了 inset 也不会改变桌面布局；返回 (left, top, right, bottom)。
 static func safe_insets(vp_size: Vector2) -> Vector4:

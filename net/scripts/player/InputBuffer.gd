@@ -24,3 +24,11 @@ func predicted_at(seq: int) -> Variant:
 func drop_through(seq: int) -> void:
 	while not entries.is_empty() and int(entries.front()["command"]["seq"]) <= seq:
 		entries.pop_front()
+
+
+## 服务端确认长时间不到时，丢掉最老一条给新输入让位。
+## 缓冲满就停止采样会让本地预测一起停摆（人原地定住 ~2 秒后彻底不动），
+## 宁可少一条待确认命令，也不能不读键盘。
+func drop_oldest() -> void:
+	if not entries.is_empty():
+		entries.pop_front()

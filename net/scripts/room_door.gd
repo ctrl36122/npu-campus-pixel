@@ -52,6 +52,7 @@ func setup(idx: int, rect: Rect2, side_kind: String) -> void:
 	# 比门洞窄 2px：贴着门框站着时不会被自己这扇门的碰撞"夹住"
 	rs.size = Vector2(maxf(rect.size.x * TS - 2.0, 4.0), rect.size.y * TS)
 	_shape.shape = rs
+	# 门洞竖直中点；节点原点在门洞底边
 	_shape.position = Vector2(0.0, -rect.size.y * TS * 0.5)
 	_shape.disabled = false
 	_body.add_child(_shape)
@@ -88,12 +89,15 @@ func warn() -> void:
 
 
 func _process(delta: float) -> void:
+	if not is_inside_tree():
+		return
 	if _warn_flash > 0.0:
 		_warn_flash = maxf(0.0, _warn_flash - delta * 2.2)
 		queue_redraw()
 	if is_equal_approx(_t, _target):
 		return
-	_t = move_toward(_t, _target, delta / OPEN_TIME)
+	var dur := maxf(OPEN_TIME, 0.001)
+	_t = move_toward(_t, _target, delta / dur)
 	queue_redraw()
 	# 门开到一半就放行：等动画播完才让过，人会先在门口顿一下
 	var want_block := _t < PASS_AT
@@ -183,13 +187,17 @@ func _draw_leaf(r: Rect2, dark: Color, light: Color, from_left: bool) -> void:
 		draw_rect(Rect2(r.position.x + 1.0, r.position.y + 1.0, r.size.x - 2.0, r.size.y - 2.0), light)
 	# 上沿一道亮边，玻璃才不像一块平色
 	draw_rect(Rect2(r.position.x, r.position.y, r.size.x, 1.0), Color(1, 1, 1, 0.10))
-	# 斜反光
+	# 斜反光：左扇从左起，右扇从右起
 	if r.size.x > 4.0:
-		var x0 := r.position.x + (1.5 if from_left else 1.5)
-		draw_line(
-			Vector2(x0, r.end.y - 1.5),
-			Vector2(minf(x0 + r.size.x * 0.7, r.end.x - 1.0), r.position.y + 1.5),
-			Color(1, 1, 1, 0.09), 1.0)
+		var line_start: Vector2
+		var line_end: Vector2
+		if from_left:
+			line_start = Vector2(r.position.x + 1.5, r.end.y - 1.5)
+			line_end = Vector2(minf(r.position.x + r.size.x * 0.7, r.end.x - 1.0), r.position.y + 1.5)
+		else:
+			line_start = Vector2(r.end.x - 1.5, r.end.y - 1.5)
+			line_end = Vector2(maxf(r.end.x - r.size.x * 0.7, r.position.x + 1.0), r.position.y + 1.5)
+		draw_line(line_start, line_end, Color(1, 1, 1, 0.09), 1.0)
 
 
 func _ease(t: float) -> float:

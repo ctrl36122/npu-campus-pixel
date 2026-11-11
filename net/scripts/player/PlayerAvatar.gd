@@ -79,6 +79,7 @@ const HeroDB := preload("res://scripts/sandbox/hero_db.gd")
 const PlayerInputScript := preload("res://net/scripts/player/PlayerInput.gd")
 const InputBufferScript := preload("res://net/scripts/player/InputBuffer.gd")
 const RemoteSmootherScript := preload("res://net/scripts/player/RemoteSmoother.gd")
+const GameThemeScript := preload("res://scripts/ui/theme.gd")
 
 @onready var visual: Node2D = $Visual
 @onready var sprite: AnimatedSprite2D = $Visual/Sprite
@@ -547,6 +548,9 @@ func _on_tick(tick: int) -> void:
 	if GameState.phase != GameState.Phase.IN_RUN:
 		return
 	if is_local_player:
+		# 冻结状态以 GameTheme 的多源汇总为准：这里每 tick 同步一次，避免某个
+		# 面板「只置 true 没置 false」留下一个永久 true 把人锁死。
+		ui_blocked = GameThemeScript.is_move_blocked()
 		if _room_freeze:
 			# 房间内是「本地权威」：服务器根本不知道宿舍空间的存在，坐标体系完全不同，
 			# 所以这里既不进预测缓冲也不发包（发包只会让服务器上的人在校园里乱走）。
@@ -569,14 +573,22 @@ func _on_tick(tick: int) -> void:
 				# 上报本地权威姿势（_local_pose），不要用 sit_dir —— 后者可能刚被
 				# 服务器的旧包覆盖，拿它回传等于把错值又推回服务器，形成自我维持的锁死。
 				Net.send_to(1, self, &"_push_room_pose", [position, _local_pose])
-		elif buffer.entries.size() < InputBufferScript.CAPACITY:
+		else:
+			# 缓冲满了也照样读键盘、照样做本地预测。以前这里拿
+			# `buffer.entries.size() < CAPACITY` 当闸门：服务端确认一旦停更
+			# （丢包 / 主机卡顿 / 切后台 / 网络切换）约 2 秒缓冲就满，之后连
+			# 输入都不再采样，人直接定在原地 —— 房间分支早就修过，校园漏了。
+			# 现在满了就丢最老一条给新命令让位；旧命令本来也会被服务端按
+			# processed_seq 丢掉，不影响回收，只是少一条可回放的历史。
 			var command: Dictionary = input.sample(self, next_seq, tick)
-			if ui_blocked:                       # 设置面板打开时冻结移动
+			if ui_blocked:                       # 面板 / 聊天输入时冻结移动
 				command["x"] = 0.0
 				command["y"] = 0.0
 			next_seq += 1
 			if not Net.is_server():
 				_apply_movement(command)
+			if buffer.entries.size() >= InputBufferScript.CAPACITY:
+				buffer.drop_oldest()
 			buffer.push(command, position)
 		# 房间内不进网络链路：没有要发的命令，也没有要等服务器回的确认
 		if not _room_freeze:
@@ -764,6 +776,10 @@ func _step_out() -> bool:
 
 
 func _process(delta: float) -> void:
+	# 面板被隐藏 / 节点销毁时 GameTheme 会自动撤掉对应来源，这里每帧同步一次，
+	# 让 Arena 的划船输入判定也立刻看到，不必等下一个网络 tick。
+	if is_local_player:
+		ui_blocked = GameThemeScript.is_move_blocked()
 	_hold_local_pose()
 	_update_visual()
 	_update_camera_zoom(delta)

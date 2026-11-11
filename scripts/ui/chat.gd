@@ -475,11 +475,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 
 
-## 说话时冻结本地移动（避免打字时人物乱跑）
+## 说话时冻结本地移动（避免打字时人物乱跑）。
+## 只登记「chat」这一位，别直接写玩家身上的 bool：地图 / 设置 / 好友面板
+## 各有自己的冻结来源，谁单独写 false 都会把别人还开着的面板一起解除。
 func _set_local_blocked(v: bool) -> void:
-	for p in get_tree().get_nodes_in_group("players"):
-		if p.is_local_player:
-			p.ui_blocked = v
+	GameTheme.set_move_blocked("chat", v)
 
 
 # ---------------------------------------------------------------- 收消息
@@ -751,6 +751,9 @@ func _stick_bottom_if_needed() -> void:
 
 # ---------------------------------------------------------------- 每帧
 func _process(delta: float) -> void:
+	# 状态驱动而非事件驱动：哪怕某个「收起」分支漏了、或面板被外部隐藏，
+	# 下一帧也会把冻结位改回真实状态，不会留下一个永久 true 把人锁死。
+	GameTheme.set_move_blocked("chat", _expanded)
 	# 软键盘弹出 / 收起时窗口高度会变，面板要跟着让出位置，否则输入行被键盘盖住
 	if OS.has_feature("mobile"):
 		var vk := DisplayServer.virtual_keyboard_get_height()

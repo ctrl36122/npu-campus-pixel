@@ -197,10 +197,13 @@ func _add_consent() -> void:
 	probe.free()
 	if not need:
 		return
+	_consent_blocking = true
 	_consent = ConsentScript.new()
 	add_child(_consent)
 	_refresh_block()                              # 弹窗期间别让人物跟着 WASD 乱跑
-	_consent.connect("accepted", func() -> void: _refresh_block())
+	_consent.connect("accepted", func() -> void:
+		_consent_blocking = false
+		_refresh_block())
 
 
 ## 好友面板随时可以按 P 打开，所以无条件挂上（不像说明页还要先问要不要弹）。
@@ -247,9 +250,15 @@ func open_dm(uid: String, nm: String) -> void:
 
 ## 说明页和好友面板都可能是"该挡住移动"的那一个。谁都没开才放开 ——
 ## 分别直接写 true/false 的话，关掉面板会把还开着的说明页一起解除。
+## should_show() 每次都要读一次磁盘里的 consent.cfg；这个函数现在每帧跑，
+## 所以把「还挡不挡」缓存成状态，只在创建说明页 / 用户点接受时更新。
+var _consent_blocking := false
+
+
 func _refresh_block() -> void:
 	var blocked := false
-	if _consent != null and is_instance_valid(_consent) and bool(_consent.call("should_show")):
+	# 说明页节点要是被外部释放了，缓存也跟着失效，别留下一个永久 true。
+	if _consent_blocking and _consent != null and is_instance_valid(_consent):
 		blocked = true
 	if _friend_panel != null and is_instance_valid(_friend_panel) and bool(_friend_panel.call("is_open")):
 		blocked = true
@@ -257,7 +266,7 @@ func _refresh_block() -> void:
 		blocked = true
 	if _dm_panel != null and is_instance_valid(_dm_panel) and bool(_dm_panel.call("is_open")):
 		blocked = true
-	_set_local_blocked(blocked)
+	_set_local_blocked(blocked, "panels")
 
 
 ## 宠物面板：数据源是 Arena（领养存档 + 牵绳状态），世界建好后再 setup。
@@ -493,7 +502,9 @@ func _on_session_closed(reason: String) -> void:
 	_card_title.text = "已断开连接"
 	_card_sub.text = reason if not reason.is_empty() else "主机可能退出了游戏"
 	_settings.visible = false
-	_set_local_blocked(false)
+	# 断线时所有面板都没了，把冻结来源一次性清空（重连后由 _refresh_block 重建）
+	GameTheme.clear_move_blocks()
+	_sync_block()
 	await get_tree().create_timer(6.0).timeout
 	if _online:
 		return
@@ -506,6 +517,9 @@ func _process(delta: float) -> void:
 		# DayNight 是 autoload，直接按名字访问（get_singleton 查不到 autoload）
 		if true:  # DayNight 是 autoload，直接按名字访问
 			_clock.text = "%s  %s" % [DayNight.time_string(), DayNight.phase_name()]
+	# 冻结状态每帧重算：面板被外部隐藏、关闭信号漏发、节点重建后残留的
+	# true 都会在下一帧自动消失，不会把人物永久锁在原地。
+	_refresh_block()
 	if not OS.has_environment("XGD_DEBUG"):
 		return
 	_dbg_t += delta
@@ -1036,7 +1050,7 @@ func _open_map() -> void:
 	else:
 		_map.call("clear_room")                # 内部已 reset_view（仅房间模式时）
 		_map.call("reset_view")
-	_set_local_blocked(true)
+	_set_local_blocked(true, "map", _map)
 
 
 func _close_map() -> void:
@@ -1047,7 +1061,7 @@ func _close_map() -> void:
 		_touch_pad.call("set_buttons_hidden_for", "map", false)
 		if _touch_pad.has_method("set_touch_grabbed_for"):
 			_touch_pad.call("set_touch_grabbed_for", "map", false)
-	_set_local_blocked(false)
+	_set_local_blocked(false, "map")
 
 
 # ---------------------------------------------------------------- 设置交互
@@ -1082,7 +1096,7 @@ func _toggle_settings(open: bool) -> void:
 	if _settings == null:
 		return
 	_settings.visible = open
-	_set_local_blocked(open)
+	_set_local_blocked(open, "settings", _settings)
 	if is_instance_valid(_chat):
 		_chat.call("set_hidden", open)
 	if open:
@@ -1150,10 +1164,18 @@ func _reconnect() -> void:
 	_boot()
 
 
-func _set_local_blocked(v: bool) -> void:
+## 冻结移动只登记「自己那一位」，由 GameTheme 汇总；带 node 的来源在面板
+## 隐藏 / 节点销毁时自动失效。最后同步给本机玩家（Arena 划船判定会读它）。
+func _set_local_blocked(v: bool, source: String, node: Node = null) -> void:
+	GameTheme.set_move_blocked(source, v, node)
+	_sync_block()
+
+
+func _sync_block() -> void:
+	var blocked := GameTheme.is_move_blocked()
 	for p in get_tree().get_nodes_in_group("players"):
 		if p.is_local_player:
-			p.ui_blocked = v
+			p.ui_blocked = blocked
 
 
 # ---------------------------------------------------------------- 存档
