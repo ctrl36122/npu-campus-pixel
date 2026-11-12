@@ -108,11 +108,15 @@ JUNCTION_MIN_GAP = 44           # 相邻路口合并半径
 
 # ---- 广场石板铺装（仍是「非路非草非水」的米色系）----
 PLAZA_TONES = ((201, 184, 150), (213, 196, 162))  # 广场铺装的两种精确底色（暗/亮）
-SLAB_W, SLAB_H = 32, 16        # 横向砖，奇数行错缝半块
-SLAB_DELTAS = (-4, 1, -2, 3)   # 三通道同 delta；都不为 0，保证改后 != 任一底色
-SEAM_DELTA = -18               # 砖缝（固定色，跨过阴影带也不断）
-GRATE_DELTA = -28              # 排水格栅
-SLAB_COVER = 0.88              # 整块内「米色系」占比，低于就跳过（保住细步道/边界）
+# v2（2026-11-12）：32x16 深缝在中央院落整片铺开时像方格纸，把砖放大到
+# 48x24、砖缝压浅一半、砖间明暗差收窄、格栅放稀。底色 PLAZA_TONES 绝不能改
+# ——它是「源图精确底色」的匹配常量，改了 cores 全空，石板只画缝不画板色。
+SLAB_W, SLAB_H = 48, 24        # 横向砖，奇数行错缝半块
+SLAB_DELTAS = (-3, 1, -2, 2)   # 三通道同 delta；都不为 0，保证改后 != 任一底色
+SEAM_DELTA = -9                # 砖缝（固定色，跨过阴影带也不断）
+GRATE_DELTA = -16              # 排水格栅
+GRATE_EVERY = 31               # 格栅命中率 1/N（越大越稀）
+SLAB_COVER = 0.82              # 整块内「米色系」占比，低于就跳过（砖变大后略放宽）
 PLAZA_ON = True
 
 def load_world():
@@ -388,7 +392,7 @@ def _paint_plaza(im, ox, oy):
             if cover < SLAB_COVER:
                 continue
             d = SLAB_DELTAS[D._hash8(SEED + 31, bx, by) % len(SLAB_DELTAS)]
-            grate = D._hash8(SEED + 37, bx, by) % 23 == 0
+            grate = D._hash8(SEED + 37, bx, by) % GRATE_EVERY == 0
             slabs = [tuple(t[i] + d for i in range(3)) for t in PLAZA_TONES]
             seam = tuple(PLAZA_TONES[0][i] + SEAM_DELTA for i in range(3))
             grill = tuple(PLAZA_TONES[0][i] + GRATE_DELTA for i in range(3))
@@ -398,7 +402,8 @@ def _paint_plaza(im, ox, oy):
                         continue
                     if xx == 0 or yy == SLAB_H - 1:
                         c = seam
-                    elif grate and 10 <= xx <= 19 and yy in (4, 7, 10):
+                    elif grate and SLAB_W // 3 <= xx <= SLAB_W * 2 // 3 \
+                            and yy in (SLAB_H // 4, SLAB_H // 2, SLAB_H * 3 // 4):
                         c = grill
                     else:
                         k = ti[lx + xx, ly + yy] - 1
