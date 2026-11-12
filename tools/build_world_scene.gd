@@ -193,6 +193,10 @@ func _build_objects(d) -> void:
 				bpolys.append(pv3)
 		var seq := 0
 		for it in inst:
+			# hide 只影响场景渲染；实例仍留在 world.json 原地原位，
+			# 因为地面烘焙的树影用「数组下标」做随机种子，删一条会让全图树影重排。
+			if bool(it.get("hide", false)):
+				continue
 			var si := int(it.get("sp", -1))
 			if si < 0 or si >= atlases.size():
 				continue
