@@ -98,6 +98,12 @@ var correction_offset: Vector2 = Vector2.ZERO
 var _face_dir: Vector2 = Vector2.DOWN
 var _moving: bool = false
 var _last_pos: Vector2 = Vector2.ZERO
+## 脚步声：按「走过的距离」积累，满一步响一次（用定时器会在贴墙/变速时对不上拍）
+## 30 局部像素 ≈ 0.55s 一步（约每秒 1.8 步），比真人走路略快，像素游戏一直是这个手感
+const STEP_DIST: float = 30.0
+var _step_acc: float = 0.0
+var _step_prev: Vector2 = Vector2.ZERO
+var _idle_time: float = 0.0
 var _applied_hero: String = ""
 var _emote_timer: SceneTreeTimer
 var _bubble_timer: SceneTreeTimer
@@ -507,6 +513,37 @@ func _update_visual() -> void:
 		sprite.play()
 
 
+## 脚步声（只给本地玩家）。按实际位移积累，走满一步响一次：
+## 停下来立刻不响，贴墙原地踏步也不会空响「哒哒哒」。
+## 室内/室外两套音色由 Sfx 自己按 Arena 告知的状态挑。
+##
+## ⚠️ 位移是 30Hz 网络 tick 跳的，而 _process 跑 60+ fps —— 隔一帧就会有一帧
+## 位移为 0。所以「这一帧没动」不能当成「停下了」（那样累加器会被反复清零，
+## 永远攒不满一步）。改成连续静止 0.25s 才清零。
+func _update_footsteps(delta: float) -> void:
+	var now: Vector2 = position
+	var moved: float = (now - _step_prev).length()
+	_step_prev = now
+	if not is_local_player:
+		return
+	# 瞬移（出生、进出房间、_step_out 补偿）不该被算成走路
+	if moved > 40.0 or sit_dir != 0 or ui_blocked:
+		_step_acc = 0.0
+		_idle_time = 0.0
+		return
+	if moved > 0.05:
+		_idle_time = 0.0
+		_step_acc += moved
+		if _step_acc >= STEP_DIST:
+			_step_acc = 0.0
+			# position 是校园层局部坐标，正好等于地面贴图像素 —— Sfx 拿它查脚下材质
+			Sfx.footstep(position)
+		return
+	_idle_time += delta
+	if _idle_time > 0.25:
+		_step_acc = 0.0
+
+
 func _on_emote(id: int, index: int) -> void:
 	if id != owner_peer_id:
 		return
@@ -786,6 +823,7 @@ func _process(delta: float) -> void:
 		ui_blocked = GameThemeScript.is_move_blocked()
 	_hold_local_pose()
 	_update_visual()
+	_update_footsteps(delta)
 	_update_camera_zoom(delta)
 	if not Net.is_server():
 		var seq: int = int(server_state.get("seq", 0))

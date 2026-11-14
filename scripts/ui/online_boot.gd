@@ -51,8 +51,8 @@ var _nick_edit: LineEdit
 var _addr_edit: LineEdit
 var _net_info: Label
 var _hero_btns: Array[Button] = []
-var _music_slider: HSlider
-var _music_btn: Button
+## 设置面板里的音量行："music" / "sfx" -> {"slider": HSlider, "btn": Button}
+var _audio_rows: Dictionary = {}
 var _mini: Control
 ## 当前世界（Arena），进/出房间时要把小地图切成房间的
 var _arena: Node
@@ -732,28 +732,9 @@ func _build_settings(_layer: CanvasLayer) -> void:
 		hr.add_child(b)
 		_hero_btns.append(b)
 
-	# 背景音乐：滑杆调音量 + 一键静音（改动立刻写 user://audio.cfg，不用点保存）
-	col.add_child(_label("音乐", 12, "#8a99a6"))
-	var mr := HBoxContainer.new()
-	mr.add_theme_constant_override("separation", int(GameTheme.px(8.0)))
-	col.add_child(mr)
-
-	_music_slider = HSlider.new()
-	_music_slider.min_value = 0.0
-	_music_slider.max_value = 1.0
-	_music_slider.step = 0.05
-	_music_slider.focus_mode = Control.FOCUS_NONE
-	_music_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_music_slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_music_slider.custom_minimum_size = Vector2(0, GameTheme.px(26.0))
-	_music_slider.value = Music.volume()
-	_music_slider.value_changed.connect(_on_music_volume)
-	mr.add_child(_music_slider)
-
-	_music_btn = _button("静音", 70)
-	_music_btn.pressed.connect(_toggle_music_mute)
-	mr.add_child(_music_btn)
-	_sync_music_btn()
+	# 声音：音乐 / 音效各一行滑杆 + 一键静音（改完立刻写 user://audio.cfg，不用点保存）
+	_add_audio_row(col, "music", "音乐")
+	_add_audio_row(col, "sfx", "音效")
 
 	# 联机信息：当主机时，这里显示「同一 WiFi 填什么 / 异地填什么」，点复制直接发给同学
 	col.add_child(_label("联机地址", 12, "#8a99a6"))
@@ -1141,9 +1122,12 @@ func _toggle_settings(open: bool) -> void:
 		_addr_edit.text = _last_addr
 		_refresh_hero_highlights()
 		_refresh_net_info()
-		if _music_slider != null:
-			_music_slider.set_value_no_signal(Music.volume())
-		_sync_music_btn()
+		for key in _audio_rows:
+			var row: Dictionary = _audio_rows[key]
+			var slider: HSlider = row.get("slider")
+			if slider != null:
+				slider.set_value_no_signal(_audio_volume(str(key)))
+			_sync_audio_btn(str(key))
 		# 不自动聚焦输入框：否则 Tab 会被 LineEdit 吃掉，关不掉面板
 
 
@@ -1184,23 +1168,71 @@ func _apply_hero(id: String) -> void:
 	_refresh_hero_highlights()
 
 
-func _on_music_volume(v: float) -> void:
-	Music.set_volume(v)
-	# 拖滑杆本身就是在说「我要听」，顺手解除静音
-	if Music.muted() and v > 0.0:
-		Music.set_muted(false)
-		_sync_music_btn()
+## 音量行（音乐 / 音效共用）：一行滑杆 + 一个静音按钮，改完立刻落盘
+func _add_audio_row(col: Node, key: String, title: String) -> void:
+	col.add_child(_label(title, 12, "#8a99a6"))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", int(GameTheme.px(8.0)))
+	col.add_child(row)
+
+	var slider := HSlider.new()
+	slider.min_value = 0.0
+	slider.max_value = 1.0
+	slider.step = 0.05
+	slider.focus_mode = Control.FOCUS_NONE
+	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	slider.custom_minimum_size = Vector2(0, GameTheme.px(26.0))
+	slider.value = _audio_volume(key)
+	slider.value_changed.connect(func(v: float) -> void: _on_audio_volume(key, v))
+	row.add_child(slider)
+
+	var btn := _button("静音", 70)
+	btn.pressed.connect(func() -> void: _toggle_audio_mute(key))
+	row.add_child(btn)
+
+	_audio_rows[key] = {"slider": slider, "btn": btn}
+	_sync_audio_btn(key)
 
 
-func _toggle_music_mute() -> void:
-	Music.set_muted(not Music.muted())
-	_sync_music_btn()
+func _audio_volume(key: String) -> float:
+	if key == "music":
+		return Music.volume()
+	return Sfx.volume()
 
 
-func _sync_music_btn() -> void:
-	if _music_btn == null:
-		return
-	_music_btn.text = "开声音" if Music.muted() else "静音"
+func _audio_muted(key: String) -> bool:
+	if key == "music":
+		return Music.muted()
+	return Sfx.muted()
+
+
+func _on_audio_volume(key: String, v: float) -> void:
+	if key == "music":
+		Music.set_volume(v)
+		# 拖滑杆本身就是在说「我要听」，顺手解除静音
+		if Music.muted() and v > 0.0:
+			Music.set_muted(false)
+	else:
+		Sfx.set_volume(v)
+		if Sfx.muted() and v > 0.0:
+			Sfx.set_muted(false)
+	_sync_audio_btn(key)
+
+
+func _toggle_audio_mute(key: String) -> void:
+	if key == "music":
+		Music.set_muted(not Music.muted())
+	else:
+		Sfx.set_muted(not Sfx.muted())
+	_sync_audio_btn(key)
+
+
+func _sync_audio_btn(key: String) -> void:
+	var row: Dictionary = _audio_rows.get(key, {})
+	var b: Button = row.get("btn")
+	if b != null:
+		b.text = "开声音" if _audio_muted(key) else "静音"
 
 
 ## 只重画外观按钮的高亮，不动输入框（换装时不该把正在输入的昵称清掉）

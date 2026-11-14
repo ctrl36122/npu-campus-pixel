@@ -3035,6 +3035,8 @@ func enter_room(path: String, floor_n: int = 1) -> bool:
 	_despawn_leash_cat()
 	# 背景音乐换成楼里那首（自习空间 / 宿舍分开，交叉淡入淡出由 Music 自己处理）
 	Music.set_room_kind(_room_music_kind(current_floor))
+	# 脚步换成室内的音色（木地板/瓷砖那套）
+	Sfx.set_indoor(true)
 	room_changed.emit(true)
 	return true
 
@@ -3079,6 +3081,7 @@ func leave_room() -> void:
 	_spawn_leash_cat()
 	# 回到校园：音乐交还给 Music 自己按昼夜挑
 	Music.set_room_kind("")
+	Sfx.set_indoor(false)
 	room_changed.emit(false)
 
 
