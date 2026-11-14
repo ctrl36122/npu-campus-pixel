@@ -20,11 +20,19 @@ const SOFA_W := 64
 const SOFA_H := 54
 const CHAIR_W := 22
 const CHAIR_H := 26
+## 窗外天空只有一张贴图：房间背后那层天（assets/room_sky_bg.png）。
+## 窗户玻璃本身是透明的，直接透出它，所以这里不需要再存一份「窗景」。
 
 static var _books_tex: Texture2D = null
 static var _seats_tex: Texture2D = null
+static var _sky_bg_tex: Texture2D = null
+static var _sky_fill_tex: Texture2D = null
+static var _sky_clouds_tex: Texture2D = null
 static var _books_probed := false
 static var _seats_probed := false
+static var _sky_bg_probed := false
+static var _sky_fill_probed := false
+static var _sky_clouds_probed := false
 
 
 static func books_tex() -> Texture2D:
@@ -41,6 +49,35 @@ static func seats_tex() -> Texture2D:
 		if ResourceLoader.exists("res://assets/room_seats.png"):
 			_seats_tex = load("res://assets/room_seats.png")
 	return _seats_tex
+
+
+## 房间背后那片天的上沿（含日月，窗顶往上看到的就是它）。窗户玻璃是透明的，
+## 透的就是这一层；中庭那块大洞透的是下面那张纵深图。两张都缺了也不崩 ——
+## room_sky.gd 会退回纯色渐变。
+static func sky_bg_tex() -> Texture2D:
+	if not _sky_bg_probed:
+		_sky_bg_probed = true
+		if ResourceLoader.exists("res://assets/room_sky_bg.png"):
+			_sky_bg_tex = load("res://assets/room_sky_bg.png")
+	return _sky_bg_tex
+
+
+## 房间背后那片天往下的一大块（渐变底 + 夜里的星，没有第二颗太阳）
+static func sky_fill_tex() -> Texture2D:
+	if not _sky_fill_probed:
+		_sky_fill_probed = true
+		if ResourceLoader.exists("res://assets/room_sky_fill.png"):
+			_sky_fill_tex = load("res://assets/room_sky_fill.png")
+	return _sky_fill_tex
+
+
+## 云层：横向无缝，room_sky.gd 拿它整块横向滚动 —— 背景会动全靠它
+static func sky_clouds_tex() -> Texture2D:
+	if not _sky_clouds_probed:
+		_sky_clouds_probed = true
+		if ResourceLoader.exists("res://assets/room_sky_clouds.png"):
+			_sky_clouds_tex = load("res://assets/room_sky_clouds.png")
+	return _sky_clouds_tex
 
 # 各类家具的挤出高度（像素，局部 8px/格空间）
 const RISE_WALL := 13.0
@@ -68,6 +105,8 @@ func setup(k: String, r: Rect2, z: int = 0) -> void:
 	# z_index 在 y-sort 容器里优先于 y 比较。椅子靠它把「主体」压到所有人下面、
 	# 「坐面前沿」抬到所有人上面 —— 一个节点没法同时做到这两件事。
 	z_index = z
+	# 房间家具多是硬边色块，贴图也用最近邻，不然缩放后边缘会发灰、和周围对不上
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	queue_redraw()
 
 
@@ -192,25 +231,55 @@ func _wall(o: Vector2, w: float, h: float) -> void:
 		xx += 16.0
 
 
-## 落地窗：贴在墙内侧、往上长出一截亮玻璃。不画落地阴影（窗不是家具），
+## 落地窗：贴在墙内侧、往上长出一整面玻璃。不画落地阴影（窗不是家具），
 ## 也不参与碰撞。只用在 bright 房间，暗房里没有这个 kind。
+##
+## **玻璃本身不画**：只画窗框、窗棂和窗台，中间是透明的，直接透出房间背后
+## 那层天（room_sky.gd）。所以窗外不是另一张贴图，就是外面那片天本身 ——
+## 走远走近、白天黑夜，窗里窗外永远是同一个天色，也不会有第二套地平线。
 func _window(o: Vector2, w: float, h: float) -> void:
-	var top := o.y - 16.0
-	var wh := h + 16.0
-	# 外框
-	draw_rect(Rect2(o.x, top, w, wh), Color("f4f8fb"))
-	# 玻璃：上半是天空、下半略暖（窗外地面反光）
-	draw_rect(Rect2(o.x + 2.0, top + 2.0, w - 4.0, wh - 4.0), Color("bfe3f5"))
-	draw_rect(Rect2(o.x + 2.0, top + 2.0, w - 4.0, wh * 0.42), Color("e2f4ff"))
-	draw_rect(Rect2(o.x + 2.0, top + wh * 0.62, w - 4.0, wh * 0.22), Color("d7ecdf"))
-	# 窗棂：竖向每 24px 一道 + 中间一道横档
-	var xx := o.x + 24.0
-	while xx < o.x + w - 4.0:
-		draw_rect(Rect2(xx, top + 2.0, 2.0, wh - 4.0), Color("f4f8fb"))
-		xx += 24.0
-	draw_rect(Rect2(o.x + 2.0, top + wh * 0.5, w - 4.0, 2.0), Color("f4f8fb"))
+	# 窗户的高度直接取 rect 高度（北墙那排是 14 格 = 112px 的落地窗）。
+	var top := o.y
+	var wh := h
+	var fw := 3.0                      # 窗框厚度：窗大了，2px 细边会被读成线稿
+	# 外框（四边，中间留空给背后的天）
+	draw_rect(Rect2(o.x, top, w, fw), Color("f4f8fb"))
+	draw_rect(Rect2(o.x, top + wh - fw, w, fw), Color("f4f8fb"))
+	draw_rect(Rect2(o.x, top, fw, wh), Color("f4f8fb"))
+	draw_rect(Rect2(o.x + w - fw, top, fw, wh), Color("f4f8fb"))
+	# 窗洞上沿压一道淡青灰：切口的厚度，不然透明的窗框会显得像贴在空气上
+	draw_rect(Rect2(o.x + fw, top + fw, w - fw * 2.0, 2.0),
+		Color(0.36, 0.52, 0.62, 0.35))
+
+	# 窗棂：竖向每 30px 一道 + 中间一道横档。窗高 112px，横档落在栏杆高度
+	# 附近，人站在窗前看出去才像窗，不像一整块贴图。
+	var xx := o.x + 30.0
+	while xx < o.x + w - fw - 1.0:
+		draw_rect(Rect2(xx, top + fw, 2.0, wh - fw * 2.0), Color("f4f8fb"))
+		xx += 30.0
+	draw_rect(Rect2(o.x + fw, top + wh * 0.5 - 1.0, w - fw * 2.0, 2.0), Color("f4f8fb"))
 	# 窗台：一条亮边把窗和地板接起来
-	draw_rect(Rect2(o.x - 1.0, o.y + h - 2.0, w + 2.0, 2.0), Color("ffffff"))
+	draw_rect(Rect2(o.x - 1.0, o.y + h - 3.0, w + 2.0, 3.0), Color("ffffff"))
+
+
+## 当前该取哪两行天空、混合多少（[行A, 行B, 混合度]）。
+## 四档中心对齐一天的四个拐点：00:00 夜、06:00 日出、12:00 正午、18:00 日落，
+## 两档之间线性过渡 —— 因为 pixel-sky 四张共用地形，山脊不会在切档时跳动。
+## static：房间背后那层天（room_sky.gd）也调它，两边必须是同一个天色。
+static func sky_pair(t: float) -> Array:
+	var keys: Array[float] = [0.0, 0.25, 0.5, 0.75, 1.0]
+	var rows: Array[int] = [3, 0, 1, 2, 3]
+	for i in range(4):
+		if t >= keys[i] and t <= keys[i + 1]:
+			var f: float = (t - keys[i]) / (keys[i + 1] - keys[i])
+			# 走到区间端点就直接切档，不要用 alpha=1 去「盖住」上一档 ——
+			# 浮点混色下那样会在边界露一层残影（正午会透出日出的紫色）。
+			if f >= 0.999:
+				return [rows[i + 1], rows[i + 1], 0.0]
+			if f <= 0.001:
+				return [rows[i], rows[i], 0.0]
+			return [rows[i], rows[i + 1], f]
+	return [1, 1, 0.0]
 
 
 # ---------------------------------------------------------------- 桌子

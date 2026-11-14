@@ -105,6 +105,10 @@ var _bubble_timer: SceneTreeTimer
 var ui_blocked: bool = false
 ## 相机缩放目标值（滚轮改这个，_process 里平滑逼近）
 var _cam_zoom_target: float = ZOOM_BASE
+## 相机相对人物的额外位移（世界像素）。房间里贴着北墙那排落地窗时，
+## 镜头往上让一截，画面才装得下「窗顶 + 窗上一片天」——
+## 不然人站到墙边，窗的上半截永远在屏幕外。出房间时 Arena 会归零。
+var _cam_shift: Vector2 = Vector2.ZERO
 ## 精灵/相机相对物理位置的滞后量（tick 阶跃的平滑缓冲）
 var _render_lag: Vector2 = Vector2.ZERO
 ## 上一次 _apply_movement 实际挪了多远（像素）。渲染时按这个长度线性追平滞后，
@@ -826,7 +830,7 @@ func _update_camera_follow() -> void:
 	if not is_local_player:
 		return
 	var cam: Camera2D = $Camera
-	cam.global_position = visual.global_position
+	cam.global_position = visual.global_position + _cam_shift
 
 
 ## 视距平滑逼近目标值（滚一格不要整屏跳一下）

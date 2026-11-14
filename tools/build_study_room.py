@@ -44,6 +44,13 @@ ZOOM = 1.2          # 房间太大，镜头不再强行 fit 全屋，保持人�
 VOID_X, VOID_Y, VOID_W = 30.0, 30.0, 60.0
 RAIL_T = 1.0
 
+# ── 北墙落地窗（格）──────────────────────────────────────────────────────
+# 整排窗是这间阅览厅的主视觉：14 格高（112px），从房间上沿（y=0）往上立起来，
+# 所以 rect 的 y 是负的。玻璃是**透明的**，透出来的是房间背后那层天
+# （room_sky.gd）：窗里窗外同一片天，看得出日落、也看得见夜里的星。
+# 北墙本身不画（glass=True，见下）—— 画了正好挡在窗后面。
+WINDOW_H = 14.0
+
 # ── 双人桌（格）：两把椅并排在同侧 ──────────────────────────────────────
 TABLE_W, TABLE_H = 9.0, 2.6
 SEAT_W, SEAT_H = 2.4, 1.6
@@ -186,7 +193,8 @@ def build() -> dict:
 
     # ── 外墙：正方形四边，南墙按门洞切成两段 ────────────────────────────
     walls = [
-        rect(0, 0, W, WALL_T),                                   # 北
+        # 北墙是整面玻璃幕墙：只留碰撞，不画墙（画了会挡在透明窗玻璃后面）
+        rect(0, 0, W, WALL_T, glass=True),                       # 北
         rect(0, H - WALL_T, DOOR_X, WALL_T),                     # 南 · 门左
         rect(DOOR_X + DOOR_W, H - WALL_T, W - DOOR_X - DOOR_W, WALL_T),  # 南 · 门右
         rect(0, WALL_T, WALL_T, H - WALL_T * 2),                # 西
@@ -200,7 +208,7 @@ def build() -> dict:
     # ── 北墙整排落地窗：贴墙内侧、不 solid。只放北墙 —— 南墙在 y-sort 里
     # 比窗更靠下，会把窗整片盖掉。8 扇 15 格首尾相接，不留灰色断口
     for i in range(8):
-        props.append(rect(i * 15.0, WALL_T, 15.0, 1.0, k="window"))
+        props.append(rect(i * 15.0, -WINDOW_H, 15.0, WINDOW_H, k="window"))
 
     # ── 中庭四边的矮护栏：solid，人走不进镂空区。四段首尾不重叠 ──────────
     vx, vy, vw = VOID_X, VOID_Y, VOID_W

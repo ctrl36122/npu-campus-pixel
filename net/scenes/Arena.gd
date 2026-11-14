@@ -1977,6 +1977,14 @@ const DOOR_CHECK_HZ := 8.0
 ## 1.9 让房间填满屏幕，人物约 34px 高，坐着/站着一眼能分清。
 const ROOM_ZOOM := 2.1
 const CAMPUS_ZOOM := 1.05
+## 进房间时相机上边界往上多让出的净天（局部像素 / 房间 8px 空间）。
+## 图书馆那排落地窗本身高 112px；再往上留这么多，镜头贴到北墙时
+## 窗顶上还有一片云可以看，窗和天一起才撑得起画面主体。
+const SKY_LOOK_UP := 90.0
+## 有落地窗的房间，把镜头整体往上抬这么多（局部像素）：人物落到画面偏下
+## 三分之一处，窗顶和窗上那片天才真正进得来。纯靠放宽 limit 是没用的 ——
+## 镜头跟着人走，人站在墙边不会自己往上看。
+const SKY_CAM_SHIFT := 50.0
 ## 离座位多近才能坐（像素，campus/Objects 局部空间 = 8px/格）。
 ## 这个值必须**小于「椅子中心到隔间开口」的距离**（约 25px），否则站在隔间里
 ## 任何位置按 E 都是「坐下」，走出去也一直在坐下 —— 表现就是「人被卡在宿舍空间里」。
@@ -3025,8 +3033,15 @@ func enter_room(path: String, floor_n: int = 1) -> bool:
 	_setup_room_cats()
 	# 进了楼，牵着的猫跟你回家（房间里由 RoomCat_* 顶上，校园那只先收起来）
 	_despawn_leash_cat()
+	# 背景音乐换成楼里那首（自习空间 / 宿舍分开，交叉淡入淡出由 Music 自己处理）
+	Music.set_room_kind(_room_music_kind(current_floor))
 	room_changed.emit(true)
 	return true
+
+
+## 楼里放哪首曲子：自习空间（图书馆）安静那首，其余楼层（宿舍 1~5、B1 活动室）宿舍曲
+func _room_music_kind(floor_n: int) -> String:
+	return "study" if floor_n >= STUDY_FLOOR else "dorm"
 
 
 func leave_room() -> void:
@@ -3062,6 +3077,8 @@ func leave_room() -> void:
 	_update_floor_visibility()
 	# 出楼了：牵着的那只跟到校园里（贴在脚边小跑，会绕开楼和水）
 	_spawn_leash_cat()
+	# 回到校园：音乐交还给 Music 自己按昼夜挑
+	Music.set_room_kind("")
 	room_changed.emit(false)
 
 
@@ -3363,14 +3380,28 @@ func _set_cam_limit(avatar: Node, free_it: bool) -> void:
 		# 相机本来就该在房间内滑，不该滑到外面去。
 		var rp: Vector2 = (room as Node2D).global_position
 		var rs: Vector2 = (room as Node2D).get("size_px") * (room as Node2D).global_scale
+		var gs: float = (room as Node2D).global_scale.y
+		# 例外只有北边：落地窗是往上长的，玻璃伸到房间矩形之外，窗外还有一片天。
+		# 上边界不放宽，镜头推到顶也只能看见窗最下面一条 —— 大窗和天空就白做了。
+		# 左右下三边保持原样：那三面没有内容，放开了只会露出地板外的虚空。
+		var look_up := 0.0
+		var sky_top: float = float(room.call("view_top_px")) * gs
+		if sky_top < -1.0:
+			look_up = -sky_top + SKY_LOOK_UP * gs
 		cam.set("limit_left", int(rp.x))
-		cam.set("limit_top", int(rp.y))
+		cam.set("limit_top", int(rp.y - look_up))
 		cam.set("limit_right", int(rp.x + rs.x))
 		cam.set("limit_bottom", int(rp.y + rs.y))
+		# 光放宽边界没用：镜头是跟着人走的，人走到北墙边也不会主动往上看。
+		# 所以有窗的房间再给相机一个向上的固定位移，人物落到画面偏下，
+		# 窗顶和窗上那片天才进得来；没窗的房间（宿舍 / B1）不动。
+		avatar.set("_cam_shift",
+			Vector2(0.0, -SKY_CAM_SHIFT * gs) if sky_top < -1.0 else Vector2.ZERO)
 	elif not _cam_limit.is_empty():
 		for k in _cam_limit:
 			cam.set("limit_" + String(k), _cam_limit[k])
 		_cam_limit.clear()
+		avatar.set("_cam_shift", Vector2.ZERO)
 	cam.call("reset_smoothing")
 	cam.call("force_update_scroll")
 
@@ -4304,6 +4335,7 @@ func _go_floor(n: int) -> void:
 	_refresh_door_plates()
 	_update_floor_label()
 	_update_floor_visibility()
+	Music.set_room_kind(_room_music_kind(want))
 	_fade_flash()
 
 

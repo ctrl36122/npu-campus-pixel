@@ -11,11 +11,15 @@ extends Node2D
 const RoomProp := preload("res://net/scripts/room_prop.gd")
 const RoomGlow := preload("res://net/scripts/room_glow.gd")
 const RoomDoor := preload("res://net/scripts/room_door.gd")
+const RoomSky := preload("res://net/scripts/room_sky.gd")
 
 const TS := 8.0
 const ROOM_SCALE := 2.0
 ## 边界墙厚度（局部像素）。玩家撞到就停，防止走进地板外的虚空。
 const EDGE_T := 24.0
+## 房间背后那片天左右各外扩多少（局部像素）。相机横向本来就够不到房间外，
+## 这里只是让「地板边缘 → 天空」那条交界不会在地板外侧露出黑色。
+const SKY_PAD := 320.0
 
 ## 本节点在父空间里的缩放。独立跑（调试）时是 2.0；挂进 campus/Objects
 ## （那里已经是 8px/格 的局部空间）时要设 1.0，否则整个房间会被放大一倍。
@@ -127,12 +131,33 @@ func title() -> String:
 	return String(data.get("name", "房间"))
 
 
+## 房间最北的可视内容在哪儿（局部像素，负值＝伸出房间矩形上沿之外）。
+## 北墙落地窗是往上长的，会超出房间矩形一大截；相机边界必须按它放宽，
+## 否则镜头推到顶也只看得见窗最下面那一条，窗外那片天等于白做。
+## 没有窗的房间（宿舍 / B1 活动室）返回 0，相机限制保持原样。
+func view_top_px() -> float:
+	var top := 0.0
+	for item in data.get("props", []):
+		if String((item as Dictionary).get("k", "")) == "window":
+			top = minf(top, float((item as Dictionary).get("y", 0.0)) * TS)
+	return top
+
+
 # ---------------------------------------------------------------- 搭建
 
 func _build() -> void:
 	name = String(data.get("id", "room"))
 	scale = Vector2(node_scale, node_scale)
 	size_px = Vector2(float(data["W"]) * TS, float(data["H"]) * TS)
+
+	# 房间背后先铺一片天。地板是张不透明底图，所以天空只会从两处露出来：
+	# 地板外侧的一圈（相机贴边时看得到）和北墙落地窗上方 —— 这两处以前都是
+	# 纯黑虚空。天气/时刻跟窗户共用一套插值，所以全游戏的天色永远一致。
+	var sky := RoomSky.new()
+	sky.name = "Sky"
+	sky.z_index = -200
+	sky.call("setup", size_px, SKY_PAD)
+	add_child(sky)
 
 	var floor_spr := Sprite2D.new()
 	floor_spr.name = "Floor"
@@ -158,7 +183,10 @@ func _build() -> void:
 
 	for w in data.get("walls", []):
 		var wd: Dictionary = w
-		_add_prop("wall", wd)
+		# 玻璃幕墙（"glass": true）：整面墙都是落地窗，墙本身不画 —— 画了就正好
+		# 挡在透明的窗玻璃后面。碰撞照旧，人还是走到这儿就停。
+		if not bool(wd.get("glass", false)):
+			_add_prop("wall", wd)
 		_add_solid(wd)
 
 	for item in data.get("props", []):
@@ -508,9 +536,9 @@ func _fill_cells(img: Image, r: Rect2, k: float, col: Color) -> void:
 	img.fill_rect(Rect2i(x0, y0, x1 - x0, y1 - y0), col)
 
 
-## 回字形中庭的「镂空」：不摆地毯，而是把这一块地板直接换成天光色，
-## 四边压一圈向内衰减的井壁阴影 —— 远看就是地板被切掉一块、往下是挑空。
-## 只在亮房用；中间再嵌一圈细亮线，让「正方形套正方形」的层次读得出来。
+## 回字形中庭的「镂空」：这一块地板真的是透明的 —— 抠掉 alpha，直接透出房间
+## 背后那层天（room_sky.gd），远看就是地板中间开了一扇朝天的天窗。
+## 四边压一圈向内衰减的井壁阴影，切口才有厚度，不会像贴了张蓝天图。
 func _paint_void(img: Image, r: Rect2) -> void:
 	var x0 := maxi(0, int(r.position.x))
 	var y0 := maxi(0, int(r.position.y))
@@ -525,33 +553,18 @@ func _paint_void(img: Image, r: Rect2) -> void:
 	_blend(img, Rect2i(x0 - 3, y0, 3, h), Color("f6fbfd"))
 	_blend(img, Rect2i(x1, y0, 5, h), Color(0.05, 0.10, 0.14, 0.45))
 	_blend(img, Rect2i(x0, y1, w, 5), Color(0.05, 0.10, 0.14, 0.45))
-	# 天光：比浅木地板更冷更亮，保持整间房的明亮氛围
-	img.fill_rect(Rect2i(x0, y0, w, h), Color("cfe3ee"))
-	# 大方格（天窗分格），线要极淡，别抢掉「空」的感觉
-	var step := 40
-	var gx := x0 + step
-	while gx < x1:
-		_blend(img, Rect2i(gx, y0, 1, h), Color(0.35, 0.55, 0.65, 0.30))
-		gx += step
-	var gy := y0 + step
-	while gy < y1:
-		_blend(img, Rect2i(x0, gy, w, 1), Color(0.35, 0.55, 0.65, 0.30))
-		gy += step
-	# 井壁内阴影：四边各 26px，越靠切口越暗 —— 中间是亮的、四周往下沉，
-	# 这一圈深度是「镂空」读得出来的关键，只铺一块浅色地砖会像玻璃地板。
+	# 真·镂空：整块写成全透明。注意只能 fill_rect 直接写像素（不混合），
+	# 用 _blend 只会盖上一层半透明的蓝，天还是透不上来。
+	img.fill_rect(Rect2i(x0, y0, w, h), Color(0, 0, 0, 0))
+	# 井壁内阴影：四边各 26px，越靠切口越暗。这几笔落在刚抠空的像素上，
+	# 结果是一圈半透明的暗调 —— 天空从中间亮、往四边沉，切口就有了深度。
 	for i in range(26):
 		var t := 1.0 - float(i) / 26.0
-		var a := 0.58 * t * t
+		var a := 0.55 * t * t
 		_blend(img, Rect2i(x0 + i, y0 + i, w - i * 2, 1), Color(0.08, 0.15, 0.21, a))
 		_blend(img, Rect2i(x0 + i, y1 - 1 - i, w - i * 2, 1), Color(0.08, 0.15, 0.21, a))
 		_blend(img, Rect2i(x0 + i, y0 + i, 1, h - i * 2), Color(0.08, 0.15, 0.21, a))
 		_blend(img, Rect2i(x1 - 1 - i, y0 + i, 1, h - i * 2), Color(0.08, 0.15, 0.21, a))
-	# 内嵌一圈细亮线：回字中回字，远看更像套了两个正方形
-	var inset := 30
-	_blend(img, Rect2i(x0 + inset, y0 + inset, w - inset * 2, 1), Color(1, 1, 1, 0.55))
-	_blend(img, Rect2i(x0 + inset, y1 - inset - 1, w - inset * 2, 1), Color(1, 1, 1, 0.55))
-	_blend(img, Rect2i(x0 + inset, y0 + inset, 1, h - inset * 2), Color(1, 1, 1, 0.55))
-	_blend(img, Rect2i(x1 - inset - 1, y0 + inset, 1, h - inset * 2), Color(1, 1, 1, 0.55))
 
 
 ## 隔间地胶：比外面的木地板深一档的灰蓝，带细密织纹和一圈内嵌包边。

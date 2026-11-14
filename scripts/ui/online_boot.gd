@@ -51,6 +51,8 @@ var _nick_edit: LineEdit
 var _addr_edit: LineEdit
 var _net_info: Label
 var _hero_btns: Array[Button] = []
+var _music_slider: HSlider
+var _music_btn: Button
 var _mini: Control
 ## 当前世界（Arena），进/出房间时要把小地图切成房间的
 var _arena: Node
@@ -178,8 +180,16 @@ func _verify_shot() -> void:
 	if tex != null:
 		var img := tex.get_image()
 		if img != null:
-			img.save_png("res://shot_verify.png")
-			print("[verify] 已保存 res://shot_verify.png")
+			# 同时开两个实例核对时（编辑器里跑着一个、命令行又跑一个），
+			# 都往 shot_verify.png 写会互相覆盖 —— XGD_VERIFY_AS=名字 可改名
+			var base := "shot_verify"
+			if OS.has_environment("XGD_VERIFY_AS"):
+				var raw := OS.get_environment("XGD_VERIFY_AS").strip_edges()
+				if not raw.is_empty():
+					base = "shot_" + raw
+			var path := "res://%s.png" % base
+			img.save_png(path)
+			print("[verify] 已保存 ", path)
 
 
 ## 聊天层自己管输入框和气泡，这里只负责实例化（它自己连 Net.message_received）
@@ -485,6 +495,8 @@ func _wait_world() -> void:
 			return
 		var w = SessionFlow.world
 		if w != null and is_instance_valid(w) and w.get("minimap_tex") != null:
+			# 世界就绪：加载/声明页那首循环曲交还给校园曲（Music 自己按昼夜挑）
+			Music.set_menu(false)
 			if _pet_panel != null and is_instance_valid(_pet_panel):
 				_pet_panel.call("setup", w)
 			_build_map_ui(w)
@@ -502,6 +514,8 @@ func _on_session_closed(reason: String) -> void:
 	_card_title.text = "已断开连接"
 	_card_sub.text = reason if not reason.is_empty() else "主机可能退出了游戏"
 	_settings.visible = false
+	# 掉回「已断开 / 连接中」那张卡片，音乐切回加载页循环曲
+	Music.set_menu(true)
 	# 断线时所有面板都没了，把冻结来源一次性清空（重连后由 _refresh_block 重建）
 	GameTheme.clear_move_blocks()
 	_sync_block()
@@ -717,6 +731,29 @@ func _build_settings(_layer: CanvasLayer) -> void:
 		b.pressed.connect(_apply_hero.bind(str(hero["id"])))
 		hr.add_child(b)
 		_hero_btns.append(b)
+
+	# 背景音乐：滑杆调音量 + 一键静音（改动立刻写 user://audio.cfg，不用点保存）
+	col.add_child(_label("音乐", 12, "#8a99a6"))
+	var mr := HBoxContainer.new()
+	mr.add_theme_constant_override("separation", int(GameTheme.px(8.0)))
+	col.add_child(mr)
+
+	_music_slider = HSlider.new()
+	_music_slider.min_value = 0.0
+	_music_slider.max_value = 1.0
+	_music_slider.step = 0.05
+	_music_slider.focus_mode = Control.FOCUS_NONE
+	_music_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_music_slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_music_slider.custom_minimum_size = Vector2(0, GameTheme.px(26.0))
+	_music_slider.value = Music.volume()
+	_music_slider.value_changed.connect(_on_music_volume)
+	mr.add_child(_music_slider)
+
+	_music_btn = _button("静音", 70)
+	_music_btn.pressed.connect(_toggle_music_mute)
+	mr.add_child(_music_btn)
+	_sync_music_btn()
 
 	# 联机信息：当主机时，这里显示「同一 WiFi 填什么 / 异地填什么」，点复制直接发给同学
 	col.add_child(_label("联机地址", 12, "#8a99a6"))
@@ -1104,6 +1141,9 @@ func _toggle_settings(open: bool) -> void:
 		_addr_edit.text = _last_addr
 		_refresh_hero_highlights()
 		_refresh_net_info()
+		if _music_slider != null:
+			_music_slider.set_value_no_signal(Music.volume())
+		_sync_music_btn()
 		# 不自动聚焦输入框：否则 Tab 会被 LineEdit 吃掉，关不掉面板
 
 
@@ -1142,6 +1182,25 @@ func _apply_hero(id: String) -> void:
 	Net.set_my_hero(id)
 	_save_profile(_last_addr)
 	_refresh_hero_highlights()
+
+
+func _on_music_volume(v: float) -> void:
+	Music.set_volume(v)
+	# 拖滑杆本身就是在说「我要听」，顺手解除静音
+	if Music.muted() and v > 0.0:
+		Music.set_muted(false)
+		_sync_music_btn()
+
+
+func _toggle_music_mute() -> void:
+	Music.set_muted(not Music.muted())
+	_sync_music_btn()
+
+
+func _sync_music_btn() -> void:
+	if _music_btn == null:
+		return
+	_music_btn.text = "开声音" if Music.muted() else "静音"
 
 
 ## 只重画外观按钮的高亮，不动输入框（换装时不该把正在输入的昵称清掉）
