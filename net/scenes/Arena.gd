@@ -2008,6 +2008,8 @@ var _room_title := ""
 var _door_hint: Button          # 提示兼交互按钮（手机上点它就是按 E）
 var _voice_btn: Button          # 坐着时右下角的「进语音」按钮（只在 B1 组队房间里出现）
 var _voice_link_now := ""       # _voice_btn 当前指向的 OOPZ 链接（V 键用它）
+var _share_btn: Button          # 坐着时右下角的「一起看屏幕」按钮（Piik，B1 组队房间）
+var _share_target_now := ""     # 当前指向的 Piik 邀请链接或 4 位房间号（B 键用它）
 var _door_clock := 0.0
 ## 座位：[{pos: Vector2(campus 局部坐标), face: String, kind: String, room: int}]
 var _seats_campus: Array = []
@@ -2098,12 +2100,19 @@ var _note_bye_btn: Button
 ## OOPZ 语音链接那一格（只有 B1 组队板显示，宿舍公告不会出现）
 var _oopz_box: VBoxContainer
 var _oopz_edit: LineEdit
+## Piik 屏幕共享那一格（同样只有 B1 组队板显示）
+var _piik_box: VBoxContainer
+var _piik_edit: LineEdit
+var _piik_help: PanelContainer  # 「怎么用 / 连不上怎么办」独立帮助面板
 var _note_view: PanelContainer
 var _note_view_title: Label
 var _note_view_body: Label
 ## 只读面板里的「加入语音」按钮（房主留了链接才显示）
 var _note_view_voice: Button
 var _note_view_link: String = ""
+## 只读面板里的「一起看屏幕」按钮（房主留了 Piik 邀请才显示）
+var _note_view_share: Button
+var _note_view_share_link: String = ""
 var _note_room_idx: int = -1
 ## 上一次量到的软键盘高度（只在手机上非 0），用来在键盘弹出时重新摆面板
 var _vk_last: float = 0.0
@@ -2121,8 +2130,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	var k := event as InputEventKey
 	if not k.pressed or k.echo:
 		return
-	# 焦点在输入框（含 IME 组合期）时交互键让路：给猫起名、写公告、填 OOPZ 链接
-	# 时打 e/f/v 不该顺手摸猫、牵绳或认领房间。Esc 仍可取消命名面板。
+	# 焦点在输入框（含 IME 组合期）时交互键让路：给猫起名、写公告、填语音/共享链接
+	# 时打 e/f/v/b 不该顺手摸猫、牵绳或认领房间。Esc 仍可取消命名面板。
 	if GameTheme.is_typing(get_viewport()) and k.keycode != KEY_ESCAPE:
 		return
 	if k.keycode == KEY_E and _try_interact():
@@ -2134,6 +2143,16 @@ func _unhandled_input(event: InputEvent) -> void:
 	# V = 进 OOPZ 语音（只在右下角那个按钮亮着时有效，坐下才会亮）
 	if k.keycode == KEY_V and not _voice_link_now.is_empty() and _voice_btn != null and _voice_btn.visible:
 		_open_voice(_voice_link_now)
+		get_viewport().set_input_as_handled()
+		return
+	# B = 看队长的屏幕（Piik 房间，一样要坐下 + 按钮亮着）
+	if k.keycode == KEY_B and not _share_target_now.is_empty() and _share_btn != null and _share_btn.visible:
+		_open_share(_share_target_now)
+		get_viewport().set_input_as_handled()
+		return
+	# 帮助面板浮在公告面板之上，Esc 先收它，别一下把底下正在写的公告也关了
+	if k.keycode == KEY_ESCAPE and _piik_help != null and _piik_help.visible:
+		_piik_help.visible = false
 		get_viewport().set_input_as_handled()
 		return
 	if k.keycode == KEY_ESCAPE and _adopt_open():
@@ -3274,10 +3293,12 @@ func _try_auto_room() -> void:
 					(a as Node2D).call("teleport_to",
 						room.position + Vector2(float(raw[0]), float(raw[1])) * TS)
 					print("[dbg] 房内落点=", (a as Node2D).position)
-		# 调试：XGD_OOPZ_DEMO=1 自己是队长、=2 是别人的队（验语音按钮/编辑框用）
+		# 调试：XGD_OOPZ_DEMO=1 自己是队长、=2 是别人的队
+		# （验语音 / 屏幕共享按钮与编辑框；演示 note 两种 @ 标记都带上）
 		if OS.has_environment("XGD_OOPZ_DEMO"):
 			var demo := OS.get_environment("XGD_OOPZ_DEMO")
-			var demo_note := OOPZ_TAG + "https://oopz.cn/i/demo01\n来打排位，缺 2 人，开麦"
+			var demo_note := OOPZ_TAG + "https://oopz.cn/i/demo01\n" \
+				+ PIIK_TAG + "4821\n来打排位，缺 2 人，开麦，也能看我屏幕"
 			if demo == "2":
 				Net.room_claims["%d:0" % BASEMENT_FLOOR] = {
 					"name": "别人的队", "uid": "demo-other", "note": demo_note}
@@ -3286,6 +3307,9 @@ func _try_auto_room() -> void:
 				Net.claim_room(BASEMENT_FLOOR, 0, "演示队")
 				Net.set_team_note(0, demo_note)
 			print("[dbg] 演示组队板=", Net.room_claims.get("%d:0" % BASEMENT_FLOOR, {}))
+		# 调试：XGD_PIIK_HELP=1 展开「怎么用 / 排障」帮助面板（截图核对排版用）
+		if OS.has_environment("XGD_PIIK_HELP"):
+			call_deferred("_open_piik_help_debug")
 		# 自测：XGD_TEST_VOICE="<邀请链接>" 走完整链路 —— 写进 0 号板 → 读回来 →
 		# 过白名单 → 唤起系统，把每一步结果打出来（验「链接到底能不能用」用）。
 		if OS.has_environment("XGD_TEST_VOICE"):
@@ -3488,67 +3512,94 @@ func _build_door_hint() -> void:
 	layer.add_child(_door_hint)
 
 
-## 坐着时的「进语音」按钮（右下角）。手机上点它、桌面上按 V，都是唤起 OOPZ。
-## 只在 B1 活动室、且坐进的单间填了语音链接时才出现 —— 宿舍不涉及。
+## 坐着时右下角的两个动作按钮：进 OOPZ 语音（V / 点）、看队长的屏幕（B / 点）。
+## 只在 B1 活动室、且坐进的单间留了对应链接时才出现 —— 宿舍不涉及。
+## 两个按钮都挂在同一个 CanvasLayer，从右下角往上叠，谁没留链接就不占位。
 func _build_voice_btn() -> void:
-	_voice_btn = Button.new()
-	_voice_btn.focus_mode = Control.FOCUS_NONE
-	_voice_btn.mouse_filter = Control.MOUSE_FILTER_STOP
-	_voice_btn.add_theme_font_size_override("font_size", GameTheme.fs(17))
-	_voice_btn.add_theme_color_override("font_color", Color("#d8ffe8"))
-	_voice_btn.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
-	_voice_btn.add_theme_constant_override("outline_size", 3)
-	# 跟项目其余 UI 一致：2px 实线边框 + 深底，不用圆角/模糊
-	for st in ["normal", "hover", "pressed", "focus"]:
-		var sb := StyleBoxFlat.new()
-		sb.bg_color = Color(0.07, 0.16, 0.12, 0.94) if st == "normal" else Color(0.10, 0.22, 0.16, 0.97)
-		sb.border_color = Color(0.42, 0.90, 0.66, 0.95)
-		sb.set_border_width_all(2)
-		sb.content_margin_left = int(GameTheme.px(14.0))
-		sb.content_margin_right = int(GameTheme.px(14.0))
-		sb.content_margin_top = int(GameTheme.px(8.0))
-		sb.content_margin_bottom = int(GameTheme.px(8.0))
-		_voice_btn.add_theme_stylebox_override(st, sb)
-	_voice_btn.pressed.connect(_on_voice_btn_pressed)
-	_voice_btn.visible = false
 	var layer := CanvasLayer.new()
 	layer.name = "VoiceBtn"
 	layer.layer = 5
 	add_child(layer)
-	layer.add_child(_voice_btn)
+	for cfg: Array in [
+		["voice", Color(0.42, 0.90, 0.66, 0.95), Color("#d8ffe8"),
+			Color(0.07, 0.16, 0.12, 0.94), _on_voice_btn_pressed],
+		["share", Color(0.48, 0.76, 0.98, 0.95), Color("#dcefff"),
+			Color(0.07, 0.13, 0.20, 0.94), _on_share_btn_pressed],
+	]:
+		var b := Button.new()
+		b.focus_mode = Control.FOCUS_NONE
+		b.mouse_filter = Control.MOUSE_FILTER_STOP
+		b.add_theme_font_size_override("font_size", GameTheme.fs(17))
+		b.add_theme_color_override("font_color", cfg[2] as Color)
+		b.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
+		b.add_theme_constant_override("outline_size", 3)
+		# 跟项目其余 UI 一致：2px 实线边框 + 深底，不用圆角/模糊
+		for st in ["normal", "hover", "pressed", "focus"]:
+			var sb := StyleBoxFlat.new()
+			var base: Color = cfg[3] as Color
+			sb.bg_color = base if st == "normal" else base.lightened(0.12)
+			sb.border_color = cfg[1] as Color
+			sb.set_border_width_all(2)
+			sb.content_margin_left = int(GameTheme.px(14.0))
+			sb.content_margin_right = int(GameTheme.px(14.0))
+			sb.content_margin_top = int(GameTheme.px(8.0))
+			sb.content_margin_bottom = int(GameTheme.px(8.0))
+			b.add_theme_stylebox_override(st, sb)
+		b.pressed.connect(cfg[4] as Callable)
+		b.visible = false
+		layer.add_child(b)
+		if String(cfg[0]) == "voice":
+			_voice_btn = b
+		else:
+			_share_btn = b
 
 
 func _on_voice_btn_pressed() -> void:
 	_open_voice(_voice_link_now)
 
 
-## 右下角摆位（换分辨率/窗口缩放都要重算，所以每次显示前调一次）
-func _place_voice_btn() -> void:
-	if _voice_btn == null:
-		return
+func _on_share_btn_pressed() -> void:
+	_open_share(_share_target_now)
+
+
+## 右下角摆位（换分辨率/窗口缩放都要重算，所以每次显示前调一次）。
+## 可见的按钮从下往上排，各自按自己的宽度右对齐。
+func _place_action_btns() -> void:
 	var vs := get_viewport().get_visible_rect().size
-	var sz := _voice_btn.get_combined_minimum_size()
-	_voice_btn.size = sz
-	_voice_btn.position = Vector2(vs.x - sz.x - 18.0, vs.y - sz.y - 18.0)
+	var bottom := vs.y - 18.0
+	for b in [_voice_btn, _share_btn]:
+		if b == null or not (b as Button).visible:
+			continue
+		var sz: Vector2 = (b as Button).get_combined_minimum_size()
+		(b as Button).size = sz
+		(b as Button).position = Vector2(vs.x - sz.x - 18.0, bottom - sz.y)
+		bottom -= sz.y + 10.0
 
 
-## 坐着的时候每 8Hz 调一次：坐的单间有语音链接就亮按钮，没有就藏起来。
-func _refresh_voice_btn(pos: Vector2) -> void:
-	if _voice_btn == null:
+## 坐着的时候每 8Hz 调一次：坐的单间留了什么链接就亮哪个按钮。
+func _refresh_action_btns(pos: Vector2) -> void:
+	if _voice_btn == null or _share_btn == null:
 		return
-	var link := ""
+	var vlink := ""
+	var slink := ""
 	var idx := -1
 	if current_floor == BASEMENT_FLOOR and in_room:
 		idx = _seat_room_at(pos)
 		if idx >= 0:
-			link = _room_voice_link(idx)
-	_voice_link_now = link
-	if link.is_empty():
-		_voice_btn.visible = false
-		return
-	_voice_btn.text = "%s · 按 V 进语音" % _team_board_name(idx)
-	_voice_btn.visible = true
-	_place_voice_btn()
+			vlink = _room_voice_link(idx)
+			slink = _room_share_target(idx)
+	_voice_link_now = vlink
+	_share_target_now = slink
+	_voice_btn.visible = not vlink.is_empty()
+	_share_btn.visible = not slink.is_empty()
+	var hint_v := "" if GameTheme.touch_ui() else "按 V "
+	var hint_b := "" if GameTheme.touch_ui() else "按 B "
+	if _voice_btn.visible:
+		_voice_btn.text = "%s · %s进语音" % [_team_board_name(idx), hint_v]
+	if _share_btn.visible:
+		_share_btn.text = "%s · %s一起看屏幕" % [_team_board_name(idx), hint_b]
+	if _voice_btn.visible or _share_btn.visible:
+		_place_action_btns()
 
 
 
@@ -3573,13 +3624,18 @@ func _update_interact_hint(delta: float) -> void:
 		_door_hint.visible = false
 		if _voice_btn != null:
 			_voice_btn.visible = false
+		if _share_btn != null:
+			_share_btn.visible = false
 		return
 
 	var pos: Vector2 = (me as Node2D).position
-	# 「进语音」按钮只有坐着的时候才该出现，先无条件藏掉，坐着那一支再按需点亮
+	# 两个动作按钮只有坐着的时候才该出现，先无条件藏掉，坐着那一支再按需点亮
 	if _voice_btn != null:
 		_voice_btn.visible = false
 		_voice_link_now = ""
+	if _share_btn != null:
+		_share_btn.visible = false
+		_share_target_now = ""
 
 	# 门的开合每 8Hz 定一次「该开还是该关」，动画由 RoomDoor 逐帧插值
 	_update_room_doors()
@@ -3603,8 +3659,8 @@ func _update_interact_hint(delta: float) -> void:
 		# 一份旧值，本地权威姿势要等玩家自己的 _process 才贴回，而 Arena 是父节点、
 		# 先跑一步 —— 提示条采样到窗口里那一帧，就会在「起床 / 躺到床上」之间反复跳。
 		_door_hint.text = "按 E %s" % ("起床" if bool(me.call("is_lying")) else "站起来")
-		# 坐在 B1 某个单间里、且队里留了 OOPZ 链接 → 右下角亮「进语音」
-		_refresh_voice_btn(pos)
+		# 坐在 B1 某个单间里、队里留了语音 / 屏幕共享链接 → 右下角按需亮按钮
+		_refresh_action_btns(pos)
 		return
 
 	# 身边站着人：E 优先做「加好友」。比座椅/门牌都具体 —— 人都贴脸了，
@@ -4103,6 +4159,10 @@ func _ensure_floor_ui() -> void:
 	_note_view = _build_note_view()
 	_note_view.visible = false
 	host.add_child(_note_view)
+	# Piik 帮助面板压在公告面板之上、换层黑场之下
+	_piik_help = _build_piik_help()
+	_piik_help.visible = false
+	host.add_child(_piik_help)
 
 	# 换层黑场（加在最后 → 盖在最上层）
 	_floor_flash = ColorRect.new()
@@ -4494,17 +4554,59 @@ func _team_seated_count(idx: int) -> int:
 ## 这样不用动服务端 schema，老版本客户端也不会 checksum failed。
 const OOPZ_TAG := "@oopz:"
 
-## 把公告拆成 [语音链接, 正文]。链接只在首行、靠前缀标记，展示时剥掉。
+## Piik 屏幕共享（2026-11-14）。官方没有 SDK / API / URL Scheme，也没有 iframe
+## 嵌入方式：只有「房主用网页或 App 开房 → 复制邀请 → 观众用浏览器看」这一条路。
+## 所以跟 OOPZ 一样只做链接唤起，画面不进游戏窗口；好处是观众免安装，
+## 而且支持 4 位房间号，短链接/房间号都塞得进 160 字的公告上限。
+## note 里的 @piik: 行可以是完整邀请链接，也可以是 4 位房间号。
+const PIIK_TAG := "@piik:"
+## 房间号只在开房的同一个 Piik 站点有效；以后换成自己部署的站点只改这一处。
+const PIIK_SITE := "https://demo.piik.tv"
+const PIIK_DOWNLOAD := "https://piik.tv/#download"
+const PIIK_FAQ := "https://piik.tv/#faq"
+
+## 把公告拆成 [语音链接, 正文]。两种 @ 标记行都不进正文（展示时剥掉）。
+## @piik: 行单独用 _note_piik() 取。老客户端不认这个前缀，会把它当一行正文
+## 显示出来，但标签仍在原文里、重存也不会丢，所以新旧客户端混用不会写坏链接。
 func _note_split(note: String) -> Array:
 	var link := ""
 	var body := PackedStringArray()
 	for ln in note.split("\n", true):
 		var t: String = ln.strip_edges()
-		if link.is_empty() and t.to_lower().begins_with(OOPZ_TAG):
+		var low := t.to_lower()
+		if low.begins_with(PIIK_TAG):
+			continue
+		if link.is_empty() and low.begins_with(OOPZ_TAG):
 			link = t.substr(OOPZ_TAG.length()).strip_edges()
 			continue
 		body.append(ln)
 	return [link, "\n".join(body).strip_edges()]
+
+
+## 取公告里的 Piik 邀请（完整链接或 4 位房间号），没有就空串。
+func _note_piik(note: String) -> String:
+	for ln in note.split("\n", true):
+		var t: String = ln.strip_edges()
+		if t.to_lower().begins_with(PIIK_TAG):
+			return t.substr(PIIK_TAG.length()).strip_edges()
+	return ""
+
+
+## 只放行 https/http 完整邀请链接，或 3~6 位纯数字房间号。
+## OS.shell_open 是把字符串直接丢给系统，任意 scheme 都可能被当可执行协议。
+## 自建 / 备用 Piik 站点的域名不限（官方排障本来就建议换站点），但必须是 http(s)。
+func _safe_share_target(s: String) -> String:
+	var t: String = s.replace("\r", "").replace("\n", "").strip_edges()
+	if t.is_empty() or t.length() > 150:
+		return ""
+	if t.is_valid_int() and t.length() >= 3 and t.length() <= 6:
+		return t
+	var low := t.to_lower()
+	if not (low.begins_with("https://") or low.begins_with("http://")):
+		return ""
+	if low.contains(" ") or low.contains("\t"):
+		return ""
+	return t
 
 
 ## 只放行 http/https/oopz 三种 scheme。OS.shell_open 是把字符串直接丢给系统，
@@ -4545,6 +4647,14 @@ func _room_voice_link(room_idx: int) -> String:
 		return ""
 	var parts := _note_split(String(cur.get("note", "")))
 	return _safe_voice_link(String(parts[0]))
+
+
+## 某个单间的组队板上留的 Piik 邀请（链接或房间号，没有就返回空串）。
+func _room_share_target(room_idx: int) -> String:
+	var cur: Dictionary = Net.room_claims.get("%d:%d" % [BASEMENT_FLOOR, room_idx], {})
+	if cur.is_empty():
+		return ""
+	return _safe_share_target(_note_piik(String(cur.get("note", ""))))
 
 
 ## 坐着的人在哪个单间：找脚下最近的那把椅子，读它数据里的 room。
@@ -4624,6 +4734,70 @@ func _open_voice(link: String) -> void:
 
 func _on_note_view_voice_pressed() -> void:
 	_open_voice(_note_view_link)
+
+
+# ── Piik 屏幕共享 ─────────────────────────────────────────────────────────
+## 打开队长的 Piik 房间：完整邀请链接直达；4 位房间号则开站点 + 复制号。
+## 房间号只在开房的那个站点有效，官网给的用法是「加入房间 → 输入四位房间号」。
+## 观众一律用系统浏览器观看，不用装 App —— 这也是没法把它做进游戏窗口的原因。
+func _open_share(target: String) -> void:
+	var t := _safe_share_target(target)
+	if t.is_empty():
+		_notice("这支队还没留 Piik 屏幕共享邀请")
+		return
+	if t.is_valid_int():
+		DisplayServer.clipboard_set(t)
+		var err := OS.shell_open(PIIK_SITE)
+		if err != OK:
+			_notice("没能打开 Piik 站点 · 房间号 %s 已复制" % t)
+		else:
+			_notice("已打开 Piik · 房间号 %s 已复制，点「加入房间」粘贴" % t)
+		return
+	var err2 := OS.shell_open(t)
+	if err2 != OK:
+		DisplayServer.clipboard_set(t)
+		_notice("没能打开邀请页 · 链接已复制，粘到浏览器即可")
+		return
+	_notice("已在浏览器打开 Piik 房间 · 没画面就点「播放」")
+
+
+func _on_note_view_share_pressed() -> void:
+	_open_share(_note_view_share_link)
+
+
+## 组队板面板上的外链按钮都走这里；打不开就把地址塞剪贴板。
+func _open_piik_link(url: String) -> void:
+	var err := OS.shell_open(url)
+	if err != OK:
+		DisplayServer.clipboard_set(url)
+		_notice("没能打开浏览器 · 地址已复制：" + url)
+
+
+func _on_piik_start_pressed() -> void:
+	_open_piik_link(PIIK_SITE)
+
+
+func _on_piik_download_pressed() -> void:
+	_open_piik_link(PIIK_DOWNLOAD)
+
+
+func _on_piik_faq_pressed() -> void:
+	_open_piik_link(PIIK_FAQ)
+
+
+## 「怎么用 / 连不上怎么办」帮助面板（三条排障写在游戏里，不必跳网页）。
+func _toggle_piik_help() -> void:
+	_ensure_floor_ui()
+	_piik_help.visible = not _piik_help.visible
+	if _piik_help.visible:
+		_center_panel.call_deferred(_piik_help)
+
+
+## 截图调试用：直接把帮助面板展开，不用在 headless 里点按钮。
+func _open_piik_help_debug() -> void:
+	_ensure_floor_ui()
+	_piik_help.visible = true
+	_center_panel.call_deferred(_piik_help)
 
 
 
@@ -4741,6 +4915,48 @@ func _build_note_panel() -> PanelContainer:
 	oh.add_theme_color_override("font_color", Color(0.58, 0.66, 0.74))
 	_oopz_box.add_child(oh)
 
+	# Piik 屏幕共享（只有 B1 组队板显示）。完整邀请链接或 4 位房间号都存进 note，
+	# 队员用浏览器看、不用装 App；三条排障 FAQ 放在「怎么用 / 排障」帮助面板里，
+	# 免得编辑面板在手机竖屏上被撑得过高。
+	_piik_box = VBoxContainer.new()
+	_piik_box.add_theme_constant_override("separation", 4)
+	_piik_box.visible = false
+	vb.add_child(_piik_box)
+	var pl := Label.new()
+	pl.text = "Piik 屏幕共享邀请 · 选填（完整链接或 4 位房间号）"
+	pl.add_theme_font_size_override("font_size", GameTheme.fs(12))
+	pl.add_theme_color_override("font_color", Color(0.62, 0.84, 0.98))
+	_piik_box.add_child(pl)
+	_piik_edit = LineEdit.new()
+	_piik_edit.placeholder_text = "粘贴邀请链接，或只填 4 位房间号（更省字数）"
+	_piik_edit.custom_minimum_size = Vector2(460, 38)
+	_piik_edit.add_theme_font_size_override("font_size", GameTheme.fs(14))
+	_piik_edit.add_theme_color_override("font_color", Color("#dcefff"))
+	_piik_box.add_child(_piik_edit)
+	var ph := Label.new()
+	ph.text = "房主开播后把邀请贴这里；队员看组队板或坐下点右下角按钮，用浏览器直接看，不用装 App。"
+	ph.add_theme_font_size_override("font_size", GameTheme.fs(11))
+	ph.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	ph.custom_minimum_size = Vector2(460, 0)
+	ph.add_theme_color_override("font_color", Color(0.58, 0.66, 0.74))
+	_piik_box.add_child(ph)
+	var prow := HBoxContainer.new()
+	prow.add_theme_constant_override("separation", 8)
+	_piik_box.add_child(prow)
+	for cfg: Array in [
+		["去 Piik 开播", _on_piik_start_pressed],
+		["下载 App", _on_piik_download_pressed],
+		["怎么用 / 排障", _toggle_piik_help],
+	]:
+		var pb := Button.new()
+		pb.text = String(cfg[0])
+		pb.custom_minimum_size = Vector2(0, 42)
+		pb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		pb.focus_mode = Control.FOCUS_NONE
+		pb.add_theme_font_size_override("font_size", GameTheme.fs(13))
+		pb.pressed.connect(cfg[1] as Callable)
+		prow.add_child(pb)
+
 	_note_edit = TextEdit.new()
 	_note_edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
 	_note_edit.custom_minimum_size = Vector2(460, 150)
@@ -4854,6 +5070,26 @@ func _build_note_view() -> PanelContainer:
 	_note_view_voice.visible = false
 	_note_view_voice.pressed.connect(_on_note_view_voice_pressed)
 	vb.add_child(_note_view_voice)
+	# 队长留了 Piik 邀请才显示：站在板前就能直接进房间（不用先坐下）
+	_note_view_share = Button.new()
+	_note_view_share.text = "一起看屏幕（Piik）"
+	_note_view_share.custom_minimum_size = Vector2(0, 48)
+	_note_view_share.focus_mode = Control.FOCUS_NONE
+	_note_view_share.add_theme_font_size_override("font_size", GameTheme.fs(16))
+	_note_view_share.add_theme_color_override("font_color", Color("#dcefff"))
+	for st in ["normal", "hover", "pressed", "focus"]:
+		var ssb := StyleBoxFlat.new()
+		ssb.bg_color = Color(0.07, 0.13, 0.20, 0.95) if st == "normal" else Color(0.10, 0.18, 0.27, 0.98)
+		ssb.border_color = Color(0.48, 0.76, 0.98, 0.95)
+		ssb.set_border_width_all(2)
+		ssb.content_margin_left = 12
+		ssb.content_margin_right = 12
+		ssb.content_margin_top = 8
+		ssb.content_margin_bottom = 8
+		_note_view_share.add_theme_stylebox_override(st, ssb)
+	_note_view_share.visible = false
+	_note_view_share.pressed.connect(_on_note_view_share_pressed)
+	vb.add_child(_note_view_share)
 	var foot_row := HBoxContainer.new()
 	vb.add_child(foot_row)
 	var foot := Label.new()
@@ -4871,6 +5107,82 @@ func _build_note_view() -> PanelContainer:
 	close_btn.pressed.connect(_close_note_view)
 	foot_row.add_child(close_btn)
 	return pc
+
+
+## Piik 使用与排障帮助面板。内容按官方 FAQ / 疑难解答精简，游戏内就能查，
+## 不用为了「能聊天却没画面」再切出去翻网页。套 ScrollContainer 是为了
+## 手机竖屏 + 软键盘弹出时，长文案还能滚着看。
+func _build_piik_help() -> PanelContainer:
+	var pc := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.06, 0.09, 0.15, 0.98)
+	sb.border_color = Color(0.48, 0.76, 0.98, 0.95)
+	sb.set_border_width_all(2)
+	sb.content_margin_left = 16
+	sb.content_margin_right = 16
+	sb.content_margin_top = 14
+	sb.content_margin_bottom = 14
+	pc.add_theme_stylebox_override("panel", sb)
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 10)
+	pc.add_child(vb)
+	var title := Label.new()
+	title.text = "Piik 屏幕共享 · 怎么用 / 连不上怎么办"
+	title.add_theme_font_size_override("font_size", GameTheme.fs(17))
+	title.add_theme_color_override("font_color", Color("#cfe6ff"))
+	vb.add_child(title)
+	var scroll := ScrollContainer.new()
+	# 400 高：桌面 1280×720 能把三条排障 FAQ 一次显示完，不必先滚动
+	scroll.custom_minimum_size = Vector2(460, 400)
+	vb.add_child(scroll)
+	var body := Label.new()
+	body.text = "【房主 · 开播】\n" \
+		+ "1. 打开 Piik 在线版，或装 App 后选「公网邀请」进入。\n" \
+		+ "2. 点「开始分享」→ 选游戏窗口 / 屏幕 →「复制邀请链接」。\n" \
+		+ "3. 把完整链接贴回组队板；链接太长就只填 4 位房间号（更省字数）。\n" \
+		+ "4. 分享期间保持 App 和那个标签页开着，关掉房间和邀请就没了。\n\n" \
+		+ "【观众 · 围观】\n" \
+		+ "不用装 App：站在板前点开组队公告 →「一起看屏幕」，或坐下点右下角按钮（桌面按 B）。\n" \
+		+ "一个房间 1 位房主 + 最多 20 位观众；浏览器里没自动播放就点「播放」。\n" \
+		+ "房间号只在开房的那个站点有效，队里最好贴完整邀请链接。\n\n" \
+		+ "【连不上怎么办】\n" \
+		+ "· 分享失败 / 卡顿：先更新 App 和浏览器；编码选「自动」，开播还失败就试 VP8。\n" \
+		+ "· 能聊天却没画面：校园网 / 受限网络常挡 P2P。换支持服务器转发的 Piik 站点，\n" \
+		+ "　或用 UU / Tailscale 组虚拟局域网。\n" \
+		+ "· 公网邀请打不开：换一个能访问的 Piik 站点，保持 App 运行，在站点点「App」\n" \
+		+ "　授权后重新发邀请。"
+	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.custom_minimum_size = Vector2(440, 0)
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	body.add_theme_font_size_override("font_size", GameTheme.fs(13))
+	body.add_theme_color_override("font_color", Color("#dbe7f5"))
+	scroll.add_child(body)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	vb.add_child(row)
+	var faq_btn := Button.new()
+	faq_btn.text = "看官方 FAQ"
+	faq_btn.custom_minimum_size = Vector2(150, 44)
+	faq_btn.focus_mode = Control.FOCUS_NONE
+	faq_btn.add_theme_font_size_override("font_size", GameTheme.fs(14))
+	faq_btn.pressed.connect(_on_piik_faq_pressed)
+	row.add_child(faq_btn)
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(spacer)
+	var close_btn := Button.new()
+	close_btn.text = "关闭"
+	close_btn.custom_minimum_size = Vector2(96, 44)
+	close_btn.focus_mode = Control.FOCUS_NONE
+	close_btn.add_theme_font_size_override("font_size", GameTheme.fs(14))
+	close_btn.pressed.connect(_close_piik_help)
+	row.add_child(close_btn)
+	return pc
+
+
+func _close_piik_help() -> void:
+	if _piik_help != null:
+		_piik_help.visible = false
 
 
 ## 打开某间房的公告板：自己的可编辑，别人的只读，空房提示先认领。
@@ -4903,6 +5215,7 @@ func _open_note_board(idx: int) -> void:
 		var note_raw := String(cur.get("note", ""))
 		var parts := _note_split(note_raw)
 		_note_view_link = _safe_voice_link(String(parts[0])) if is_b1 else ""
+		_note_view_share_link = _safe_share_target(_note_piik(note_raw)) if is_b1 else ""
 		var note := String(parts[1])
 		if is_b1:
 			var body := note if not note.is_empty() else "队长还没写招募内容。"
@@ -4911,6 +5224,7 @@ func _open_note_board(idx: int) -> void:
 		else:
 			_note_view_body.text = note if not note.is_empty() else "这间房的房主还没写公告。"
 		_note_view_voice.visible = not _note_view_link.is_empty()
+		_note_view_share.visible = not _note_view_share_link.is_empty()
 		_note_view_body.add_theme_color_override("font_color",
 			Color("#e6effb") if not note.is_empty() else Color(0.60, 0.66, 0.74))
 		_note_view.visible = true
@@ -4919,9 +5233,12 @@ func _open_note_board(idx: int) -> void:
 	_note_room_idx = idx
 	_note_title.text = ("发布 %s 组队招募" % label) if is_b1 else \
 		("编写 %d 号房的门口公告" % (idx + 1))
-	var mine := _note_split(String(cur.get("note", "")))
+	var mine_raw := String(cur.get("note", ""))
+	var mine := _note_split(mine_raw)
 	_oopz_box.visible = is_b1
+	_piik_box.visible = is_b1
 	_oopz_edit.text = _safe_voice_link(String(mine[0])) if is_b1 else ""
+	_piik_edit.text = _safe_share_target(_note_piik(mine_raw)) if is_b1 else ""
 	_note_edit.text = String(mine[1])
 	_update_note_count()
 	_note_panel.visible = true
@@ -4973,14 +5290,19 @@ func _save_note_board() -> void:
 		return
 	var idx := _note_room_idx
 	var body := _note_edit.text.strip_edges()
-	# 语音链接存在公告首行（@oopz: 前缀）—— 服务端只认 note 一个字符串，
-	# 这样加功能不用改协议，老版本客户端看到的就是一段多了一行前缀的文字。
-	var link := _safe_voice_link(_oopz_edit.text) if current_floor == BASEMENT_FLOOR else ""
+	# 两个链接都存在公告开头（@oopz: 首行、@piik: 次行）—— 服务端只认 note
+	# 一个字符串，这样加功能不用改协议；老客户端会把 @piik: 当一行正文显示，
+	# 但不会把链接弄丢。两条都选填，顺序固定，@oopz: 保持首行兼容旧版解析。
+	var is_b1 := current_floor == BASEMENT_FLOOR
+	var link := _safe_voice_link(_oopz_edit.text) if is_b1 else ""
+	var share := _safe_share_target(_piik_edit.text) if is_b1 else ""
 	var txt := body
+	if not share.is_empty():
+		txt = PIIK_TAG + share + ("\n" + txt if not txt.is_empty() else "")
 	if not link.is_empty():
-		txt = OOPZ_TAG + link + ("\n" + body if not body.is_empty() else "")
+		txt = OOPZ_TAG + link + ("\n" + txt if not txt.is_empty() else "")
 	_close_note_board()
-	if current_floor == BASEMENT_FLOOR:
+	if is_b1:
 		# 组队板的招募走 team note 通道：不写宿舍公告、不写 my_room.cfg
 		Net.set_team_note(idx, txt)
 	else:
@@ -4988,15 +5310,25 @@ func _save_note_board() -> void:
 		# 同步落本地存档：服务端只把认领/公告存在内存里，重启就没了，
 		# 而旧版服务端连请求都收不到 —— 不存本地就是「退出之后公告没保存」。
 		_save_my_room(current_floor, idx, txt.strip_edges().left(160))
-	if current_floor == BASEMENT_FLOOR:
+	if is_b1:
 		if txt.strip_edges().is_empty():
 			_notice("组队招募已撤下")
-		elif link.is_empty():
-			_notice("组队招募已发布 · B1 的同学都能看到")
-		elif not _looks_oopz_invite(link):
-			_notice("已发布，但这链接不像语音频道邀请（应为 oopz.cn/i/…）· 队员可能进不去")
+			return
+		# 公告整串上限 160 字（含两个 @ 标记行），链接太长正文会被截；
+		# 4 位房间号只有 10 个字符，超长时引导改用它。
+		var tail := ""
+		if txt.length() > 150:
+			tail = " · 公告超 160 字会被截断，建议改填 4 位房间号"
+		elif not link.is_empty() and not _looks_oopz_invite(link):
+			tail = " · 语音链接不像频道邀请，队员可能进不去"
+		if not share.is_empty() and not link.is_empty():
+			_notice("组队招募已发布（语音 + 屏幕共享）· 坐下点右下角按钮" + tail)
+		elif not share.is_empty():
+			_notice("组队招募已发布（含屏幕共享）· 队员看板或坐下点按钮" + tail)
+		elif not link.is_empty():
+			_notice("组队招募已发布（含语音频道）· 队员坐下点按钮 / 按 V" + tail)
 		else:
-			_notice("组队招募已发布（含语音频道）· 队员坐下按 V 唤起 OOPZ")
+			_notice("组队招募已发布 · B1 的同学都能看到")
 	else:
 		_notice("门口公告已擦掉" if txt.strip_edges().is_empty() else "门口公告已更新")
 
@@ -5004,10 +5336,12 @@ func _save_note_board() -> void:
 func _clear_note_board() -> void:
 	_note_edit.text = ""
 	_oopz_edit.text = ""
+	_piik_edit.text = ""
 	_save_note_board()
 
 
 func _close_note_board() -> void:
+	_close_piik_help()
 	if _note_panel != null:
 		_note_panel.visible = false
 	if _note_edit != null and _note_edit.is_inside_tree():
@@ -5031,6 +5365,7 @@ func _note_open() -> bool:
 func _close_note_all() -> void:
 	_close_note_board()
 	_close_note_view()
+	_close_piik_help()
 
 
 ## B1：把 4 块组队板刷成「谁开的队 / 已入座几人」。
