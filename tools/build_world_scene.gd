@@ -245,6 +245,8 @@ func _in_poly(pt: Vector2, poly: PackedVector2Array) -> bool:
 ##   bottom  精灵底部留白像素（默认 0）
 ##   layer   "objects"（默认，参与 y 排序+碰撞）或 "ground"（铺在楼下面，无碰撞）
 ##   collide 可选，碰撞多边形数组（绝对格坐标）
+##   region  可选，[x, y, w, h]；sprite 指向图集时用（车辆图集 props_cars_sheet.png）
+##   offs    可选，[dx, dy] 精灵像素偏移；默认 (0, -(高 - bottom))，图集换尺寸时用它居中
 func _build_props(d) -> void:
 	var props = d.get("props", [])
 	if props == null or props.is_empty():
@@ -258,10 +260,22 @@ func _build_props(d) -> void:
 		var tex: Texture2D = load(sp)
 		if tex == null:
 			continue
+		var reg = p.get("region", null)
+		var src_h := tex.get_height()
+		if reg != null and reg.size() == 4:
+			var at := AtlasTexture.new()
+			at.atlas = tex
+			at.region = Rect2(float(reg[0]), float(reg[1]), float(reg[2]), float(reg[3]))
+			tex = at
+			src_h = float(reg[3])
 		var x := float(p.get("x", 0.0))
 		var base_y := float(p.get("baseY", 0.0))
 		var bottom := float(p.get("bottom", 0.0))
-		var top := base_y * CELL - (tex.get_height() - bottom)
+		var offs = p.get("offs", null)
+		var off := Vector2(0.0, -(src_h - bottom))
+		if offs != null and offs.size() == 2:
+			off = Vector2(float(offs[0]), float(offs[1]))
+		var top := base_y * CELL + off.y
 		if str(p.get("layer", "objects")) == "ground":
 			if ground == null:
 				continue
@@ -270,7 +284,7 @@ func _build_props(d) -> void:
 			gs.texture = tex
 			gs.centered = false
 			gs.texture_filter = NEAREST
-			gs.position = Vector2(x * CELL, top)
+			gs.position = Vector2(x * CELL + off.x, top)
 			_attach(ground, gs)
 			continue
 		if objs == null:
@@ -285,7 +299,7 @@ func _build_props(d) -> void:
 		s.texture = tex
 		s.centered = false
 		s.texture_filter = NEAREST
-		s.offset = Vector2(0, -(tex.get_height() - bottom))
+		s.offset = off
 		_attach(body, s)
 		for poly in p.get("collide", []):
 			if poly.size() < 3:

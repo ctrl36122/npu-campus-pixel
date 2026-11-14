@@ -139,6 +139,7 @@
 [ext_resource type="Texture2D" path="res://assets/props_forge/decor_77.png" id="129_qn65p"]
 [ext_resource type="Texture2D" path="res://assets/props_forge/decor_78.png" id="130_ou5tn"]
 [ext_resource type="Texture2D" path="res://assets/props_bin.png" id="133_qn65p"]
+[ext_resource type="Texture2D" path="res://assets/props_cars_sheet.png" id="900_carsheet"]
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_7huuw"]
 atlas = ExtResource("82_t2jyq")
@@ -6071,132 +6072,154 @@ position = Vector2(943, 645)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车1_0" unique_id=215049343]
 texture_filter = 1
-texture = ExtResource("122_8bem1")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(0, 0, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车1_0" unique_id=486263063]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车1_2" type="StaticBody2D" parent="Objects" unique_id=1043252142]
 position = Vector2(973, 645)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车1_2" unique_id=1804264296]
 texture_filter = 1
-texture = ExtResource("117_ic2vq")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(12, 0, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车1_2" unique_id=1846636564]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车1_4" type="StaticBody2D" parent="Objects" unique_id=1140710646]
 position = Vector2(1003, 645)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车1_4" unique_id=1638813259]
 texture_filter = 1
-texture = ExtResource("122_8bem1")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(24, 0, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车1_4" unique_id=1782564126]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车1_5" type="StaticBody2D" parent="Objects" unique_id=850728654]
 position = Vector2(1018, 645)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车1_5" unique_id=1486526565]
 texture_filter = 1
-texture = ExtResource("116_o7bbu")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(36, 0, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车1_5" unique_id=888295593]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车1_7" type="StaticBody2D" parent="Objects" unique_id=2041310039]
 position = Vector2(1048, 645)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车1_7" unique_id=1687314561]
 texture_filter = 1
-texture = ExtResource("121_mslh2")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(48, 0, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车1_7" unique_id=827307380]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车1_8" type="StaticBody2D" parent="Objects" unique_id=1538529818]
 position = Vector2(943, 690)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车1_8" unique_id=2016166362]
 texture_filter = 1
-texture = ExtResource("119_mgrvy")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(60, 0, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车1_8" unique_id=52858669]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车1_10" type="StaticBody2D" parent="Objects" unique_id=486850789]
 position = Vector2(973, 690)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车1_10" unique_id=1706678850]
 texture_filter = 1
-texture = ExtResource("119_mgrvy")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(72, 0, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车1_10" unique_id=1092053239]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车1_12" type="StaticBody2D" parent="Objects" unique_id=1713088921]
 position = Vector2(1003, 690)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车1_12" unique_id=278412725]
 texture_filter = 1
-texture = ExtResource("120_ey67g")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(84, 0, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车1_12" unique_id=1346041019]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车1_13" type="StaticBody2D" parent="Objects" unique_id=191950540]
 position = Vector2(1018, 690)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车1_13" unique_id=437624111]
 texture_filter = 1
-texture = ExtResource("119_mgrvy")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(96, 0, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车1_13" unique_id=25092294]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车1_14" type="StaticBody2D" parent="Objects" unique_id=1972210972]
 position = Vector2(1033, 690)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车1_14" unique_id=908458727]
 texture_filter = 1
-texture = ExtResource("118_cmoy1")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(108, 0, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车1_14" unique_id=781057761]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车1_15" type="StaticBody2D" parent="Objects" unique_id=777546316]
 position = Vector2(1048, 690)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车1_15" unique_id=154624223]
 texture_filter = 1
-texture = ExtResource("118_cmoy1")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(120, 0, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车1_15" unique_id=1938757856]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="停车牌2" type="StaticBody2D" parent="Objects" unique_id=622904362]
 position = Vector2(1568, 1507.2)
@@ -6212,132 +6235,154 @@ position = Vector2(1567, 1533)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车2_0" unique_id=628273084]
 texture_filter = 1
-texture = ExtResource("116_o7bbu")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(132, 0, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车2_0" unique_id=1661675643]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车2_1" type="StaticBody2D" parent="Objects" unique_id=1705752611]
 position = Vector2(1582, 1533)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车2_1" unique_id=1305338535]
 texture_filter = 1
-texture = ExtResource("116_o7bbu")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(144, 0, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车2_1" unique_id=969214236]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车2_2" type="StaticBody2D" parent="Objects" unique_id=1096559653]
 position = Vector2(1597, 1533)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车2_2" unique_id=386043477]
 texture_filter = 1
-texture = ExtResource("116_o7bbu")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(156, 0, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车2_2" unique_id=1204320148]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车2_3" type="StaticBody2D" parent="Objects" unique_id=1488033741]
 position = Vector2(1612, 1533)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车2_3" unique_id=923526313]
 texture_filter = 1
-texture = ExtResource("121_mslh2")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(168, 0, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车2_3" unique_id=653741214]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车2_4" type="StaticBody2D" parent="Objects" unique_id=1741954782]
 position = Vector2(1627, 1533)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车2_4" unique_id=343242117]
 texture_filter = 1
-texture = ExtResource("121_mslh2")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(180, 0, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车2_4" unique_id=186121946]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车2_6" type="StaticBody2D" parent="Objects" unique_id=1008322889]
 position = Vector2(1657, 1533)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车2_6" unique_id=1900161765]
 texture_filter = 1
-texture = ExtResource("121_mslh2")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(0, 22, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车2_6" unique_id=954261077]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车2_9" type="StaticBody2D" parent="Objects" unique_id=1853765717]
 position = Vector2(1582, 1578)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车2_9" unique_id=1136960402]
 texture_filter = 1
-texture = ExtResource("118_cmoy1")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(12, 22, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车2_9" unique_id=1192100849]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车2_10" type="StaticBody2D" parent="Objects" unique_id=164764462]
 position = Vector2(1597, 1578)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车2_10" unique_id=1733441]
 texture_filter = 1
-texture = ExtResource("119_mgrvy")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(24, 22, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车2_10" unique_id=1296820342]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车2_11" type="StaticBody2D" parent="Objects" unique_id=1572353898]
 position = Vector2(1612, 1578)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车2_11" unique_id=271316113]
 texture_filter = 1
-texture = ExtResource("118_cmoy1")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(36, 22, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车2_11" unique_id=1647409239]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车2_13" type="StaticBody2D" parent="Objects" unique_id=761670930]
 position = Vector2(1642, 1578)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车2_13" unique_id=106436949]
 texture_filter = 1
-texture = ExtResource("118_cmoy1")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(48, 22, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车2_13" unique_id=859599759]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车2_14" type="StaticBody2D" parent="Objects" unique_id=1526996490]
 position = Vector2(1657, 1578)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车2_14" unique_id=1368473077]
 texture_filter = 1
-texture = ExtResource("120_ey67g")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(60, 22, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车2_14" unique_id=925398605]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="停车牌3" type="StaticBody2D" parent="Objects" unique_id=123806058]
 position = Vector2(824, 2851.2)
@@ -6353,180 +6398,210 @@ position = Vector2(838, 2877)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车3_1" unique_id=313044465]
 texture_filter = 1
-texture = ExtResource("121_mslh2")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(72, 22, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车3_1" unique_id=120022421]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车3_2" type="StaticBody2D" parent="Objects" unique_id=1329225980]
 position = Vector2(853, 2877)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车3_2" unique_id=1685854720]
 texture_filter = 1
-texture = ExtResource("122_8bem1")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(84, 22, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车3_2" unique_id=1079695604]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车3_3" type="StaticBody2D" parent="Objects" unique_id=1186516574]
 position = Vector2(868, 2877)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车3_3" unique_id=1705202840]
 texture_filter = 1
-texture = ExtResource("116_o7bbu")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(96, 22, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车3_3" unique_id=456143825]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车3_4" type="StaticBody2D" parent="Objects" unique_id=1847470249]
 position = Vector2(883, 2877)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车3_4" unique_id=1319570953]
 texture_filter = 1
-texture = ExtResource("122_8bem1")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(108, 22, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车3_4" unique_id=214230905]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车3_5" type="StaticBody2D" parent="Objects" unique_id=1091706643]
 position = Vector2(898, 2877)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车3_5" unique_id=1879649451]
 texture_filter = 1
-texture = ExtResource("117_ic2vq")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(120, 22, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车3_5" unique_id=2144600990]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车3_6" type="StaticBody2D" parent="Objects" unique_id=1923264458]
 position = Vector2(913, 2877)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车3_6" unique_id=2141722735]
 texture_filter = 1
-texture = ExtResource("122_8bem1")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(132, 22, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车3_6" unique_id=802937196]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车3_7" type="StaticBody2D" parent="Objects" unique_id=2053997275]
 position = Vector2(928, 2877)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车3_7" unique_id=1594179174]
 texture_filter = 1
-texture = ExtResource("116_o7bbu")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(144, 22, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车3_7" unique_id=2133813553]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车3_8" type="StaticBody2D" parent="Objects" unique_id=1128290360]
 position = Vector2(823, 2922)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车3_8" unique_id=1539251583]
 texture_filter = 1
-texture = ExtResource("123_6od3t")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(156, 22, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车3_8" unique_id=1639089232]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车3_9" type="StaticBody2D" parent="Objects" unique_id=1434285055]
 position = Vector2(838, 2922)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车3_9" unique_id=148775795]
 texture_filter = 1
-texture = ExtResource("119_mgrvy")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(168, 22, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车3_9" unique_id=1487860210]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车3_10" type="StaticBody2D" parent="Objects" unique_id=927329241]
 position = Vector2(853, 2922)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车3_10" unique_id=1788909298]
 texture_filter = 1
-texture = ExtResource("118_cmoy1")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(180, 22, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车3_10" unique_id=969233386]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车3_11" type="StaticBody2D" parent="Objects" unique_id=8935992]
 position = Vector2(868, 2922)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车3_11" unique_id=289207116]
 texture_filter = 1
-texture = ExtResource("123_6od3t")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(0, 44, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车3_11" unique_id=1098980850]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车3_12" type="StaticBody2D" parent="Objects" unique_id=1858841694]
 position = Vector2(883, 2922)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车3_12" unique_id=2047013839]
 texture_filter = 1
-texture = ExtResource("123_6od3t")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(12, 44, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车3_12" unique_id=1840214666]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车3_13" type="StaticBody2D" parent="Objects" unique_id=872335720]
 position = Vector2(898, 2922)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车3_13" unique_id=1428440091]
 texture_filter = 1
-texture = ExtResource("120_ey67g")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(24, 44, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车3_13" unique_id=1183334227]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车3_14" type="StaticBody2D" parent="Objects" unique_id=1373395657]
 position = Vector2(913, 2922)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车3_14" unique_id=1879095686]
 texture_filter = 1
-texture = ExtResource("119_mgrvy")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(36, 44, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车3_14" unique_id=1747686827]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车3_15" type="StaticBody2D" parent="Objects" unique_id=1037426444]
 position = Vector2(928, 2922)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车3_15" unique_id=246528296]
 texture_filter = 1
-texture = ExtResource("119_mgrvy")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(48, 44, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车3_15" unique_id=1107495257]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="停车牌4" type="StaticBody2D" parent="Objects" unique_id=712473631]
 position = Vector2(2360, 3283.2)
@@ -6542,132 +6617,154 @@ position = Vector2(2359, 3309)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车4_0" unique_id=1425384114]
 texture_filter = 1
-texture = ExtResource("117_ic2vq")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(60, 44, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车4_0" unique_id=1816018767]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车4_3" type="StaticBody2D" parent="Objects" unique_id=1372470524]
 position = Vector2(2404, 3309)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车4_3" unique_id=2075604276]
 texture_filter = 1
-texture = ExtResource("122_8bem1")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(72, 44, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车4_3" unique_id=1920374389]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车4_5" type="StaticBody2D" parent="Objects" unique_id=648642081]
 position = Vector2(2434, 3309)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车4_5" unique_id=1391992730]
 texture_filter = 1
-texture = ExtResource("122_8bem1")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(84, 44, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车4_5" unique_id=1235060263]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车4_6" type="StaticBody2D" parent="Objects" unique_id=1897181014]
 position = Vector2(2449, 3309)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车4_6" unique_id=1924009267]
 texture_filter = 1
-texture = ExtResource("116_o7bbu")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(96, 44, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车4_6" unique_id=1300705927]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车4_8" type="StaticBody2D" parent="Objects" unique_id=1296619568]
 position = Vector2(2359, 3354)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车4_8" unique_id=1494185524]
 texture_filter = 1
-texture = ExtResource("123_6od3t")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(108, 44, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车4_8" unique_id=937036182]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车4_9" type="StaticBody2D" parent="Objects" unique_id=450832550]
 position = Vector2(2374, 3354)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车4_9" unique_id=835052305]
 texture_filter = 1
-texture = ExtResource("119_mgrvy")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(120, 44, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车4_9" unique_id=1893807968]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车4_10" type="StaticBody2D" parent="Objects" unique_id=1173159760]
 position = Vector2(2389, 3354)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车4_10" unique_id=980603211]
 texture_filter = 1
-texture = ExtResource("119_mgrvy")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(132, 44, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车4_10" unique_id=398233157]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车4_11" type="StaticBody2D" parent="Objects" unique_id=909347428]
 position = Vector2(2404, 3354)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车4_11" unique_id=1693947090]
 texture_filter = 1
-texture = ExtResource("123_6od3t")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(144, 44, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车4_11" unique_id=1574392755]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车4_12" type="StaticBody2D" parent="Objects" unique_id=444751053]
 position = Vector2(2419, 3354)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车4_12" unique_id=982173754]
 texture_filter = 1
-texture = ExtResource("123_6od3t")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(156, 44, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车4_12" unique_id=758584636]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车4_13" type="StaticBody2D" parent="Objects" unique_id=930434655]
 position = Vector2(2434, 3354)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车4_13" unique_id=1308581818]
 texture_filter = 1
-texture = ExtResource("118_cmoy1")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(168, 44, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车4_13" unique_id=720457498]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车4_15" type="StaticBody2D" parent="Objects" unique_id=472971175]
 position = Vector2(2464, 3354)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车4_15" unique_id=1894064349]
 texture_filter = 1
-texture = ExtResource("118_cmoy1")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(180, 44, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车4_15" unique_id=89249468]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="停车牌5" type="StaticBody2D" parent="Objects" unique_id=1538972796]
 position = Vector2(656, 3859.2)
@@ -6683,144 +6780,168 @@ position = Vector2(655, 3885)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车5_0" unique_id=964080647]
 texture_filter = 1
-texture = ExtResource("117_ic2vq")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(0, 66, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车5_0" unique_id=2113867582]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车5_1" type="StaticBody2D" parent="Objects" unique_id=1803031929]
 position = Vector2(670, 3885)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车5_1" unique_id=1895843874]
 texture_filter = 1
-texture = ExtResource("116_o7bbu")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(12, 66, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车5_1" unique_id=393784450]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车5_2" type="StaticBody2D" parent="Objects" unique_id=1162671751]
 position = Vector2(685, 3885)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车5_2" unique_id=1491994530]
 texture_filter = 1
-texture = ExtResource("116_o7bbu")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(24, 66, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车5_2" unique_id=1541702644]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车5_3" type="StaticBody2D" parent="Objects" unique_id=1021748180]
 position = Vector2(700, 3885)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车5_3" unique_id=1950405559]
 texture_filter = 1
-texture = ExtResource("122_8bem1")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(36, 66, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车5_3" unique_id=1313825288]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车5_4" type="StaticBody2D" parent="Objects" unique_id=1898082835]
 position = Vector2(715, 3885)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车5_4" unique_id=1894643734]
 texture_filter = 1
-texture = ExtResource("117_ic2vq")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(48, 66, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车5_4" unique_id=1656121842]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车5_5" type="StaticBody2D" parent="Objects" unique_id=1255413779]
 position = Vector2(730, 3885)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车5_5" unique_id=1104869826]
 texture_filter = 1
-texture = ExtResource("121_mslh2")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(60, 66, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车5_5" unique_id=1880002404]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车5_6" type="StaticBody2D" parent="Objects" unique_id=1315376557]
 position = Vector2(745, 3885)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车5_6" unique_id=757680195]
 texture_filter = 1
-texture = ExtResource("116_o7bbu")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(72, 66, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车5_6" unique_id=585602739]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车5_9" type="StaticBody2D" parent="Objects" unique_id=883338532]
 position = Vector2(670, 3930)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车5_9" unique_id=1319563354]
 texture_filter = 1
-texture = ExtResource("123_6od3t")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(84, 66, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车5_9" unique_id=1367890076]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车5_12" type="StaticBody2D" parent="Objects" unique_id=768465046]
 position = Vector2(715, 3930)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车5_12" unique_id=1628249100]
 texture_filter = 1
-texture = ExtResource("123_6od3t")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(96, 66, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车5_12" unique_id=394300945]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车5_13" type="StaticBody2D" parent="Objects" unique_id=86202814]
 position = Vector2(730, 3930)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车5_13" unique_id=652990077]
 texture_filter = 1
-texture = ExtResource("118_cmoy1")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(108, 66, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车5_13" unique_id=247301201]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车5_14" type="StaticBody2D" parent="Objects" unique_id=2142198735]
 position = Vector2(745, 3930)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车5_14" unique_id=1563584693]
 texture_filter = 1
-texture = ExtResource("119_mgrvy")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(120, 66, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车5_14" unique_id=1275513471]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车5_15" type="StaticBody2D" parent="Objects" unique_id=478881681]
 position = Vector2(760, 3930)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车5_15" unique_id=667365454]
 texture_filter = 1
-texture = ExtResource("119_mgrvy")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(132, 66, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车5_15" unique_id=354421031]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="停车牌6" type="StaticBody2D" parent="Objects" unique_id=909539616]
 position = Vector2(2168, 4243.2)
@@ -6836,156 +6957,182 @@ position = Vector2(2167, 4269)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车6_0" unique_id=1041928926]
 texture_filter = 1
-texture = ExtResource("122_8bem1")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(144, 66, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车6_0" unique_id=293328560]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车6_1" type="StaticBody2D" parent="Objects" unique_id=665298411]
 position = Vector2(2182, 4269)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车6_1" unique_id=1744357664]
 texture_filter = 1
-texture = ExtResource("122_8bem1")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(156, 66, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车6_1" unique_id=1457213]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车6_2" type="StaticBody2D" parent="Objects" unique_id=266715903]
 position = Vector2(2197, 4269)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车6_2" unique_id=549882546]
 texture_filter = 1
-texture = ExtResource("117_ic2vq")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(168, 66, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车6_2" unique_id=1325524650]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车6_3" type="StaticBody2D" parent="Objects" unique_id=1349531267]
 position = Vector2(2212, 4269)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车6_3" unique_id=247619864]
 texture_filter = 1
-texture = ExtResource("117_ic2vq")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(180, 66, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车6_3" unique_id=2113614649]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车6_4" type="StaticBody2D" parent="Objects" unique_id=2095360395]
 position = Vector2(2227, 4269)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车6_4" unique_id=811210523]
 texture_filter = 1
-texture = ExtResource("121_mslh2")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(0, 88, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车6_4" unique_id=1438847961]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车6_6" type="StaticBody2D" parent="Objects" unique_id=15438412]
 position = Vector2(2257, 4269)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车6_6" unique_id=442643920]
 texture_filter = 1
-texture = ExtResource("116_o7bbu")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(12, 88, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车6_6" unique_id=834516776]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车6_7" type="StaticBody2D" parent="Objects" unique_id=199823834]
 position = Vector2(2272, 4269)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车6_7" unique_id=1328228068]
 texture_filter = 1
-texture = ExtResource("117_ic2vq")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(24, 88, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车6_7" unique_id=215497725]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车6_8" type="StaticBody2D" parent="Objects" unique_id=59298951]
 position = Vector2(2167, 4314)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车6_8" unique_id=188938470]
 texture_filter = 1
-texture = ExtResource("123_6od3t")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(36, 88, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车6_8" unique_id=753540904]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车6_9" type="StaticBody2D" parent="Objects" unique_id=1756972535]
 position = Vector2(2182, 4314)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车6_9" unique_id=352554297]
 texture_filter = 1
-texture = ExtResource("120_ey67g")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(48, 88, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车6_9" unique_id=425019047]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车6_10" type="StaticBody2D" parent="Objects" unique_id=1205823310]
 position = Vector2(2197, 4314)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车6_10" unique_id=427837708]
 texture_filter = 1
-texture = ExtResource("120_ey67g")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(60, 88, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车6_10" unique_id=382424554]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车6_11" type="StaticBody2D" parent="Objects" unique_id=30570261]
 position = Vector2(2212, 4314)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车6_11" unique_id=730318500]
 texture_filter = 1
-texture = ExtResource("118_cmoy1")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(72, 88, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车6_11" unique_id=13689159]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车6_12" type="StaticBody2D" parent="Objects" unique_id=236377769]
 position = Vector2(2227, 4314)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车6_12" unique_id=1519695773]
 texture_filter = 1
-texture = ExtResource("120_ey67g")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(84, 88, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车6_12" unique_id=40790921]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车6_14" type="StaticBody2D" parent="Objects" unique_id=1918775766]
 position = Vector2(2257, 4314)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车6_14" unique_id=1912136834]
 texture_filter = 1
-texture = ExtResource("119_mgrvy")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(96, 88, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车6_14" unique_id=613843071]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="停车牌7" type="StaticBody2D" parent="Objects" unique_id=2107166331]
 position = Vector2(200, 4315.2)
@@ -7001,144 +7148,168 @@ position = Vector2(214, 4341)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车7_1" unique_id=870779438]
 texture_filter = 1
-texture = ExtResource("116_o7bbu")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(108, 88, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车7_1" unique_id=91265033]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车7_3" type="StaticBody2D" parent="Objects" unique_id=136605304]
 position = Vector2(244, 4341)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车7_3" unique_id=1134565237]
 texture_filter = 1
-texture = ExtResource("116_o7bbu")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(120, 88, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车7_3" unique_id=1122953891]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车7_4" type="StaticBody2D" parent="Objects" unique_id=1406664485]
 position = Vector2(259, 4341)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车7_4" unique_id=202889222]
 texture_filter = 1
-texture = ExtResource("116_o7bbu")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(132, 88, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车7_4" unique_id=399298379]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车7_6" type="StaticBody2D" parent="Objects" unique_id=693739760]
 position = Vector2(289, 4341)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车7_6" unique_id=1760929348]
 texture_filter = 1
-texture = ExtResource("121_mslh2")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(144, 88, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车7_6" unique_id=1816768589]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车7_7" type="StaticBody2D" parent="Objects" unique_id=266885948]
 position = Vector2(304, 4341)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车7_7" unique_id=798558762]
 texture_filter = 1
-texture = ExtResource("122_8bem1")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(156, 88, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车7_7" unique_id=2109832693]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车7_8" type="StaticBody2D" parent="Objects" unique_id=1957655829]
 position = Vector2(199, 4386)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车7_8" unique_id=1922998208]
 texture_filter = 1
-texture = ExtResource("119_mgrvy")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(168, 88, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车7_8" unique_id=1515055906]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车7_9" type="StaticBody2D" parent="Objects" unique_id=1022329835]
 position = Vector2(214, 4386)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车7_9" unique_id=338429934]
 texture_filter = 1
-texture = ExtResource("123_6od3t")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(180, 88, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车7_9" unique_id=1080956892]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车7_10" type="StaticBody2D" parent="Objects" unique_id=1609814329]
 position = Vector2(229, 4386)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车7_10" unique_id=466114244]
 texture_filter = 1
-texture = ExtResource("119_mgrvy")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(0, 110, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车7_10" unique_id=1174741301]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车7_11" type="StaticBody2D" parent="Objects" unique_id=2036462272]
 position = Vector2(244, 4386)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车7_11" unique_id=1242359005]
 texture_filter = 1
-texture = ExtResource("118_cmoy1")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(12, 110, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车7_11" unique_id=1962621587]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车7_12" type="StaticBody2D" parent="Objects" unique_id=1371362953]
 position = Vector2(259, 4386)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车7_12" unique_id=2026411861]
 texture_filter = 1
-texture = ExtResource("120_ey67g")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(24, 110, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车7_12" unique_id=614830558]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车7_14" type="StaticBody2D" parent="Objects" unique_id=2083897777]
 position = Vector2(289, 4386)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车7_14" unique_id=463375763]
 texture_filter = 1
-texture = ExtResource("119_mgrvy")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(36, 110, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车7_14" unique_id=544369727]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车7_15" type="StaticBody2D" parent="Objects" unique_id=1551234176]
 position = Vector2(304, 4386)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车7_15" unique_id=1864037398]
 texture_filter = 1
-texture = ExtResource("119_mgrvy")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(48, 110, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车7_15" unique_id=285549150]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="停车牌8" type="StaticBody2D" parent="Objects" unique_id=2015505645]
 position = Vector2(368, 4819.2)
@@ -7154,156 +7325,182 @@ position = Vector2(367, 4845)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车8_0" unique_id=1717724791]
 texture_filter = 1
-texture = ExtResource("117_ic2vq")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(60, 110, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车8_0" unique_id=1314673212]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车8_2" type="StaticBody2D" parent="Objects" unique_id=593392338]
 position = Vector2(397, 4845)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车8_2" unique_id=1692652192]
 texture_filter = 1
-texture = ExtResource("117_ic2vq")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(72, 110, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车8_2" unique_id=320715194]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车8_3" type="StaticBody2D" parent="Objects" unique_id=727914204]
 position = Vector2(412, 4845)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车8_3" unique_id=266871661]
 texture_filter = 1
-texture = ExtResource("116_o7bbu")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(84, 110, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车8_3" unique_id=737911233]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车8_4" type="StaticBody2D" parent="Objects" unique_id=971499958]
 position = Vector2(427, 4845)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车8_4" unique_id=1102674470]
 texture_filter = 1
-texture = ExtResource("117_ic2vq")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(96, 110, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车8_4" unique_id=740477358]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车8_6" type="StaticBody2D" parent="Objects" unique_id=1287285994]
 position = Vector2(457, 4845)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车8_6" unique_id=1325618913]
 texture_filter = 1
-texture = ExtResource("116_o7bbu")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(108, 110, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车8_6" unique_id=506623626]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车8_7" type="StaticBody2D" parent="Objects" unique_id=211775828]
 position = Vector2(472, 4845)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车8_7" unique_id=350364448]
 texture_filter = 1
-texture = ExtResource("122_8bem1")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(120, 110, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车8_7" unique_id=1441335595]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车8_8" type="StaticBody2D" parent="Objects" unique_id=863582558]
 position = Vector2(367, 4890)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车8_8" unique_id=526236902]
 texture_filter = 1
-texture = ExtResource("118_cmoy1")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(132, 110, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车8_8" unique_id=2045194924]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车8_9" type="StaticBody2D" parent="Objects" unique_id=478458263]
 position = Vector2(382, 4890)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车8_9" unique_id=1519567324]
 texture_filter = 1
-texture = ExtResource("118_cmoy1")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(144, 110, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车8_9" unique_id=159034450]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车8_10" type="StaticBody2D" parent="Objects" unique_id=1894524881]
 position = Vector2(397, 4890)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车8_10" unique_id=1056234618]
 texture_filter = 1
-texture = ExtResource("123_6od3t")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(156, 110, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车8_10" unique_id=1144383149]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车8_12" type="StaticBody2D" parent="Objects" unique_id=1123248895]
 position = Vector2(427, 4890)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车8_12" unique_id=1782050565]
 texture_filter = 1
-texture = ExtResource("120_ey67g")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(168, 110, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车8_12" unique_id=1276233670]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车8_13" type="StaticBody2D" parent="Objects" unique_id=1276780230]
 position = Vector2(442, 4890)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车8_13" unique_id=1613567415]
 texture_filter = 1
-texture = ExtResource("119_mgrvy")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(180, 110, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车8_13" unique_id=1280535355]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车8_14" type="StaticBody2D" parent="Objects" unique_id=1594082646]
 position = Vector2(457, 4890)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车8_14" unique_id=552033782]
 texture_filter = 1
-texture = ExtResource("119_mgrvy")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(0, 132, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车8_14" unique_id=1193951703]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车8_15" type="StaticBody2D" parent="Objects" unique_id=300468270]
 position = Vector2(472, 4890)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车8_15" unique_id=733733844]
 texture_filter = 1
-texture = ExtResource("118_cmoy1")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(12, 132, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车8_15" unique_id=684227641]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="停车牌9" type="StaticBody2D" parent="Objects" unique_id=1350685123]
 position = Vector2(2120, 5155.2)
@@ -7319,168 +7516,196 @@ position = Vector2(2119, 5181)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车9_0" unique_id=1161650326]
 texture_filter = 1
-texture = ExtResource("116_o7bbu")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(24, 132, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车9_0" unique_id=988394416]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车9_1" type="StaticBody2D" parent="Objects" unique_id=333641421]
 position = Vector2(2134, 5181)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车9_1" unique_id=1842470545]
 texture_filter = 1
-texture = ExtResource("116_o7bbu")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(36, 132, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车9_1" unique_id=1456953122]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车9_3" type="StaticBody2D" parent="Objects" unique_id=1215267196]
 position = Vector2(2164, 5181)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车9_3" unique_id=63913225]
 texture_filter = 1
-texture = ExtResource("116_o7bbu")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(48, 132, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车9_3" unique_id=121861874]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车9_4" type="StaticBody2D" parent="Objects" unique_id=1732641896]
 position = Vector2(2179, 5181)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车9_4" unique_id=621320518]
 texture_filter = 1
-texture = ExtResource("122_8bem1")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(60, 132, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车9_4" unique_id=843827295]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车9_6" type="StaticBody2D" parent="Objects" unique_id=1661794185]
 position = Vector2(2209, 5181)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车9_6" unique_id=781635858]
 texture_filter = 1
-texture = ExtResource("121_mslh2")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(72, 132, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车9_6" unique_id=1432249058]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车9_7" type="StaticBody2D" parent="Objects" unique_id=503655581]
 position = Vector2(2224, 5181)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车9_7" unique_id=2140806900]
 texture_filter = 1
-texture = ExtResource("116_o7bbu")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(84, 132, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车9_7" unique_id=1187117998]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车9_8" type="StaticBody2D" parent="Objects" unique_id=1959991132]
 position = Vector2(2119, 5226)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车9_8" unique_id=1299480996]
 texture_filter = 1
-texture = ExtResource("118_cmoy1")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(96, 132, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车9_8" unique_id=1595245648]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车9_9" type="StaticBody2D" parent="Objects" unique_id=1210367497]
 position = Vector2(2134, 5226)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车9_9" unique_id=2071382717]
 texture_filter = 1
-texture = ExtResource("119_mgrvy")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(108, 132, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车9_9" unique_id=759865729]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车9_10" type="StaticBody2D" parent="Objects" unique_id=1839880672]
 position = Vector2(2149, 5226)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车9_10" unique_id=1853632820]
 texture_filter = 1
-texture = ExtResource("123_6od3t")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(120, 132, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车9_10" unique_id=1112281454]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车9_11" type="StaticBody2D" parent="Objects" unique_id=1619110739]
 position = Vector2(2164, 5226)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车9_11" unique_id=11768924]
 texture_filter = 1
-texture = ExtResource("119_mgrvy")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(132, 132, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车9_11" unique_id=1490792796]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车9_12" type="StaticBody2D" parent="Objects" unique_id=1946149875]
 position = Vector2(2179, 5226)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车9_12" unique_id=2045921656]
 texture_filter = 1
-texture = ExtResource("120_ey67g")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(144, 132, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车9_12" unique_id=1064944896]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车9_13" type="StaticBody2D" parent="Objects" unique_id=1864178024]
 position = Vector2(2194, 5226)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车9_13" unique_id=1438801005]
 texture_filter = 1
-texture = ExtResource("119_mgrvy")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(156, 132, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车9_13" unique_id=1527619701]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车9_14" type="StaticBody2D" parent="Objects" unique_id=512014712]
 position = Vector2(2209, 5226)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车9_14" unique_id=439366211]
 texture_filter = 1
-texture = ExtResource("120_ey67g")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(168, 132, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车9_14" unique_id=442017473]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="车9_15" type="StaticBody2D" parent="Objects" unique_id=481880828]
 position = Vector2(2224, 5226)
 
 [node name="Sprite" type="Sprite2D" parent="Objects/车9_15" unique_id=79944041]
 texture_filter = 1
-texture = ExtResource("123_6od3t")
+texture = ExtResource("900_carsheet")
+region_enabled = true
+region_rect = Rect2(180, 132, 12, 22)
 centered = false
-offset = Vector2(0, -16)
+offset = Vector2(-1.5, -22)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/车9_15" unique_id=1598856855]
-polygon = PackedVector2Array(0, -15.2, 9, -15.2, 9, 0, 0, 0)
+polygon = PackedVector2Array(-1.5, -20.9, 10.5, -20.9, 10.5, 0, -1.5, 0)
 
 [node name="垃圾桶1" type="StaticBody2D" parent="Objects" unique_id=892085146]
 position = Vector2(992.1621, 3951.2)
