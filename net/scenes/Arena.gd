@@ -31,6 +31,10 @@ const NPC_SPAWNS: Array = [
 
 const CAMPUS_SCALE: float = 2.0
 const TS: float = 8.0
+## B1 组队板的附加功能三选一：房主选哪个就只填哪个，面板不会同时堆两个输入框。
+const NOTE_MODE_NONE: int = 0
+const NOTE_MODE_OOPZ: int = 1
+const NOTE_MODE_PIIK: int = 2
 ## 出生点（格）：教学区之间的开阔路口。
 ## 这个点是用 Python 遍历 world.json 挑出来的——本点和周围 8 个散开位置
 ## 都不在任何建筑轮廓或水面里（北门那个点周围有楼，玩家出生就会被楼压住看不见）。
@@ -2104,6 +2108,11 @@ var _oopz_edit: LineEdit
 var _piik_box: VBoxContainer
 var _piik_edit: LineEdit
 var _piik_help: PanelContainer  # 「怎么用 / 连不上怎么办」独立帮助面板
+## 组队板附加功能只选一个：0=都不填 / 1=OOPZ 语音 / 2=Piik 屏幕共享
+var _note_mode: int = NOTE_MODE_NONE
+var _note_mode_label: Label
+var _note_mode_row: HBoxContainer
+var _note_mode_btns: Array[Button] = []
 var _note_view: PanelContainer
 var _note_view_title: Label
 var _note_view_body: Label
@@ -3294,11 +3303,20 @@ func _try_auto_room() -> void:
 						room.position + Vector2(float(raw[0]), float(raw[1])) * TS)
 					print("[dbg] 房内落点=", (a as Node2D).position)
 		# 调试：XGD_OOPZ_DEMO=1 自己是队长、=2 是别人的队
-		# （验语音 / 屏幕共享按钮与编辑框；演示 note 两种 @ 标记都带上）
+		# （演示 note 按 XGD_NOTE_MODE 只带一个标签，跟房主三选一后的真实数据一致；
+		#  要复现旧版本双标签共存的数据，加 XGD_DEMO_DUAL=1）
 		if OS.has_environment("XGD_OOPZ_DEMO"):
 			var demo := OS.get_environment("XGD_OOPZ_DEMO")
-			var demo_note := OOPZ_TAG + "https://oopz.cn/i/demo01\n" \
-				+ PIIK_TAG + "4821\n来打排位，缺 2 人，开麦，也能看我屏幕"
+			var demo_mode := OS.get_environment("XGD_NOTE_MODE").to_int() \
+				if OS.has_environment("XGD_NOTE_MODE") else NOTE_MODE_PIIK
+			var demo_tag := ""
+			if OS.has_environment("XGD_DEMO_DUAL"):
+				demo_tag = OOPZ_TAG + "https://oopz.cn/i/demo01\n" + PIIK_TAG + "4821\n"
+			elif demo_mode == NOTE_MODE_OOPZ:
+				demo_tag = OOPZ_TAG + "https://oopz.cn/i/demo01\n"
+			elif demo_mode == NOTE_MODE_PIIK:
+				demo_tag = PIIK_TAG + "4821\n"
+			var demo_note := demo_tag + "来打排位，缺 2 人，开麦，也能看我屏幕"
 			if demo == "2":
 				Net.room_claims["%d:0" % BASEMENT_FLOOR] = {
 					"name": "别人的队", "uid": "demo-other", "note": demo_note}
@@ -4562,7 +4580,6 @@ const OOPZ_TAG := "@oopz:"
 const PIIK_TAG := "@piik:"
 ## 房间号只在开房的同一个 Piik 站点有效；以后换成自己部署的站点只改这一处。
 const PIIK_SITE := "https://demo.piik.tv"
-const PIIK_DOWNLOAD := "https://piik.tv/#download"
 const PIIK_FAQ := "https://piik.tv/#faq"
 
 ## 把公告拆成 [语音链接, 正文]。两种 @ 标记行都不进正文（展示时剥掉）。
@@ -4777,10 +4794,6 @@ func _on_piik_start_pressed() -> void:
 	_open_piik_link(PIIK_SITE)
 
 
-func _on_piik_download_pressed() -> void:
-	_open_piik_link(PIIK_DOWNLOAD)
-
-
 func _on_piik_faq_pressed() -> void:
 	_open_piik_link(PIIK_FAQ)
 
@@ -4860,9 +4873,10 @@ func _clear_door_plates() -> void:
 ## 这样走廊上不会挂满长文字，但想看的人一按就能看到。
 
 func _build_note_panel() -> PanelContainer:
+	_note_mode_btns.clear()      # 换层整份重建 UI 时别把旧按钮的引用留下来
 	var pc := PanelContainer.new()
 	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.07, 0.09, 0.14, 0.97)
+	sb.bg_color = Color(0.07, 0.09, 0.14, 1.0)
 	sb.border_color = Color(0.95, 0.78, 0.38, 0.95)
 	sb.set_border_width_all(2)
 	sb.content_margin_left = 16
@@ -4884,6 +4898,33 @@ func _build_note_panel() -> PanelContainer:
 	_note_hint.add_theme_font_size_override("font_size", GameTheme.fs(12))
 	_note_hint.add_theme_color_override("font_color", Color(0.62, 0.70, 0.80))
 	vb.add_child(_note_hint)
+
+	# 组队板附加功能：三选一，选中哪个才显示哪个输入框。宿舍公告整行隐藏，
+	# 免得两个输入框 + 一堆说明把手机竖屏撑爆。
+	_note_mode_label = Label.new()
+	_note_mode_label.text = "组队附加 · 选一个就行（不选也行）"
+	_note_mode_label.add_theme_font_size_override("font_size", GameTheme.fs(12))
+	_note_mode_label.add_theme_color_override("font_color", Color(0.62, 0.70, 0.80))
+	_note_mode_label.visible = false
+	vb.add_child(_note_mode_label)
+	_note_mode_row = HBoxContainer.new()
+	_note_mode_row.add_theme_constant_override("separation", 8)
+	_note_mode_row.visible = false
+	vb.add_child(_note_mode_row)
+	for cfg: Array in [
+		["都不填", NOTE_MODE_NONE],
+		["OOPZ 语音", NOTE_MODE_OOPZ],
+		["Piik 屏幕", NOTE_MODE_PIIK],
+	]:
+		var mb := Button.new()
+		mb.text = String(cfg[0])
+		mb.custom_minimum_size = Vector2(0, 42)
+		mb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		mb.focus_mode = Control.FOCUS_NONE
+		mb.add_theme_font_size_override("font_size", GameTheme.fs(13))
+		mb.pressed.connect(_set_note_mode.bind(int(cfg[1])))
+		_note_mode_row.add_child(mb)
+		_note_mode_btns.append(mb)
 
 	# OOPZ 语音链接（只有 B1 组队板显示）。OOPZ 没开放平台，做不到游戏内直接连麦，
 	# 但把频道分享链接存在板子上，队员坐下就能一键唤起客户端进同一个频道。
@@ -4945,7 +4986,6 @@ func _build_note_panel() -> PanelContainer:
 	_piik_box.add_child(prow)
 	for cfg: Array in [
 		["去 Piik 开播", _on_piik_start_pressed],
-		["下载 App", _on_piik_download_pressed],
 		["怎么用 / 排障", _toggle_piik_help],
 	]:
 		var pb := Button.new()
@@ -5018,6 +5058,76 @@ func _leave_my_room() -> void:
 		_notice("已撕下 %d 层 %d 号房的名牌，下次上线从校园出生" % [current_floor, idx + 1])
 
 
+## 组队板附加功能三选一：切换后只留对应的那一格，另一个输入框连同说明一起收起来。
+func _set_note_mode(m: int) -> void:
+	_note_mode = clampi(m, NOTE_MODE_NONE, NOTE_MODE_PIIK)
+	var is_b1 := current_floor == BASEMENT_FLOOR
+	if _note_mode_label != null:
+		_note_mode_label.visible = is_b1
+	if _note_mode_row != null:
+		_note_mode_row.visible = is_b1
+	if _oopz_box != null:
+		_oopz_box.visible = is_b1 and _note_mode == NOTE_MODE_OOPZ
+	if _piik_box != null:
+		_piik_box.visible = is_b1 and _note_mode == NOTE_MODE_PIIK
+	if _note_mode != NOTE_MODE_PIIK:
+		_close_piik_help()
+	# 选中态用各自的强调色，没选中的一律深底灰边，一眼能看出当前填的是哪一项
+	for i in _note_mode_btns.size():
+		var b: Button = _note_mode_btns[i]
+		var on := i == _note_mode
+		var bg := Color(0.08, 0.10, 0.15, 0.96)
+		var bd := Color(0.34, 0.40, 0.48, 0.95)
+		var fg := Color(0.62, 0.68, 0.76)
+		if on:
+			match _note_mode:
+				NOTE_MODE_OOPZ:
+					bg = Color(0.10, 0.22, 0.16, 0.97)
+					bd = Color(0.42, 0.90, 0.66, 0.95)
+					fg = Color("#d8ffe8")
+				NOTE_MODE_PIIK:
+					bg = Color(0.10, 0.18, 0.27, 0.97)
+					bd = Color(0.48, 0.76, 0.98, 0.95)
+					fg = Color("#dcefff")
+				_:
+					bg = Color(0.20, 0.18, 0.12, 0.97)
+					bd = Color(0.95, 0.78, 0.38, 0.95)
+					fg = Color("#ffe9a8")
+		for st in ["normal", "hover", "pressed", "focus"]:
+			var sb := StyleBoxFlat.new()
+			sb.bg_color = bg if st == "normal" else bg.lightened(0.06)
+			sb.border_color = bd
+			sb.set_border_width_all(2)
+			sb.content_margin_left = 8
+			sb.content_margin_right = 8
+			sb.content_margin_top = 6
+			sb.content_margin_bottom = 6
+			b.add_theme_stylebox_override(st, sb)
+		b.add_theme_color_override("font_color", fg)
+	if _note_panel != null and _note_panel.visible:
+		_center_panel.call_deferred(_note_panel)
+
+
+## 打开已有公告时反推模式：旧版数据可能两个标签都在，优先显示 Piik；
+## 另一格文本仍留在内存里，切回去就能看到，但保存只写选中的那个。
+func _note_mode_of(note: String) -> int:
+	if not _note_piik(note).is_empty():
+		return NOTE_MODE_PIIK
+	if not String(_note_split(note)[0]).is_empty():
+		return NOTE_MODE_OOPZ
+	return NOTE_MODE_NONE
+
+
+## note 里只拼当前选中的那一个标签行；@oopz: 保持首行，兼容旧版解析。
+func _note_compose(body: String, link: String, share: String) -> String:
+	var txt := body.strip_edges()
+	if not share.is_empty():
+		txt = PIIK_TAG + share + ("\n" + txt if not txt.is_empty() else "")
+	if not link.is_empty():
+		txt = OOPZ_TAG + link + ("\n" + txt if not txt.is_empty() else "")
+	return txt
+
+
 func _update_note_count() -> void:
 	if _note_count != null:
 		_note_count.text = "%d / 160 字" % _note_edit.text.length()
@@ -5027,7 +5137,7 @@ func _update_note_count() -> void:
 func _build_note_view() -> PanelContainer:
 	var pc := PanelContainer.new()
 	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.06, 0.08, 0.13, 0.97)
+	sb.bg_color = Color(0.06, 0.08, 0.13, 1.0)
 	sb.border_color = Color(0.55, 0.66, 0.80, 0.95)
 	sb.set_border_width_all(2)
 	sb.content_margin_left = 18
@@ -5115,7 +5225,7 @@ func _build_note_view() -> PanelContainer:
 func _build_piik_help() -> PanelContainer:
 	var pc := PanelContainer.new()
 	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.06, 0.09, 0.15, 0.98)
+	sb.bg_color = Color(0.06, 0.09, 0.15, 1.0)
 	sb.border_color = Color(0.48, 0.76, 0.98, 0.95)
 	sb.set_border_width_all(2)
 	sb.content_margin_left = 16
@@ -5235,13 +5345,15 @@ func _open_note_board(idx: int) -> void:
 		("编写 %d 号房的门口公告" % (idx + 1))
 	var mine_raw := String(cur.get("note", ""))
 	var mine := _note_split(mine_raw)
-	_oopz_box.visible = is_b1
-	_piik_box.visible = is_b1
 	_oopz_edit.text = _safe_voice_link(String(mine[0])) if is_b1 else ""
 	_piik_edit.text = _safe_share_target(_note_piik(mine_raw)) if is_b1 else ""
 	_note_edit.text = String(mine[1])
 	_update_note_count()
 	_note_panel.visible = true
+	_set_note_mode(_note_mode_of(mine_raw) if is_b1 else NOTE_MODE_NONE)
+	# 截图/验收用：XGD_NOTE_MODE=0|1|2 强制三态，正常玩不受影响
+	if is_b1 and OS.has_environment("XGD_NOTE_MODE"):
+		_set_note_mode(OS.get_environment("XGD_NOTE_MODE").to_int())
 	_center_panel(_note_panel)
 	_note_edit.grab_focus()
 	# 手机点进来就弹软键盘，不用再点一下输入框
@@ -5290,17 +5402,18 @@ func _save_note_board() -> void:
 		return
 	var idx := _note_room_idx
 	var body := _note_edit.text.strip_edges()
-	# 两个链接都存在公告开头（@oopz: 首行、@piik: 次行）—— 服务端只认 note
-	# 一个字符串，这样加功能不用改协议；老客户端会把 @piik: 当一行正文显示，
-	# 但不会把链接弄丢。两条都选填，顺序固定，@oopz: 保持首行兼容旧版解析。
+	# 服务端只认 note 一个字符串，所以邀请靠 @ 标记行存在开头，不用改协议。
+	# 房主在面板上选了哪个就只写哪个：切到「都不填」或选语音时，不会把另一个
+	# 标签悄悄带进去。@oopz: 保持首行，兼容旧版解析。
 	var is_b1 := current_floor == BASEMENT_FLOOR
-	var link := _safe_voice_link(_oopz_edit.text) if is_b1 else ""
-	var share := _safe_share_target(_piik_edit.text) if is_b1 else ""
-	var txt := body
-	if not share.is_empty():
-		txt = PIIK_TAG + share + ("\n" + txt if not txt.is_empty() else "")
-	if not link.is_empty():
-		txt = OOPZ_TAG + link + ("\n" + txt if not txt.is_empty() else "")
+	var link := ""
+	var share := ""
+	if is_b1:
+		if _note_mode == NOTE_MODE_OOPZ:
+			link = _safe_voice_link(_oopz_edit.text)
+		elif _note_mode == NOTE_MODE_PIIK:
+			share = _safe_share_target(_piik_edit.text)
+	var txt := _note_compose(body, link, share)
 	_close_note_board()
 	if is_b1:
 		# 组队板的招募走 team note 通道：不写宿舍公告、不写 my_room.cfg
@@ -5314,19 +5427,18 @@ func _save_note_board() -> void:
 		if txt.strip_edges().is_empty():
 			_notice("组队招募已撤下")
 			return
-		# 公告整串上限 160 字（含两个 @ 标记行），链接太长正文会被截；
-		# 4 位房间号只有 10 个字符，超长时引导改用它。
+		# 公告整串上限 160 字（含 @ 标记行），链接太长正文会被截；
+		# Piik 的 4 位房间号只有 10 个字符，超长时引导改用它。
 		var tail := ""
 		if txt.length() > 150:
-			tail = " · 公告超 160 字会被截断，建议改填 4 位房间号"
+			tail = " · 公告超 160 字会被截断" + \
+				("，建议改填 4 位房间号" if _note_mode == NOTE_MODE_PIIK else "，请精简正文")
 		elif not link.is_empty() and not _looks_oopz_invite(link):
 			tail = " · 语音链接不像频道邀请，队员可能进不去"
-		if not share.is_empty() and not link.is_empty():
-			_notice("组队招募已发布（语音 + 屏幕共享）· 坐下点右下角按钮" + tail)
-		elif not share.is_empty():
-			_notice("组队招募已发布（含屏幕共享）· 队员看板或坐下点按钮" + tail)
+		if not share.is_empty():
+			_notice("组队招募已发布（Piik 屏幕共享）· 队员看板或坐下按 B" + tail)
 		elif not link.is_empty():
-			_notice("组队招募已发布（含语音频道）· 队员坐下点按钮 / 按 V" + tail)
+			_notice("组队招募已发布（OOPZ 语音）· 队员看板或坐下按 V" + tail)
 		else:
 			_notice("组队招募已发布 · B1 的同学都能看到")
 	else:
@@ -5337,6 +5449,7 @@ func _clear_note_board() -> void:
 	_note_edit.text = ""
 	_oopz_edit.text = ""
 	_piik_edit.text = ""
+	_set_note_mode(NOTE_MODE_NONE)
 	_save_note_board()
 
 

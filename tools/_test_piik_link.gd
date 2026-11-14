@@ -78,6 +78,28 @@ func _run_tests() -> void:
 	_check(short_note.length() <= 160, "语音 + 房间号 + 短正文在 160 字内")
 	_check(short_note.left(160) == short_note, "不会被 _clean_note 截掉尾巴")
 
+	# 组队板三选一：0=都不填 / 1=OOPZ 语音 / 2=Piik 屏幕共享
+	_check(a._note_mode_of(old_note) == 1, "旧公告只有语音 → 打开时停在 OOPZ")
+	_check(a._note_mode_of("@piik:4821\n来打排位") == 2, "只有 Piik → 停在 Piik")
+	_check(a._note_mode_of("纯文字招募") == 0, "没有标签 → 停在都不填")
+	_check(a._note_mode_of(new_note) == 2, "旧版双标签数据 → 优先 Piik，另一格文本仍保留")
+	_check(a._note_compose("来打排位", "https://oopz.cn/i/demo01", "") ==
+		"@oopz:https://oopz.cn/i/demo01\n来打排位", "选 OOPZ 时只写语音标签")
+	_check(a._note_compose("来打排位", "", "4821") == "@piik:4821\n来打排位",
+		"选 Piik 时只写屏幕标签")
+	_check(a._note_compose("来打排位", "", "") == "来打排位", "都不填 → 纯正文")
+	_check(a._note_compose("", "", "4821") == "@piik:4821", "空正文时不留多余空行")
+	var switched: String = String(a._note_compose(String(a._note_split(new_note)[1]), "", "4821"))
+	_check(not switched.contains("@oopz:"), "从语音切到 Piik 后保存不带旧标签")
+	_check(switched.length() <= 160, "单模式公告更省字数")
+	var rt_oopz: String = String(a._note_compose("来打排位", "https://oopz.cn/i/demo01", ""))
+	var rt_piik: String = String(a._note_compose("来打排位", "", "4821"))
+	var rt_none: String = String(a._note_compose("来打排位", "", ""))
+	_check(a._note_mode_of(rt_oopz) == 1, "保存后重新打开：仍停在 OOPZ")
+	_check(a._note_mode_of(rt_piik) == 2, "保存后重新打开：仍停在 Piik")
+	_check(a._note_mode_of(rt_none) == 0, "保存后重新打开：仍是都不填")
+	_check(String(a._note_split(rt_piik)[1]) == "来打排位", "Piik 标记行不会漏进正文")
+
 	a.free()
 	print("Piik 联动自检：%d 通过 / %d 失败" % [_ok, _fail])
 	quit(1 if _fail > 0 else 0)
