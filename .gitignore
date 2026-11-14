@@ -82,3 +82,8 @@ assets/cats/oreo_cat_sheet.png.import
 # 集成进作品分发，所以 assets/room_books.png 照常入库。
 assets/room_seats.png
 assets/room_seats.png.import
+
+# ── 背景音乐（第三方音乐，不做二次分发）─────────────────────
+# 四条曲子由 tools/import_music.py 从 references/*.mp3 转码到 assets/music/，
+# 只留本机、不进仓库；clone 后缺文件时 Music.gd 自动静音，游戏照常能跑。
+assets/music/

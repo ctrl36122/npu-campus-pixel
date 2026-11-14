@@ -30,6 +30,7 @@ GameState="*res://net/scenes/GameState.tscn"
 SessionFlow="*res://net/autoload/SessionFlow.gd"
 _mcp_game_helper="*res://addons/godot_ai/runtime/game_helper.gd"
 DayNight="*res://net/autoload/DayNight.gd"
+Music="*res://net/autoload/Music.gd"
 
 [display]
 
