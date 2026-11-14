@@ -73,3 +73,12 @@ road_before_after.png.import
 # 运行时换色走 cat_tint.gdshader，不改动 PNG 一个字节。
 assets/cats/oreo_cat_sheet.png
 assets/cats/oreo_cat_sheet.png.import
+
+# ── 第三方家具素材（Couch & Armchairs）────────────────────
+# 下载包里没有 License.txt，来源无法确认，按「不二次分发」处理：
+# 只留本机，clone 后缺图时 RoomProp 自动回退程序绘制的沙发 / 扶手椅
+# （见 net/scripts/room_prop.gd 的 seats_tex()）。
+# 同目录下的书籍素材（Animated Old Book）自带 EULA，允许修改尺寸后
+# 集成进作品分发，所以 assets/room_books.png 照常入库。
+assets/room_seats.png
+assets/room_seats.png.import

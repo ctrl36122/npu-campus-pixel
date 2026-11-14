@@ -237,11 +237,16 @@ def build() -> dict:
     # ── 南侧入口大厅：左右两块浅色地毯，中间给门留通道 ───────────────────
     for lx in (LOUNGE_L_X, LOUNGE_R_X):
         rugs.append(rect(lx, LOUNGE_Y, LOUNGE_W, LOUNGE_H))
-    # 左侧讨论角
+    # 左侧讨论角：素材三人沙发 + 茶几上摊开一本旧书 + 一把灰蓝扶手椅
     props += [
-        rect(8.0, 105.0, 8.0, 2.6, k="sofa", solid=True),
+        rect(8.0, 105.0, 8.0, 2.6, k="sofa_sprite", solid=True),
         rect(10.6, 110.0, 5.0, 2.2, k="table", solid=True,
-             items=desk_items(100, 5.0, 2.2)),
+             items=[
+                 # 摊开的书是外部素材，pw/ph 给 24x13.5 是为了塞进 40x17.6 的茶几面
+                 {"k": "bookopen", "px": 4.0, "py": -6.0, "pw": 24.0, "ph": 13.5, "t": 0},
+                 {"k": "cup", "px": 30.0, "py": -2.0, "pw": 6.0, "ph": 8.0, "t": 1},
+             ]),
+        rect(17.2, 108.6, 2.75, 3.25, k="armchair", v=0, solid=True),
         rect(8.6, 113.4, 2.0, 1.6, k="cushion"),
         rect(14.0, 113.4, 2.0, 1.6, k="cushion"),
         rect(20.0, 104.0, 7.0, 1.2, k="board"),
@@ -250,11 +255,16 @@ def build() -> dict:
         rect(31.0, 104.0, 1.6, 1.6, k="plant"),
         rect(31.0, 113.0, 1.6, 1.6, k="plant"),
     ]
-    # 右侧讨论角（镜像，用书架代替贩卖机，两边不完全一样）
+    # 右侧讨论角（镜像，用书架代替贩卖机，两边不完全一样；
+    # 椅子换成砖红那一对，桌上换一本绿皮书）
     props += [
-        rect(98.0, 105.0, 8.0, 2.6, k="sofa", solid=True),
+        rect(98.0, 105.0, 8.0, 2.6, k="sofa_sprite", solid=True),
         rect(100.6, 110.0, 5.0, 2.2, k="table", solid=True,
-             items=desk_items(101, 5.0, 2.2)),
+             items=[
+                 {"k": "bookopen", "px": 4.0, "py": -6.0, "pw": 24.0, "ph": 13.5, "t": 1},
+                 {"k": "cup", "px": 30.0, "py": -2.0, "pw": 6.0, "ph": 8.0, "t": 2},
+             ]),
+        rect(106.8, 108.6, 2.75, 3.25, k="armchair", v=2, solid=True),
         rect(98.6, 113.4, 2.0, 1.6, k="cushion"),
         rect(104.0, 113.4, 2.0, 1.6, k="cushion"),
         rect(90.0, 104.0, 7.0, 1.2, k="board"),
@@ -378,7 +388,7 @@ def validate(d: dict) -> list[str]:
         if sig in seen_desks:
             problems.append("两张桌的桌面摆设完全一样 @%s" % ((p["x"], p["y"]),))
         seen_desks.add(sig)
-        if not any(it["k"] in ("book", "notebook") for it in its):
+        if not any(it["k"] in ("book", "notebook", "bookopen") for it in its):
             problems.append("桌面没放书 @%s" % ((p["x"], p["y"]),))
         for it in its:
             desk_kinds.add(it["k"])

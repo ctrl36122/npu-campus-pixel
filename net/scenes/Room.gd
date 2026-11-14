@@ -238,6 +238,9 @@ func _add_prop(kind: String, r: Dictionary, z: int = 0) -> void:
 	# 否则独立 prop 的底边 y 更小，会被桌面盖住；抬 z_index 又会压住玩家）
 	if r.has("items"):
 		n.set("items", r["items"])
+	# 同类道具换款式（沙发/扶手椅选哪一张）—— 数据里写 "v"，没写就是 0
+	if r.has("v"):
+		n.set("variant", int(r["v"]))
 	n.call("setup", kind, Rect2(float(r["x"]), float(r["y"]), float(r["w"]), float(r["h"])), z)
 
 

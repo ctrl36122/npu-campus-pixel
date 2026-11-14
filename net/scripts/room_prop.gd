@@ -9,6 +9,39 @@ extends Node2D
 
 const TS := 8.0
 
+# ── 外部素材贴图 ──────────────────────────────────────────────────────────
+# 图书馆休息区用了两套第三方素材缩出来的贴图：摊开的旧书、沙发与扶手椅。
+# 这两张图**可能在仓库里不存在**（沙发包没有授权文件，按 .gitignore 处理），
+# 所以用运行时 load 而不是 preload —— preload 在文件缺失时会让整个脚本编译失败，
+# 那样整间房都进不去。缺图时各自回退到原来那套程序绘制。
+const BOOK_W := 32
+const BOOK_H := 18
+const SOFA_W := 64
+const SOFA_H := 54
+const CHAIR_W := 22
+const CHAIR_H := 26
+
+static var _books_tex: Texture2D = null
+static var _seats_tex: Texture2D = null
+static var _books_probed := false
+static var _seats_probed := false
+
+
+static func books_tex() -> Texture2D:
+	if not _books_probed:
+		_books_probed = true
+		if ResourceLoader.exists("res://assets/room_books.png"):
+			_books_tex = load("res://assets/room_books.png")
+	return _books_tex
+
+
+static func seats_tex() -> Texture2D:
+	if not _seats_probed:
+		_seats_probed = true
+		if ResourceLoader.exists("res://assets/room_seats.png"):
+			_seats_tex = load("res://assets/room_seats.png")
+	return _seats_tex
+
 # 各类家具的挤出高度（像素，局部 8px/格空间）
 const RISE_WALL := 13.0
 const RISE_TABLE := 8.0
@@ -20,6 +53,9 @@ var kind: String = "table"
 var cell := Rect2()
 ## 亮房（图书馆自习空间）：墙/桌面换成浅色，宿舍与活动室保持原样。
 var bright := false
+## 同类道具换款式用的下标：沙发/扶手椅选哪一张、摊开的书选哪一色。
+## 由房间数据里的 "v" 字段带进来，默认 0。
+var variant: int = 0
 ## 桌面小物（书 / 水杯 / 笔记本 / 电脑 / 笔筒 / 台灯）。由数据挂在桌子 prop 上，
 ## 跟桌面一起画；只有图书馆的自习桌带这个字段，其它房间的桌子保持空数组。
 var items: Array = []
@@ -62,6 +98,10 @@ func _draw() -> void:
 			_chair_back(o, w, h)
 		"sofa":
 			_sofa(o, w, h)
+		"sofa_sprite":
+			_sofa_sprite(o, w, h)
+		"armchair":
+			_armchair(o, w, h)
 		"bed":
 			_bed(o, w, h)
 		"plant":
@@ -221,6 +261,8 @@ func _desktop_item(it: Dictionary, o: Vector2) -> void:
 	match String(it.get("k", "book")):
 		"book":
 			_d_book(r, c, t)
+		"bookopen":
+			_d_bookopen(r, t)
 		"cup":
 			_d_cup(r, c)
 		"laptop":
@@ -243,6 +285,18 @@ func _d_book(r: Rect2, c: Color, t: int) -> void:
 		draw_rect(Rect2(r.position.x + off, yy, r.size.x - off, 2.3), shades[i])
 		draw_rect(Rect2(r.position.x + off + 1.0, yy + 1.4, r.size.x - off - 2.0, 0.7), Color("f3ecdc"))
 		draw_rect(Rect2(r.position.x + off, yy, r.size.x - off, 0.6), Color(1, 1, 1, 0.25))
+
+
+## 摊开的旧书（外部素材，四色可选）。桌面小物里比程序画的半开书更像
+## 「有人正在读这一页」，休息区的茶几上各放一本。
+## 素材缺失时退回画一本摊开的笔记本 —— 尺寸对得上，不会留下空位。
+func _d_bookopen(r: Rect2, t: int) -> void:
+	var tex := books_tex()
+	if tex == null:
+		_d_notebook(r, Color("b8544a"))
+		return
+	var idx := absi(t) % 4
+	draw_texture_rect_region(tex, r, Rect2(float(idx * BOOK_W), 0.0, BOOK_W, BOOK_H))
 
 
 ## 水杯：白瓷杯身 + 有色饮品 + 杯口 + 把手
@@ -657,6 +711,44 @@ func _sofa(o: Vector2, w: float, h: float) -> void:
 		draw_rect(Rect2(sx, o.y - 5.0, arm, h + 5.0), Color("5e4462"))
 		draw_rect(Rect2(sx, o.y - 5.0, arm, 1.0), Color("7d5d81"))
 		draw_rect(Rect2(sx + (0.0 if sx == o.x else arm - 1.0), o.y - 5.0, 1.0, h + 5.0), lo)
+
+
+# ---------------------------------------------------------------- 素材沙发 / 扶手椅
+#
+# 图书馆休息区换成了外部素材：一套三人沙发 + 四把扶手椅，源图是粗黑边手绘，
+# 缩到 64x54 / 22x26 之后轮廓还立得住，正好和亮房的浅色地板配。
+# 素材缺失时退回上面那套程序绘制的 _sofa / _chair_seat，房间不会破相。
+
+func _sofa_sprite(o: Vector2, w: float, h: float) -> void:
+	var tex := seats_tex()
+	if tex == null:
+		_sofa(o, w, h)
+		return
+	_shadow(o, w, h, 3.0)
+	var row := clampi(variant, 0, 1)
+	# 素材自带沙发腿，落脚线就在图片下沿 —— 贴 rect 底边、水平居中，
+	# y-sort 拿 position.y 比较时和玩家按脚底排序的规则一致。
+	var dw := float(SOFA_W)
+	var dh := float(SOFA_H)
+	draw_texture_rect_region(
+		tex,
+		Rect2(o.x + (w - dw) * 0.5, o.y + h - dh, dw, dh),
+		Rect2(0.0, float(row) * SOFA_H, SOFA_W, SOFA_H))
+
+
+func _armchair(o: Vector2, w: float, h: float) -> void:
+	var tex := seats_tex()
+	if tex == null:
+		_chair_seat(o, w, h)
+		_chair_back(o, w, h)
+		return
+	_shadow(o, w, h, 1.5)
+	var idx := clampi(variant, 0, 3)
+	draw_texture_rect_region(
+		tex,
+		Rect2(o.x + (w - float(CHAIR_W)) * 0.5, o.y + h - float(CHAIR_H),
+			float(CHAIR_W), float(CHAIR_H)),
+		Rect2(float(idx * CHAIR_W), float(SOFA_H), CHAIR_W, CHAIR_H))
 
 
 # ---------------------------------------------------------------- 床
