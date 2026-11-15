@@ -49,12 +49,12 @@ func setup_from_world(world: Node2D) -> void:
 		var l := Label.new()
 		l.text = nm
 		l.add_theme_font_override("font", _font)
-		l.add_theme_font_size_override("font_size", BASE_FS)
+		l.add_theme_font_size_override("font_size", GameTheme.fs_fixed(BASE_FS))
 		# 按建筑类型分色：扫一眼就能分出宿舍 / 教学楼 / 食堂 / 图书馆，不用逐个读字
 		var col := _color_for(nm)
 		l.add_theme_color_override("font_color", col)
-		l.add_theme_color_override("font_outline_color", Color(0.05, 0.07, 0.10, 0.88))
-		l.add_theme_constant_override("outline_size", 5)
+		l.add_theme_color_override("font_outline_color", Color(0.05, 0.07, 0.10, 1.0))
+		l.add_theme_constant_override("outline_size", GameTheme.outline(5))
 		# 光靠描边在草地/路面上还是不够跳，再加一块深色底板（像素风：直角、不圆角）
 		var sb := StyleBoxFlat.new()
 		sb.bg_color = Color(0.04, 0.06, 0.09, 0.78)

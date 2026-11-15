@@ -13,8 +13,8 @@ func _ready() -> void:
 	_lbl.add_theme_font_override("font", GameTheme.font())
 	_lbl.add_theme_font_size_override("font_size", GameTheme.fs(GameTheme.FS_HEAD))
 	_lbl.add_theme_color_override("font_color", Color(1, 1, 1, 0.95))
-	_lbl.add_theme_color_override("font_outline_color", Color(0.05, 0.07, 0.10, 0.9))
-	_lbl.add_theme_constant_override("outline_size", 4)
+	_lbl.add_theme_color_override("font_outline_color", Color(0.05, 0.07, 0.10, 1.0))
+	_lbl.add_theme_constant_override("outline_size", GameTheme.outline(4))
 	_lbl.position = Vector2(14, 10)
 	add_child(_lbl)
 

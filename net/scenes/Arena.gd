@@ -3622,9 +3622,10 @@ func _build_door_hint() -> void:
 	_door_hint.alignment = HORIZONTAL_ALIGNMENT_CENTER   # Button 叫 alignment，不是 Label 的 horizontal_alignment
 	_door_hint.add_theme_font_size_override("font_size", GameTheme.fs(20))
 	_door_hint.add_theme_color_override("font_color", Color("#eaf3fb"))
-	_door_hint.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
-	# 20px 的字配 6px 描边，笔画会被糊成一坨（「离」几乎认不出），4px 刚好压住背景又不吃笔画
-	_door_hint.add_theme_constant_override("outline_size", 4)
+	_door_hint.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 1.0))
+	# 描边宽度统一由 GameTheme.outline() 换算：Silver 只有 1px 笔画，
+	# 老字号黑体用的 4px 会把细笔画整个吃掉，现在落到 2px 实色描边
+	_door_hint.add_theme_constant_override("outline_size", GameTheme.outline(4))
 	# 位置每帧算（跟着人物头顶），这里只定尺寸和锚点。
 	# 之前钉在屏幕上方居中：换场景/换分辨率都还好，但玩家眼睛盯着人物时
 	# 根本注意不到上方那行字 —— 提示就该长在人物头上。
@@ -3652,8 +3653,8 @@ func _build_voice_btn() -> void:
 		b.mouse_filter = Control.MOUSE_FILTER_STOP
 		b.add_theme_font_size_override("font_size", GameTheme.fs(17))
 		b.add_theme_color_override("font_color", cfg[2] as Color)
-		b.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
-		b.add_theme_constant_override("outline_size", 3)
+		b.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 1.0))
+		b.add_theme_constant_override("outline_size", GameTheme.outline(3))
 		# 跟项目其余 UI 一致：2px 实线边框 + 深底，不用圆角/模糊
 		for st in ["normal", "hover", "pressed", "focus"]:
 			var sb := StyleBoxFlat.new()
@@ -4254,8 +4255,8 @@ func _ensure_floor_ui() -> void:
 		_floor_label.position = Vector2(84, 10)
 	_floor_label.add_theme_font_size_override("font_size", GameTheme.fs(18))
 	_floor_label.add_theme_color_override("font_color", Color("#e8f2ff"))
-	_floor_label.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
-	_floor_label.add_theme_constant_override("outline_size", 4)
+	_floor_label.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 1.0))
+	_floor_label.add_theme_constant_override("outline_size", GameTheme.outline(4))
 	_floor_label.visible = false
 	host.add_child(_floor_label)
 
@@ -4263,8 +4264,8 @@ func _ensure_floor_ui() -> void:
 	_notice_label = Label.new()
 	_notice_label.add_theme_font_size_override("font_size", GameTheme.fs(17))
 	_notice_label.add_theme_color_override("font_color", Color("#ffe9a8"))
-	_notice_label.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
-	_notice_label.add_theme_constant_override("outline_size", 4)
+	_notice_label.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 1.0))
+	_notice_label.add_theme_constant_override("outline_size", GameTheme.outline(4))
 	_notice_label.visible = false
 	host.add_child(_notice_label)
 
@@ -4315,8 +4316,8 @@ func _build_floor_panel() -> PanelContainer:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.add_theme_font_size_override("font_size", GameTheme.fs(20))
 	title.add_theme_color_override("font_color", Color("#dfeaff"))
-	title.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
-	title.add_theme_constant_override("outline_size", 4)
+	title.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 1.0))
+	title.add_theme_constant_override("outline_size", GameTheme.outline(4))
 	vb.add_child(title)
 
 	var g := GridContainer.new()
@@ -4945,8 +4946,8 @@ func _build_door_plates() -> void:
 		var lb := Label.new()
 		lb.add_theme_font_size_override("font_size", GameTheme.fs(13))
 		lb.add_theme_color_override("font_color", Color("#cfe2f5"))
-		lb.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
-		lb.add_theme_constant_override("outline_size", 3)
+		lb.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 1.0))
+		lb.add_theme_constant_override("outline_size", GameTheme.outline(3))
 		pc.add_child(lb)
 		pc.visible = false
 		pc.z_index = -1
@@ -4994,8 +4995,8 @@ func _build_note_panel() -> PanelContainer:
 	_note_title = Label.new()
 	_note_title.add_theme_font_size_override("font_size", GameTheme.fs(17))
 	_note_title.add_theme_color_override("font_color", Color("#ffe9a8"))
-	_note_title.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
-	_note_title.add_theme_constant_override("outline_size", 4)
+	_note_title.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 1.0))
+	_note_title.add_theme_constant_override("outline_size", GameTheme.outline(4))
 	vb.add_child(_note_title)
 	_note_hint = Label.new()
 	_note_hint.text = "写点自我介绍：叫什么、哪个学院、作息、想认识什么样的人…（最多 160 字）"
@@ -5255,8 +5256,8 @@ func _build_note_view() -> PanelContainer:
 	_note_view_title = Label.new()
 	_note_view_title.add_theme_font_size_override("font_size", GameTheme.fs(17))
 	_note_view_title.add_theme_color_override("font_color", Color("#ffe9a8"))
-	_note_view_title.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 0.95))
-	_note_view_title.add_theme_constant_override("outline_size", 4)
+	_note_view_title.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.05, 1.0))
+	_note_view_title.add_theme_constant_override("outline_size", GameTheme.outline(4))
 	vb.add_child(_note_view_title)
 	_note_view_body = Label.new()
 	_note_view_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART

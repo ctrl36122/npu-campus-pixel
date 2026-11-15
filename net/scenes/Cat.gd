@@ -194,9 +194,8 @@ func set_display_name(t: String) -> void:
 		_tag.mouse_filter = Control.MOUSE_FILTER_IGNORE   # 名字不能挡住点猫
 		_tag.add_theme_font_size_override("font_size", GameTheme.fs_fixed(TAG_FONT))
 		_tag.add_theme_color_override("font_color", Color("f1e6d2cc"))
-		_tag.add_theme_color_override("font_outline_color", Color("1a1410a6"))
-		_tag.add_theme_constant_override("outline_size", 3)
-		_tag.add_theme_color_override("font_shadow_color", Color("1a1410a6"))
+		_tag.add_theme_color_override("font_outline_color", Color("1a1410ff"))
+		_tag.add_theme_constant_override("outline_size", GameTheme.outline(3))
 		add_child(_tag)
 	_tag.text = txt
 	_sync_tag()

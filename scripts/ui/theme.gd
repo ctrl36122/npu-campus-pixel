@@ -16,7 +16,7 @@ const FS_SMALL := 11   # 提示条、次要说明
 ## Silver 的字身很紧：汉字只有 0.58 em（em=19px 时字高才 11px），
 ## 所以「原来 13px 的视觉大小」要 19px 字号才顶得上 —— 字号统一乘这个比例。
 ## 换字体或改字号手感只动这一个数，别去各面板里加数字。
-const EM_RATIO := 1.6
+const EM_RATIO := 1.8
 const FONT_PATH := "res://assets/fonts/silver.ttf"
 ## Silver 收了 8368 个汉字，够用但不是全集（聊天里打生僻字会缺字），
 ## 缺字回落到系统黑体，不至于整行变豆腐块。
@@ -49,15 +49,60 @@ static func ui_scale() -> float:
 	return _ui_scale
 
 
+## 设备像素 / 逻辑像素的比值（高分屏、窗口被非整数放大时不为 1）。
+static func device_scale() -> float:
+	var tree := Engine.get_main_loop()
+	if tree is SceneTree:
+		var vp: Viewport = (tree as SceneTree).root
+		if vp != null:
+			var vs := vp.get_visible_rect().size
+			var ws := Vector2(DisplayServer.window_get_size())
+			if vs.x > 1.0 and ws.x > 1.0:
+				return clampf(ws.x / vs.x, 0.5, 4.0)
+	return 1.0
+
+
+## Silver 的 1 个字形像素 = em/19。画布被非整数放大时（比如 1280 的界面铺到
+## 1920 的窗口上 = 1.5 倍），字号得让 em×缩放 落在 19 的整数倍上，
+## 否则同一段字里横竖笔画一半 1px、一半 2px —— 看着就是「糊」。
+## 只在目标字号往上试 3 档，绝不缩字（宁可稍大，也别突然变小）。
+const PIXEL_GRID := 19.0
+
+
+static func _snap_device(em: float) -> int:
+	var base := maxi(8, roundi(em))
+	var s := device_scale()
+	if s < 1.01:
+		return base
+	var best := base
+	var best_err := 99.0
+	for cand in range(base, base + 4):
+		var fpx := float(cand) * s / PIXEL_GRID
+		var err := absf(fpx - roundf(fpx))
+		if err < best_err - 0.0005:
+			best_err = err
+			best = cand
+	return best
+
+
 ## 字号：所有 add_theme_font_size_override 都过这一层，别再写死数字。
 static func fs(base: int) -> int:
-	return maxi(1, roundi(float(base) * ui_scale() * EM_RATIO))
+	return maxi(1, _snap_device(float(base) * ui_scale() * EM_RATIO))
 
 
 ## 屏幕恒定字号（头顶名牌、气泡这类被父节点缩放过的文字）：
 ## 只按字身比例换算，不乘 ui_scale。
 static func fs_fixed(px: float) -> int:
-	return maxi(1, roundi(px * EM_RATIO))
+	return maxi(1, _snap_device(px * EM_RATIO))
+
+
+## 文字描边：原来那些 3~5px 是给**粗黑体**配的（笔画厚，描边不吃字）。
+## Silver 只有 1px 笔画，4px 描边会让整个字变成一坨黑影 —— 这就是换字体后
+## 名牌、门牌提示「糊」的真正原因。统一收到 1~2px，颜色也必须是实色
+## （半透明描边会在硬边外面糊出一层灰边）。
+## 参数沿用老值，换算集中在这里，以后换字体只改这一处。
+static func outline(legacy_px: int) -> int:
+	return clampi(roundi(float(legacy_px) * 0.42), 1, 2)
 
 
 ## 尺寸（内边距、行高、图标块）：和字号同一倍率才不会「字大了框没大」。
@@ -138,6 +183,13 @@ static func top_hud_reserve() -> float:
 static var _font: Font
 static var _font_bold: Font
 static var _fallback: Font
+static var _base: FontFile
+
+## ⚠️ 别给 Silver 做「假加粗」：FontVariation.variation_embolden 是把字形轮廓往外撑，
+## 关掉抗锯齿后 1px 的笔画会被撑成 1~2px 不等宽，看着就是「糊」。实测 0.25 就明显发虚。
+## 层次靠字号拉开（标题/分区/正文三档），笔画保持原样最干净。
+const EMBOLDEN_BODY := 0.0
+const EMBOLDEN_TITLE := 0.0
 
 
 ## 缺字回落用的系统黑体（只在 Silver 没收录的字符上出现）。
@@ -151,36 +203,51 @@ static func _fallback_font() -> Font:
 	return _fallback
 
 
-## 常规字体 = Silver 像素字 + 系统黑体兜底。
-static func font() -> Font:
-	if _font == null:
-		var base: FontFile = load(FONT_PATH)
-		if base == null:
-			return _fallback_font()
-		# 像素字体必须关掉抗锯齿/微调/亚像素定位：不然边缘糊成灰边，
-		# 看着就像把图片放大了三倍，白瞎了这套字形。
-		base.antialiasing = TextServer.FONT_ANTIALIASING_NONE
-		base.hinting = TextServer.HINTING_NONE
-		base.subpixel_positioning = TextServer.SUBPIXEL_POSITIONING_DISABLED
+## 原样加载 Silver（带系统兜底）。加粗都在这上面套 FontVariation。
+static func _base_font() -> FontFile:
+	if _base == null:
+		var f: FontFile = load(FONT_PATH)
+		if f == null:
+			return null
+		# 像素字体关掉抗锯齿/微调/亚像素定位：边缘是硬像素，符合像素风。
+		# 实测开灰度抗锯齿只会让细笔画变软、反而更像「糊」，别开。
+		f.antialiasing = TextServer.FONT_ANTIALIASING_NONE
+		f.hinting = TextServer.HINTING_NONE
+		f.subpixel_positioning = TextServer.SUBPIXEL_POSITIONING_DISABLED
 		var fb: Array[Font] = []
 		fb.append(_fallback_font())
-		base.fallbacks = fb
-		_font = base
+		f.fallbacks = fb
+		_base = f
+	return _base
+
+
+static func _embolden(amount: float) -> Font:
+	var base := _base_font()
+	if base == null:
+		return _fallback_font()
+	if is_zero_approx(amount):
+		return base
+	var v := FontVariation.new()
+	v.base_font = base
+	v.variation_embolden = amount
+	var fb: Array[Font] = []
+	fb.append(_fallback_font())
+	v.fallbacks = fb
+	return v
+
+
+## 常规字体 = Silver 像素字（微加粗）+ 系统黑体兜底。
+static func font() -> Font:
+	if _font == null:
+		_font = _embolden(EMBOLDEN_BODY)
 	return _font
 
 
-## 标题用粗体。像素字没有第二套字重，用 FontVariation 加粗：
-## 描边式加粗会在笔画外侧多出半像素，所以倍率给小一点（0.5），
-## 在 19/26 这种字号上正好多一条实心像素，不会糊。
+## 标题字：Silver 只有一套字重，也不做假加粗（见 EMBOLDEN_BODY 的说明），
+## 现在和正文同一份字体，靠字号区分层级。留这个函数是为了调用处不用改。
 static func font_bold() -> Font:
 	if _font_bold == null:
-		var v := FontVariation.new()
-		v.base_font = font()
-		v.variation_embolden = 0.5
-		var fb: Array[Font] = []
-		fb.append(_fallback_font())
-		v.fallbacks = fb
-		_font_bold = v
+		_font_bold = _embolden(EMBOLDEN_TITLE)
 	return _font_bold
 
 
