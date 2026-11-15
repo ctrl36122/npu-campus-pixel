@@ -48,7 +48,7 @@ enabled=PackedStringArray("res://addons/godot_ai/plugin.cfg")
 
 [gui]
 
-theme/custom_font="res://assets/fonts/noto_sc_game.ttf"
+theme/custom_font="res://assets/fonts/silver.ttf"
 
 [input]
 

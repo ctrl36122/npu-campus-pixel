@@ -159,8 +159,8 @@ func _ready() -> void:
 	# 名牌/气泡跟着节点一起被缩放，人越小字越小 —— 这里按比例把字号补回去，
 	# 保证不管 ACTOR_SCALE 调到多少，字在屏幕上始终是 11/12 号那么大。
 	var font_k := 0.375 / actor_sc
-	$Name.add_theme_font_size_override("font_size", int(round(11.0 * font_k)))
-	bubble.add_theme_font_size_override("font_size", int(round(12.0 * font_k)))
+	$Name.add_theme_font_size_override("font_size", int(round(GameTheme.fs_fixed(11.0) * font_k)))
+	bubble.add_theme_font_size_override("font_size", int(round(GameTheme.fs_fixed(12.0) * font_k)))
 	is_local_player = owner_peer_id == Net.my_id()
 	SessionFlow.configure_sync($Sync)
 	_update_name()

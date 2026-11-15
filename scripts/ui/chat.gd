@@ -254,7 +254,7 @@ func _apply_font() -> void:
 	# 桌面保持原字号。
 	var fs := GameTheme.fs(GameTheme.FS_BODY)
 	if _expanded:
-		fs = GameTheme.fs(17) if touch else 18
+		fs = GameTheme.fs(17) if touch else GameTheme.fs(18)
 	if is_instance_valid(_log):
 		_log.add_theme_font_size_override("normal_font_size", fs)
 		_log.add_theme_font_size_override("bold_font_size", fs)
@@ -262,7 +262,7 @@ func _apply_font() -> void:
 		_edit.add_theme_font_size_override("font_size", fs)
 	if is_instance_valid(_title_btn):
 		_title_btn.add_theme_font_size_override("font_size",
-			GameTheme.fs(14) if touch else GameTheme.FS_SMALL)
+			GameTheme.fs(14) if touch else GameTheme.fs(GameTheme.FS_SMALL))
 
 
 func _refresh_head() -> void:

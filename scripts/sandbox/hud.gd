@@ -11,7 +11,7 @@ func _ready() -> void:
 	layer = 5
 	_lbl = Label.new()
 	_lbl.add_theme_font_override("font", GameTheme.font())
-	_lbl.add_theme_font_size_override("font_size", GameTheme.FS_HEAD)
+	_lbl.add_theme_font_size_override("font_size", GameTheme.fs(GameTheme.FS_HEAD))
 	_lbl.add_theme_color_override("font_color", Color(1, 1, 1, 0.95))
 	_lbl.add_theme_color_override("font_outline_color", Color(0.05, 0.07, 0.10, 0.9))
 	_lbl.add_theme_constant_override("outline_size", 4)

@@ -48,7 +48,7 @@ func _ready() -> void:
 		vis.scale = Vector2(sc, sc)
 	if _label != null:
 		_label.text = display_name
-		_label.add_theme_font_size_override("font_size", int(round(11.0 * 0.375 / sc)))
+		_label.add_theme_font_size_override("font_size", int(round(GameTheme.fs_fixed(11.0) * 0.375 / sc)))
 	_apply_hero()
 	_origin = position
 	_last = position

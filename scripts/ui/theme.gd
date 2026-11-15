@@ -11,6 +11,18 @@ const FS_HEAD := 15    # 分区标题 / HUD 主信息
 const FS_BODY := 13    # 正文、输入框、按钮、在线名单
 const FS_SMALL := 11   # 提示条、次要说明
 
+## ---- 字体 ----
+## 全站用 Silver（Poppy Works 的像素字体，CC BY 4.0，见 assets/fonts/silver-LICENCE.txt）。
+## Silver 的字身很紧：汉字只有 0.58 em（em=19px 时字高才 11px），
+## 所以「原来 13px 的视觉大小」要 19px 字号才顶得上 —— 字号统一乘这个比例。
+## 换字体或改字号手感只动这一个数，别去各面板里加数字。
+const EM_RATIO := 1.6
+const FONT_PATH := "res://assets/fonts/silver.ttf"
+## Silver 收了 8368 个汉字，够用但不是全集（聊天里打生僻字会缺字），
+## 缺字回落到系统黑体，不至于整行变豆腐块。
+const FALLBACK_FONTS := ["Microsoft YaHei UI", "Microsoft YaHei",
+	"PingFang SC", "Noto Sans CJK SC", "Source Han Sans SC", "SimHei"]
+
 ## 手机 UI 放大倍率。手机竖屏的基准视口是 720×1280（见 online_boot.is_portrait_ui），
 ## 13px 字号落到 1080 宽的手机屏上只有约 1.2mm 高 —— 按桌面字号做出来的面板
 ## 在手机上是「框子很大、字很小」。这里统一放大字号与点击区域，桌面端恒为 1.0。
@@ -39,7 +51,13 @@ static func ui_scale() -> float:
 
 ## 字号：所有 add_theme_font_size_override 都过这一层，别再写死数字。
 static func fs(base: int) -> int:
-	return maxi(1, roundi(float(base) * ui_scale()))
+	return maxi(1, roundi(float(base) * ui_scale() * EM_RATIO))
+
+
+## 屏幕恒定字号（头顶名牌、气泡这类被父节点缩放过的文字）：
+## 只按字身比例换算，不乘 ui_scale。
+static func fs_fixed(px: float) -> int:
+	return maxi(1, roundi(px * EM_RATIO))
 
 
 ## 尺寸（内边距、行高、图标块）：和字号同一倍率才不会「字大了框没大」。
@@ -117,29 +135,52 @@ static func safe_insets(vp_size: Vector2) -> Vector4:
 static func top_hud_reserve() -> float:
 	return px(46.0) if touch_ui() else 0.0
 
-static var _font: SystemFont
-static var _font_bold: SystemFont
+static var _font: Font
+static var _font_bold: Font
+static var _fallback: Font
 
 
-## 常规字体。字体族按优先级排，跨平台都能落到一个黑体系。
-static func font() -> SystemFont:
+## 缺字回落用的系统黑体（只在 Silver 没收录的字符上出现）。
+static func _fallback_font() -> Font:
+	if _fallback == null:
+		var f := SystemFont.new()
+		f.font_names = PackedStringArray(FALLBACK_FONTS)
+		f.antialiasing = TextServer.FONT_ANTIALIASING_GRAY
+		f.subpixel_positioning = TextServer.SUBPIXEL_POSITIONING_DISABLED
+		_fallback = f
+	return _fallback
+
+
+## 常规字体 = Silver 像素字 + 系统黑体兜底。
+static func font() -> Font:
 	if _font == null:
-		_font = SystemFont.new()
-		_font.font_names = PackedStringArray([
-			"Microsoft YaHei UI", "Microsoft YaHei",
-			"PingFang SC", "Noto Sans CJK SC", "Source Han Sans SC", "SimHei"])
-		_font.antialiasing = TextServer.FONT_ANTIALIASING_GRAY
-		_font.hinting = TextServer.HINTING_NORMAL
-		# 像素风游戏：禁用亚像素定位，字落在整像素上，小字号不发虚
-		_font.subpixel_positioning = TextServer.SUBPIXEL_POSITIONING_DISABLED
+		var base: FontFile = load(FONT_PATH)
+		if base == null:
+			return _fallback_font()
+		# 像素字体必须关掉抗锯齿/微调/亚像素定位：不然边缘糊成灰边，
+		# 看着就像把图片放大了三倍，白瞎了这套字形。
+		base.antialiasing = TextServer.FONT_ANTIALIASING_NONE
+		base.hinting = TextServer.HINTING_NONE
+		base.subpixel_positioning = TextServer.SUBPIXEL_POSITIONING_DISABLED
+		var fb: Array[Font] = []
+		fb.append(_fallback_font())
+		base.fallbacks = fb
+		_font = base
 	return _font
 
 
-## 标题用粗体（SystemFont 的 font_weight 生效于支持可变字重的系统字体）。
-static func font_bold() -> SystemFont:
+## 标题用粗体。像素字没有第二套字重，用 FontVariation 加粗：
+## 描边式加粗会在笔画外侧多出半像素，所以倍率给小一点（0.5），
+## 在 19/26 这种字号上正好多一条实心像素，不会糊。
+static func font_bold() -> Font:
 	if _font_bold == null:
-		_font_bold = font().duplicate()
-		_font_bold.font_weight = 700
+		var v := FontVariation.new()
+		v.base_font = font()
+		v.variation_embolden = 0.5
+		var fb: Array[Font] = []
+		fb.append(_fallback_font())
+		v.fallbacks = fb
+		_font_bold = v
 	return _font_bold
 
 

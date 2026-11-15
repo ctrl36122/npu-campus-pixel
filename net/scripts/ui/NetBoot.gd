@@ -103,7 +103,7 @@ func _build_ui() -> void:
 	var title := Label.new()
 	title.text = "像素工大 · 联机"
 	title.add_theme_font_override("font", f)
-	title.add_theme_font_size_override("font_size", 17)
+	title.add_theme_font_size_override("font_size", GameTheme.fs(17))
 	col.add_child(title)
 
 	# 昵称
@@ -181,7 +181,7 @@ func _build_ui() -> void:
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_status.custom_minimum_size = Vector2(300, 0)
 	_status.add_theme_font_override("font", f)
-	_status.add_theme_font_size_override("font_size", 13)
+	_status.add_theme_font_size_override("font_size", GameTheme.fs(13))
 	col.add_child(_status)
 
 	_set_hero("adam")

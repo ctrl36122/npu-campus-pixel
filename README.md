@@ -596,7 +596,9 @@ macOS 预设的要点写在 `export_presets.example.cfg` 末尾的注释里：�
 ## 数据与声明
 
 - 地图数据 © [OpenStreetMap](https://www.openstreetmap.org/copyright) 贡献者，ODbL 协议
-- 字体：思源黑体（Noto Sans SC）子集，SIL Open Font License
+- 字体：界面用 **Silver**（© [Poppy Works](https://poppy.works)，CC BY 4.0，
+  见 `assets/fonts/silver-LICENCE.txt`）；Silver 未收录的字符回落到思源黑体（Noto Sans SC）子集，SIL Open Font License
+- 音效：脚步声来自 [kdd] Different Steps 采样包（见 `assets/steps/`），背景音乐为第三方曲目、不入库
 - 代码：MIT
 - **本项目是校园爱好者的非官方作品**，与西北工业大学官方无关；校名、校徽等标识归学校所有，
   仅用于校园文化展示，不作商业用途

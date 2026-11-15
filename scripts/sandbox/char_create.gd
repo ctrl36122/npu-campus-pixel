@@ -83,7 +83,7 @@ func _build() -> void:
 	title.text = "创建你的角色"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.add_theme_font_override("font", GameTheme.font_bold())
-	title.add_theme_font_size_override("font_size", GameTheme.FS_TITLE + 1)
+	title.add_theme_font_size_override("font_size", GameTheme.fs(GameTheme.FS_TITLE + 1))
 	col.add_child(title)
 
 	# ---------- 主体：左预览 / 右角色卡 ----------
@@ -117,7 +117,7 @@ func _build() -> void:
 	var pick_lbl := Label.new()
 	pick_lbl.text = "选择外观"
 	pick_lbl.add_theme_font_override("font", f)
-	pick_lbl.add_theme_font_size_override("font_size", 14)
+	pick_lbl.add_theme_font_size_override("font_size", GameTheme.fs(14))
 	pick_lbl.add_theme_color_override("font_color", Color(0.78, 0.82, 0.78))
 	right.add_child(pick_lbl)
 
@@ -154,7 +154,7 @@ func _build() -> void:
 	var name_lbl := Label.new()
 	name_lbl.text = "昵称"
 	name_lbl.add_theme_font_override("font", f)
-	name_lbl.add_theme_font_size_override("font_size", 15)
+	name_lbl.add_theme_font_size_override("font_size", GameTheme.fs(15))
 	name_row.add_child(name_lbl)
 
 	_name_edit = LineEdit.new()
@@ -163,7 +163,7 @@ func _build() -> void:
 	_name_edit.custom_minimum_size = Vector2(240, 32)
 	_name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_name_edit.add_theme_font_override("font", f)
-	_name_edit.add_theme_font_size_override("font_size", 15)
+	_name_edit.add_theme_font_size_override("font_size", GameTheme.fs(15))
 	_name_edit.text_submitted.connect(func(_t): _confirm())
 	name_row.add_child(_name_edit)
 
@@ -171,14 +171,14 @@ func _build() -> void:
 	go.text = "进入校园"
 	go.custom_minimum_size = Vector2(140, 38)
 	go.add_theme_font_override("font", f)
-	go.add_theme_font_size_override("font_size", 16)
+	go.add_theme_font_size_override("font_size", GameTheme.fs(16))
 	go.pressed.connect(_confirm)
 	name_row.add_child(go)
 
 	_hint = Label.new()
 	_hint.custom_minimum_size = Vector2(0, 18)
 	_hint.add_theme_font_override("font", f)
-	_hint.add_theme_font_size_override("font_size", 13)
+	_hint.add_theme_font_size_override("font_size", GameTheme.fs(13))
 	_hint.add_theme_color_override("font_color", Color(0.88, 0.38, 0.34))
 	col.add_child(_hint)
 

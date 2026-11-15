@@ -5,7 +5,7 @@ extends CanvasLayer
 
 const MIN_ZOOM := 0.75       # 视距再远就不画楼名（会糊成一团）
 const LABEL_W := 132.0
-const BASE_FS := 13          # 基准字号；实际字号随镜头缩放（区间 11~19，太大盖楼太小看不清）
+const BASE_FS := 13          # 基准字号（逻辑值）；实际字号随镜头缩放，再按像素字体的字身比例放大
 
 var _labels: Array[Label] = []
 var _sprites: Array[Sprite2D] = []
@@ -71,7 +71,8 @@ func setup_from_world(world: Node2D) -> void:
 		# 底板宽度跟着文字走：短名字不会因为固定 132 宽而显得空荡荡
 		var tw := 0.0
 		if _font != null:
-			tw = _font.get_string_size(nm, HORIZONTAL_ALIGNMENT_CENTER, -1, BASE_FS).x
+			tw = _font.get_string_size(nm, HORIZONTAL_ALIGNMENT_CENTER, -1,
+				GameTheme.fs_fixed(BASE_FS)).x
 		var w := clampf(tw + 12.0, 46.0, LABEL_W + 40.0)
 		l.size = Vector2(w, 21)
 		add_child(l)
@@ -108,12 +109,14 @@ func _process(_delta: float) -> void:
 		return                       # 必须 return：否则下面的定位循环会把 visible 又设回 true
 
 	# 字号随镜头缩放，但压窄区间：太大会盖住楼体，太小读不清
-	var fs := clampi(int(round(10.5 * cam.zoom.x)), 11, 19)
+	var fs := clampi(int(round(10.5 * cam.zoom.x * GameTheme.EM_RATIO)),
+		GameTheme.fs_fixed(11.0), GameTheme.fs_fixed(19.0))
 	if fs != _cur_fs:
 		for i in _labels.size():
 			_labels[i].add_theme_font_size_override("font_size", fs)
-			_labels[i].size = Vector2(LABEL_W + _widths[i] * float(fs) / float(BASE_FS),
-				19.0 + float(fs - BASE_FS) * 0.6)
+			var k := float(fs) / float(GameTheme.fs_fixed(BASE_FS))
+			# 像素字的行高≈字号（em 19px 时字高 11px、行高 19px），别再按老公式加余量
+			_labels[i].size = Vector2(LABEL_W + _widths[i] * k, float(fs) * 1.05)
 		_cur_fs = fs
 
 	var xf := get_viewport().get_canvas_transform()

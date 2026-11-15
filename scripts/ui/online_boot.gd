@@ -39,7 +39,9 @@ var _booting: bool = true
 var _online: bool = false
 var _dbg_t: float = 0.0
 
-var _font: SystemFont
+## 全局字体。GameTheme.font() 拿到的是 FontFile（像素字 + 系统兜底），
+## 不能声明成 SystemFont —— 那是另一个子类，赋值会直接报类型错误把 UI 构建打断。
+var _font: Font
 var _ui_layer: CanvasLayer
 var _card: Control
 var _card_title: Label
@@ -687,9 +689,18 @@ func _build_settings(_layer: CanvasLayer) -> void:
 		pad.add_theme_constant_override(m, int(GameTheme.px(18.0)))
 	_settings.add_child(pad)
 
+	# 像素字体的行高比原来的黑体大，720p 下这一列（昵称/外观/音乐/音效/联机地址/
+	# 服务器地址/返回游戏）会比视口还高，直接裁掉底部两个控件。套一层滚动，
+	# 别让人够不到「返回游戏」；手机上字号放大 1.6 倍更明显。
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.custom_minimum_size = Vector2(0, vs.y * 0.86)
+	pad.add_child(scroll)
+
 	var col := VBoxContainer.new()
 	col.add_theme_constant_override("separation", int(GameTheme.px(10.0)))
-	pad.add_child(col)
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(col)
 
 	col.add_child(_label("设置", GameTheme.FS_TITLE, "#e8eef2", true))
 
