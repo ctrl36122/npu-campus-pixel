@@ -13,7 +13,7 @@ extends Node2D
 ##
 ## 房间内不该下雨（人在屋里），由 Arena 在进出房时把这一层藏起来。
 
-const MAX_DROPS := 420
+const MAX_DROPS := 300
 const MAX_FLAKES := 300
 const MAX_SPLASH := 150
 const WIND_X := -190.0          ## 雨的横向漂移（px/s），负值往西斜
@@ -72,7 +72,7 @@ func _seed_drop(i: int, s: Vector2, anywhere: bool) -> void:
 	_dx[i] = _rng.randf_range(-20.0, s.x + 40.0)
 	_dy[i] = _rng.randf_range(0.0, s.y) if anywhere else _rng.randf_range(-120.0, -8.0)
 	_dv[i] = _rng.randf_range(880.0, 1380.0)
-	_dl[i] = _rng.randf_range(26.0, 56.0)
+	_dl[i] = _rng.randf_range(20.0, 42.0)
 	_dp[i] = _rng.randf_range(0.60, 1.0)
 	# 落地线撒在屏幕下 2/3 —— 视野里地面占大头，溅在下 2/3 看着最自然
 	_dg[i] = _rng.randf_range(s.y * 0.30, s.y + 16.0)
@@ -108,12 +108,10 @@ func _process(delta: float) -> void:
 			if _splashes.size() < MAX_SPLASH and _rng.randf() < 0.75:
 				_splashes.append({"x": _dx[i], "y": _dg[i], "t": 0.0})
 			_seed_drop(i, s, false)
-			_dx[i] = _rng.randf_range(s.x * 0.4, s.x + 30.0) if wind < 0.0 \
-				else _rng.randf_range(-20.0, s.x + 20.0)
+			_dx[i] = _rng.randf_range(-20.0, s.x + 20.0)
 		elif _dy[i] - _dl[i] > s.y or _dx[i] < -30.0:
 			_seed_drop(i, s, false)
-			_dx[i] = _rng.randf_range(s.x * 0.4, s.x + 30.0) if wind < 0.0 \
-				else _rng.randf_range(-20.0, s.x + 20.0)
+			_dx[i] = _rng.randf_range(-20.0, s.x + 20.0)
 
 	# 水花生命周期
 	for sp in _splashes:
@@ -153,10 +151,10 @@ func _draw() -> void:
 		var ax := roundf(x + dx)
 		var ay := roundf(y - ln)
 		draw_line(Vector2(ax, ay), Vector2(x, y),
-			Color(0.88, 0.94, 1.0, 0.62 * _dp[i] * k_rain), 2.0)
+			Color(0.88, 0.94, 1.0, 0.58 * _dp[i] * k_rain), 1.0)
 		# 头端 45% 再描一遍，等于给雨滴加了个亮尖
 		draw_line(Vector2(roundf(x + dx * 0.45), roundf(y - ln * 0.45)),
-			Vector2(x, y), Color(0.98, 1.0, 1.0, 0.95 * _dp[i] * k_rain), 2.0)
+			Vector2(x, y), Color(0.96, 0.99, 1.0, 0.85 * _dp[i] * k_rain), 1.0)
 	# 雪：3×3 白点 + 一圈更淡的光晕，落在亮处也看得见
 	for i in n_flake:
 		var x2 := roundf(_fx[i])
