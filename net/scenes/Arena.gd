@@ -82,6 +82,7 @@ const SPREAD: float = 80.0
 ## 被楼遮住时的透视方式：只在玩家身边挖一个柔和椭圆「透视窗」（楼体其余部分
 ## 保持实心），而不是整栋楼变半透明 —— 后者夜里会把楼后被路灯照亮的路面整片透出来。
 const XRAY_SHADER := preload("res://net/shaders/building_xray.gdshader")
+const WeatherFx := preload("res://net/scripts/weather_fx.gd")
 const XRAY_RX: float = 17.0       # 透视窗半宽（贴图局部像素）
 const XRAY_RY: float = 24.0       # 透视窗半高
 const XRAY_HOLE_ALPHA: float = 0.20
@@ -123,6 +124,12 @@ var _lamp_glows: Array = []       ## 每盏路灯一组光（带轻微闪烁 pha
 var _glow_tex_empty: Texture2D    ## 没有烘焙窗光的楼用的 1×1 透明贴图
 ## MC 式格子光照图：路灯当光源做 flood-fill 传播，夜里用它把路面"点亮"
 var _light_tex: Texture2D
+
+## 天气视觉（Weather 单例驱动）：全屏调色 + 雨雪粒子
+var _wx_layer: CanvasLayer
+var _wx_tone: ColorRect
+var _wx_mat: ShaderMaterial
+var _wx_fx: Node2D
 var _world_origin := Vector2.ZERO
 var _world_size := Vector2.ONE
 ## 昼夜单例（运行时通过 Engine 取，避免编辑器脚本缓存没刷新时解析报错）
@@ -180,6 +187,9 @@ func _ready() -> void:
 
 	# 3.5) 昼夜视觉：夜幕叠加 + 建筑夜灯（夜灯强度/染色由 DayNight 单例每帧驱动）
 	_setup_daynight()
+
+	# 3.6) 天气：整屏调色（晴/阴/雨/雪）+ 雨雪粒子，参数由 Weather 单例每帧驱动
+	_setup_weather()
 
 	# 4) 小地图纹理（整张校园缩略图，给 UI 用）
 	minimap_tex = _build_minimap_texture()
@@ -1069,6 +1079,64 @@ func _setup_daynight() -> void:
 	_collect_glows()
 
 
+# ---------------------------------------------------------------- 天气
+## 天气视觉有两块，都在同一个画布（layer 4，压在楼名标注之上、交互提示之下）：
+##   1) 调色：BackBufferCopy 复制已经画好的整幅画面，全屏 shader 按天气改
+##      曝光/暖度/饱和/对比 —— 晴天更亮更暖，阴雨更灰更闷。不动任何烘焙贴图。
+##   2) 雨雪粒子：屏幕空间的 1px 斜线 / 2×2 白点，进了房间就藏起来。
+## 调色的强度按日照明暗加权：白天全量，入夜归零，夜里保持原来的夜景。
+func _setup_weather() -> void:
+	_wx_layer = CanvasLayer.new()
+	_wx_layer.name = "Weather"
+	_wx_layer.layer = 4
+	add_child(_wx_layer)
+
+	var bb := BackBufferCopy.new()
+	bb.name = "Copy"
+	bb.copy_mode = BackBufferCopy.COPY_MODE_VIEWPORT
+	_wx_layer.add_child(bb)
+
+	_wx_tone = ColorRect.new()
+	_wx_tone.name = "Tone"
+	_wx_tone.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_wx_tone.color = Color(1, 1, 1, 1)
+	_wx_tone.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var sh := load("res://net/shaders/weather_tone.gdshader") as Shader
+	if sh != null:
+		_wx_mat = ShaderMaterial.new()
+		_wx_mat.shader = sh
+		_wx_mat.set_shader_parameter("amount", 0.0)
+		_wx_tone.material = _wx_mat
+	else:
+		# 没有 shader 就当这层不存在，别留一块白板盖住画面
+		_wx_tone.visible = false
+	_wx_layer.add_child(_wx_tone)
+
+	_wx_fx = WeatherFx.new()
+	_wx_fx.name = "Fx"
+	_wx_layer.add_child(_wx_fx)
+
+
+func _update_weather() -> void:
+	if _wx_mat != null:
+		var t: Dictionary = Weather.tone()
+		var day := clampf(DayNight.daylight() * 1.2, 0.0, 1.0)
+		_wx_mat.set_shader_parameter("exposure", float(t["exposure"]))
+		_wx_mat.set_shader_parameter("saturation", float(t["sat"]))
+		_wx_mat.set_shader_parameter("contrast", float(t["contrast"]))
+		_wx_mat.set_shader_parameter("warm", t["warm"])
+		_wx_mat.set_shader_parameter("tint", t["tint"])
+		_wx_mat.set_shader_parameter("sun", float(t["sun"]))
+		_wx_mat.set_shader_parameter("amount", day)
+	if _wx_fx != null and is_instance_valid(_wx_fx):
+		# 屋里不下雨
+		_wx_fx.visible = not in_room
+		if OS.has_environment("XGD_WXDBG"):
+			print("[wx] kind=%d rain=%.2f snow=%.2f vis=%s in_room=%s" % [
+				Weather.kind, Weather.rain_strength(), Weather.snow_strength(),
+				str(_wx_fx.visible), str(in_room)])
+
+
 # ---------------------------------------------------------------- MC 式格子光照图
 ## 照搬 Minecraft 火把的光照算法：光源有亮度等级（火把 14），向四邻 flood-fill 传播，
 ## 每走一格衰减固定等级、取最大值。我们世界本来就是 8px 一格，所以直接烘一张
@@ -1476,6 +1544,7 @@ func _process(delta: float) -> void:
 	_update_bridge_z()
 	_update_xray(delta)
 	_update_daynight()
+	_update_weather()
 	_update_interact_hint(delta)
 	_place_hint_above_player()
 	_update_floor_visibility()

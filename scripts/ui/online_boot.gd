@@ -22,6 +22,7 @@ const ConsentScript := preload("res://scripts/ui/consent.gd")
 const FriendPanelScript := preload("res://scripts/ui/friend_panel.gd")
 const PetPanelScript := preload("res://scripts/ui/pet_panel.gd")
 const DmPanelScript := preload("res://scripts/ui/dm_panel.gd")
+const WeatherIconScript := preload("res://scripts/ui/weather_icon.gd")
 
 ## 小地图尺寸（保持 424:800 的校园比例）。200 宽在 1080p 下足够看清街区。
 const MINI_W: float = 200.0
@@ -69,6 +70,10 @@ var _base_mini_w: float = MINI_W
 var _map: Control
 var _chat: Node
 var _clock: Label
+## 顶部天气条：现实西安天气（Weather 单例每帧填），和时钟拼在同一条里
+var _wx_label: Label
+var _wx_icon: Control
+var _wx_text: String = ""
 ## 首次启动的说明页（免责声明 / 隐私 / 聊天规则），点过之后就没了
 var _consent: Node
 ## 好友面板（按 P 开合），常驻但不是模态：不开的时候不挡任何东西
@@ -530,9 +535,9 @@ func _on_session_closed(reason: String) -> void:
 ## 排错用：设了环境变量 XGD_DEBUG=1 时定期打印在线状态（正常玩不会有输出）
 func _process(delta: float) -> void:
 	if _clock != null and is_instance_valid(_clock):
-		# DayNight 是 autoload，直接按名字访问（get_singleton 查不到 autoload）
-		if true:  # DayNight 是 autoload，直接按名字访问
-			_clock.text = "%s  %s" % [DayNight.time_string(), DayNight.phase_name()]
+		# DayNight / Weather 都是 autoload，直接按名字访问（get_singleton 查不到）
+		_clock.text = "%s  %s" % [DayNight.time_string(), DayNight.phase_name()]
+		_sync_weather_line()
 	# 冻结状态每帧重算：面板被外部隐藏、关闭信号漏发、节点重建后残留的
 	# true 都会在下一帧自动消失，不会把人物永久锁在原地。
 	_refresh_block()
@@ -551,6 +556,22 @@ func _process(delta: float) -> void:
 	print("[dbg] online=%s id=%d peers=%d avatars=%d phase=%d friends=%d claims=%d %s" % [
 		str(_online), Net.my_id(), Net.peer_count(), avatars, GameState.phase,
 		Net.friend_list().size(), Net.room_claims.size(), " ".join(names)])
+
+
+## 顶部天气条：文字 + 小图标。
+## 只在内容变了才写 Label（setter 会触发重排），图标同理，不每帧乱刷。
+## 拿不到实时数据时后面缀「离线」—— 缓存过期和完全没网都算，
+## 这时候画面是按最后一档或西安气候模拟出来的，得让人看得出来。
+func _sync_weather_line() -> void:
+	if _wx_label != null and is_instance_valid(_wx_label):
+		var txt := Weather.short_text()
+		if not Weather.is_live():
+			txt += "·离线"
+		if txt != _wx_text:
+			_wx_text = txt
+			_wx_label.text = txt
+	if _wx_icon != null and is_instance_valid(_wx_icon):
+		_wx_icon.call("set_state", Weather.kind, DayNight.daylight() < 0.25)
 
 
 # ---------------------------------------------------------------- 界面
@@ -651,14 +672,40 @@ func _build_ui() -> void:
 	# 让开刘海 / 状态栏；桌面 inset 为 0，位置不变
 	var clock_safe_top := GameTheme.safe_insets(get_viewport().get_visible_rect().size).y
 	clock_panel.offset_top = clock_safe_top + (GameTheme.px(6.0) if is_touch_ui() else 0.0)
-	clock_panel.custom_minimum_size = Vector2(GameTheme.px(156.0), GameTheme.px(30.0))
+	clock_panel.custom_minimum_size = Vector2(GameTheme.px(292.0), GameTheme.px(30.0))
 	clock_panel.add_theme_stylebox_override("panel", _box("#0d1418b8", "#2a3845", 6))
 	clock_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(clock_panel)
 
+	# 一行两段：时间 | 天气。天气从现实西安拉（Weather 单例），
+	# 拉不到就退回离线模拟的那一档，条上会标出来，不会假装有网。
+	var clock_row := HBoxContainer.new()
+	clock_row.name = "ClockRow"
+	clock_row.add_theme_constant_override("separation", int(GameTheme.px(9.0)))
+	clock_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	clock_panel.add_child(clock_row)
+
 	_clock = _label("06:00  清晨", 13, "#e8eef2", true)
 	_clock.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	clock_panel.add_child(_clock)
+	_clock.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	clock_row.add_child(_clock)
+
+	var sep := ColorRect.new()
+	sep.color = Color("#2a3845")
+	sep.custom_minimum_size = Vector2(maxf(1.0, GameTheme.px(1.0)), GameTheme.px(14.0))
+	sep.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	sep.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	clock_row.add_child(sep)
+
+	_wx_icon = WeatherIconScript.new()
+	_wx_icon.custom_minimum_size = Vector2(GameTheme.px(12.0), GameTheme.px(12.0))
+	_wx_icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	clock_row.add_child(_wx_icon)
+
+	_wx_label = _label("西安  --", 12, "#c8d4de", false)
+	_wx_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_wx_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	clock_row.add_child(_wx_label)
 
 	_build_settings(layer)
 

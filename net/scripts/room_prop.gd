@@ -30,6 +30,9 @@ static var _sky_fill_tex: Texture2D = null
 static var _sky_clouds_tex: Texture2D = null
 static var _books_probed := false
 static var _seats_probed := false
+## 天空包里的山景四层（远山 / 中景山 / 针叶林 / 近景丘陵），按 key 缓存
+static var _sky_ridge := {}
+static var _sky_ridge_probed := {}
 static var _sky_bg_probed := false
 static var _sky_fill_probed := false
 static var _sky_clouds_probed := false
@@ -60,6 +63,20 @@ static func sky_bg_tex() -> Texture2D:
 		if ResourceLoader.exists("res://assets/room_sky_bg.png"):
 			_sky_bg_tex = load("res://assets/room_sky_bg.png")
 	return _sky_bg_tex
+
+
+## 山景层（far / mid / woods / fore）：4 时段 × 320 高，透明背景，按视差横移。
+## 缺图返回 null，调用方跳过这一层就好。
+static func sky_ridge_tex(key: String) -> Texture2D:
+	if _sky_ridge_probed.has(key):
+		return _sky_ridge.get(key)
+	_sky_ridge_probed[key] = true
+	var path := "res://assets/room_sky_%s.png" % key
+	var tex: Texture2D = null
+	if ResourceLoader.exists(path):
+		tex = load(path) as Texture2D
+	_sky_ridge[key] = tex
+	return tex
 
 
 ## 房间背后那片天往下的一大块（渐变底 + 夜里的星，没有第二颗太阳）

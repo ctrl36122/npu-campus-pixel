@@ -218,6 +218,51 @@ def _cloud_field(cloud: Image.Image, h: int) -> Image.Image:
     return out
 
 
+# ── 山景四层 ───────────────────────────────────────────────────────────
+# 天空包里除了天光和云，还有远山 / 中景山 / 针叶林 / 近景丘陵四层。
+# 之前只用了前两层，房间背后是一片空天；把这四层也铺进去，背景才有了纵深
+# （中庭和落地窗看出去是「一片山谷」，不是「一块蓝色」）。
+#
+# 原来的顾虑是「房间盖在中间，背后再来条地平线会变成两层世界」——
+# 那是把山当独立背景时的想法。现在山按视差贴在同一个天空系统里，
+# 和云共用一套天色插值，反而更像 SkyOffice 那种「房间漂在风景上」。
+#
+# 每层单独一张（4 时段 × 640×320，RGBA），运行时按各自视差系数横移。
+RIDGE_LAYERS = [
+    ("03_mountains_far.png", "far"),
+    ("04_mountains_mid.png", "mid"),
+    ("05_forest.png", "woods"),
+    ("06_foreground.png", "fore"),
+]
+RIDGE_H = 320
+
+
+def pack_ridges() -> bool:
+    """出四张山景：room_sky_far / mid / woods / fore，各 4 行 × 320 高。"""
+    sheets = {key: Image.new("RGBA", (SKY_W, RIDGE_H * len(SKY_TIMES)), (0, 0, 0, 0))
+              for _, key in RIDGE_LAYERS}
+    missing = 0
+    for row, name in enumerate(SKY_TIMES):
+        base = os.path.join(SKY_SRC, "layers", name)
+        for fname, key in RIDGE_LAYERS:
+            p = os.path.join(base, fname)
+            if not os.path.exists(p):
+                missing += 1
+                continue
+            im = Image.open(p).convert("RGBA")
+            sheets[key].alpha_composite(
+                im.crop((0, 0, SKY_W, RIDGE_H)), (0, row * RIDGE_H))
+        print(f"  {name:7s} 山景四层已合入")
+    if missing:
+        print(f"  跳过 {missing} 张缺失的山景层")
+        return False
+    for _, key in RIDGE_LAYERS:
+        out = os.path.join(ROOT, "assets", f"room_sky_{key}.png")
+        sheets[key].save(out)
+        print(f"  -> {out} ({sheets[key].size[0]}x{sheets[key].size[1]})")
+    return True
+
+
 def pack_sky() -> bool:
     """出三张图：room_sky_bg / room_sky_fill / room_sky_clouds，各 4 行。"""
     band_sheet = Image.new("RGB", (SKY_W, BAND_H * len(SKY_TIMES)), (191, 227, 245))
@@ -291,6 +336,8 @@ def main() -> None:
     if ok_sky:
         print("打包房间背后的天空：")
         pack_sky()
+        print("打包天空里的山景：")
+        pack_ridges()
 
 
 if __name__ == "__main__":

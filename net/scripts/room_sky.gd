@@ -40,6 +40,18 @@ const CLOUD_PARALLAX := 0.12
 ## 这个值同时决定「落地窗对着天空的哪一段」—— 压得越深，窗里看到的天越高、
 ## 越蓝；压得浅，窗玻璃就落在贴近地平线的那段发白的天光里。
 const BAND_OVER := 60.0
+## 山景四层（远→近）。天空包里本来就有这些层，之前只用了天光和云，
+## 房间背后是一片空天；现在按视差叠上去，中庭和落地窗看出去是一片山谷。
+##   par   跟随镜头的比例（越大越近）
+##   fog   被雨雾遮住的程度（云量 × 这个系数 → alpha 降低，远山先消失）
+const RIDGE_TEX := Vector2(640.0, 320.0)
+const RIDGES := [
+	{"key": "far", "par": 0.10, "fog": 0.88, "base": 0.92},
+	{"key": "mid", "par": 0.20, "fog": 0.62, "base": 0.96},
+	{"key": "woods", "par": 0.34, "fog": 0.30, "base": 1.0},
+	{"key": "fore", "par": 0.50, "fog": 0.10, "base": 1.0},
+]
+
 ## 贴图缺了时兜底的天空色（顺序同 SKY_TIMES：dawn / noon / sunset / night）
 const FALLBACK: Array[Color] = [
 	Color("b67281"), Color("82bee2"), Color("c15d6a"), Color("172449"),
@@ -62,7 +74,7 @@ func setup(room_size: Vector2, pad: float) -> void:
 ## 云一直在飘，所以这一层每帧重画；画的东西就几个贴图矩形，比逐个家具便宜得多。
 ## 天色那两档只在时刻走够 0.0015（约 2 分钟）时重算一次，省下每帧的插值。
 func _process(delta: float) -> void:
-	_drift = fposmod(_drift + CLOUD_SPEED * delta, CLOUD_DRAW.x)
+	_drift = fposmod(_drift + _cloud_speed() * delta, CLOUD_DRAW.x)
 	var t: float = DayNight.t
 	if absf(t - _last_t) > 0.0015:
 		_last_t = t
@@ -90,24 +102,55 @@ func _draw() -> void:
 	if fill_tex == null:
 		_paint_flat(fill_rect, c)          # 缺图退回一条冷色渐变，至少不是黑块
 	else:
-		_tile(fill_tex, fill_rect, row_a, FILL_TEX, FILL_DRAW, 1.0, 0.0)
+		_tile(fill_tex, fill_rect, row_a, FILL_TEX, FILL_DRAW, Color(1, 1, 1, 1), 0.0)
 		if mix > 0.02:
-			_tile(fill_tex, fill_rect, row_b, FILL_TEX, FILL_DRAW, mix, 0.0)
+			_tile(fill_tex, fill_rect, row_b, FILL_TEX, FILL_DRAW, Color(1, 1, 1, mix), 0.0)
 	if bg_tex == null:
 		_paint_flat(band_rect, c)
 	else:
-		_tile(bg_tex, band_rect, row_a, BAND_TEX, BAND_DRAW, 1.0, 0.0)
+		_tile(bg_tex, band_rect, row_a, BAND_TEX, BAND_DRAW, Color(1, 1, 1, 1), 0.0)
 		if mix > 0.02:
-			_tile(bg_tex, band_rect, row_b, BAND_TEX, BAND_DRAW, mix, 0.0)
+			_tile(bg_tex, band_rect, row_b, BAND_TEX, BAND_DRAW, Color(1, 1, 1, mix), 0.0)
 
 	if cloud_tex == null:
 		return
 	# 2) 云：整块云场盖满整个区域（上下两块接得上），横向自己飘 + 跟镜头错位。
 	#    云场的竖向接缝是镜像做的，滚动时不会露出来。
 	var shift := -_drift - _cam_local_x() * CLOUD_PARALLAX
-	_tile(cloud_tex, area, row_a, CLOUD_TEX, CLOUD_DRAW, 1.0, shift)
+	var cc := _cloud_col()
+	_tile(cloud_tex, area, row_a, CLOUD_TEX, CLOUD_DRAW, cc, shift)
 	if mix > 0.02:
-		_tile(cloud_tex, area, row_b, CLOUD_TEX, CLOUD_DRAW, mix, shift)
+		_tile(cloud_tex, area, row_b, CLOUD_TEX, CLOUD_DRAW,
+			Color(cc.r, cc.g, cc.b, cc.a * mix), shift)
+
+	# 3) 山：由远及近四层，底部贴着区域下沿（地平线是一条），
+	#    只用镜头视差，自己不飘。雨天按 fog 系数退到雾里 —— 远山先没影，
+	#    近景还立着，比整片一起变淡自然得多。
+	var wcloud: float = clampf(Weather.cloud(), 0.0, 1.0)
+	var cam_x := _cam_local_x()
+	for rd in RIDGES:
+		var key := String(rd["key"])
+		var tex := RoomProp.sky_ridge_tex(key)
+		if tex == null:
+			continue
+		var a := float(rd["base"]) * (1.0 - wcloud * float(rd["fog"]))
+		if a <= 0.02:
+			continue
+		_ridge(tex, area, row_a, -cam_x * float(rd["par"]), a)
+		if mix > 0.02:
+			_ridge(tex, area, row_b, -cam_x * float(rd["par"]), a * mix)
+
+
+## 云随天气变：晴天天高云淡（更透、飘得慢），阴雨天云压下来（更厚更暗、被风推着走）
+func _cloud_col() -> Color:
+	var w: float = clampf(Weather.cloud(), 0.0, 1.0)
+	var g := 1.0 - w * 0.24
+	var a := 0.60 + w * 0.40
+	return Color(g, g, g, a)
+
+
+func _cloud_speed() -> float:
+	return CLOUD_SPEED * (0.85 + clampf(Weather.cloud(), 0.0, 1.0) * 1.10)
 
 
 ## 镜头在房间局部空间里的 x。云拿它算视差：镜头往右，云往左让一点，
@@ -125,7 +168,7 @@ func _cam_local_x() -> float:
 ## 把贴图某一行在 rect 里平铺。
 ## tex_cell：贴图上单块多少像素；draw_cell：单块在游戏里占多大。
 func _tile(tex: Texture2D, rect: Rect2, row: int, tex_cell: Vector2,
-		draw_cell: Vector2, alpha: float, offset_x: float) -> void:
+		draw_cell: Vector2, col: Color, offset_x: float) -> void:
 	if rect.size.x <= 0.0 or rect.size.y <= 0.0:
 		return
 	var src_row := float(row) * tex_cell.y
@@ -147,9 +190,31 @@ func _tile(tex: Texture2D, rect: Rect2, row: int, tex_cell: Vector2,
 					tex,
 					Rect2(maxf(x, rect.position.x), maxf(y, rect.position.y), w, h - cut_t),
 					Rect2(cut_l * kx, src_row + cut_t * ky, w * kx, (h - cut_t) * ky),
-					Color(1.0, 1.0, 1.0, alpha))
+					col)
 			x += draw_cell.x
 		y += draw_cell.y
+
+
+## 画一层山：横向平铺（无缝）、底部对齐、不平铺竖向。
+func _ridge(tex: Texture2D, rect: Rect2, row: int, offset_x: float, alpha: float) -> void:
+	if rect.size.x <= 0.0 or alpha <= 0.02:
+		return
+	var h := RIDGE_TEX.y
+	# 山底对齐「房间上沿」（area 顶部往下 BAND_DRAW.y 那条线），不是区域底部：
+	# 落地窗和天窗都在房间上沿以上，对齐底部的话山会被地板整个盖住，窗外还是空天。
+	var y := rect.position.y + BAND_DRAW.y - h
+	var x0 := rect.position.x + fposmod(offset_x, RIDGE_TEX.x) - RIDGE_TEX.x
+	var x := x0
+	while x < rect.end.x - 0.5:
+		var cut_l := maxf(0.0, rect.position.x - x)
+		var w := minf(RIDGE_TEX.x - cut_l, rect.end.x - maxf(x, rect.position.x))
+		if w > 0.5:
+			draw_texture_rect_region(
+				tex,
+				Rect2(maxf(x, rect.position.x), y, w, h),
+				Rect2(cut_l, float(row) * h, w, h),
+				Color(1.0, 1.0, 1.0, alpha))
+		x += RIDGE_TEX.x
 
 
 ## 兜底：纯色块 + 一条很轻的竖向渐变，往下越浅
