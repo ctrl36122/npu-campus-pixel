@@ -87,3 +87,8 @@ assets/room_seats.png.import
 # 四条曲子由 tools/import_music.py 从 references/*.mp3 转码到 assets/music/，
 # 只留本机、不进仓库；clone 后缺文件时 Music.gd 自动静音，游戏照常能跑。
 assets/music/
+
+# ── 雨天环境音（第三方录音，不做二次分发）─────────────────
+# references/Dark_Rainy_Night(ambience).ogg 原样拷到 assets/ambience/rain.ogg。
+# 缺素材时 net/scripts/rain_audio.gd 自动回退到程序合成的雨声。
+assets/ambience/
