@@ -21,18 +21,19 @@ const SPRINT_MUL: float = 1.55
 const EMOTES: Array[String] = ["Hello!", "Here!", "Thanks!", "Help!"]
 ## 渲染平滑：移动跑在 30 Hz 的网络 tick 上，画面却是 60 fps 画的。
 ## 直接把 position 画出来，等于「每两帧跳一步」，看着就是在抽搐。
-## 这里让精灵和相机滞后一点点再平滑追上，把阶跃摊平成连续移动。
-## 30 的时间常数约一个 tick（33ms），滞后只有几像素，肉眼察觉不到。
-const RENDER_CHASE: float = 30.0
+## 做法见 _tick_visual / _render_pos：按 tick 速度自己积分，再限速回吸。
 ## 被楼挡住时角色自身的不透明度（楼 0.45，人 0.55，两者叠加仍可辨认）
 const OCCL_ALPHA: float = 0.55
-## 相机缩放：1.2 是 Player.tscn 里的默认视距。
-## 0.55 时一屏约 145 格（和网页版默认视野一致），3.0 时能看清单栋楼的窗户。
-## 显示调试：XGD_ZOOM=0.8 可指定初始缩放（截图用），正常玩走 ZOOM_BASE。
-const ZOOM_BASE: float = 1.05
-const ZOOM_MIN: float = 0.55
-const ZOOM_MAX: float = 3.0
-const ZOOM_STEP: float = 1.14
+## 相机缩放。**CAMPUS_SCALE(2) × zoom 必须是整数**：地面 1 像素 = 乘积个屏幕像素，
+## 不是整数时像素块的宽度会在 2px / 3px 之间来回跳，走起来整片地面像在「爬」，
+## 越看越糊 —— 1.05 时乘积 2.1，正是玩家说的「镜头一抖看不清」的另一半原因。
+## 0.5 时一屏约 160 格（网页版那种远视野），1.0 是默认，2.0 能看清单栋楼的窗户。
+## 显示调试：XGD_ZOOM=0.8 可指定初始缩放（截图用，不保证整数缩放）。
+const ZOOM_BASE: float = 1.0
+const ZOOM_MIN: float = 0.5
+const ZOOM_MAX: float = 2.0
+## 缩放档位：只取能让地面像素正好铺满整数个屏幕像素的值（2×zoom = 1/2/3/4）。
+const ZOOM_LEVELS: Array = [0.5, 1.0, 1.5, 2.0]
 ## 角色缩放——「人和楼的比例」唯一的旋钮。
 ## 角色挂在校园层下面，屏幕尺寸 = ACTOR_SCALE × CAMPUS_SCALE × zoom，
 ## 所以这个值越小，人越矮、楼越显宽（校园本身不动，只是相对尺度变了）。
@@ -118,11 +119,22 @@ var _cam_zoom_target: float = ZOOM_BASE
 ## 镜头往上让一截，画面才装得下「窗顶 + 窗上一片天」——
 ## 不然人站到墙边，窗的上半截永远在屏幕外。出房间时 Arena 会归零。
 var _cam_shift: Vector2 = Vector2.ZERO
-## 精灵/相机相对物理位置的滞后量（tick 阶跃的平滑缓冲）
-var _render_lag: Vector2 = Vector2.ZERO
-## 上一次 _apply_movement 实际挪了多远（像素）。渲染时按这个长度线性追平滞后，
-## 保证视觉在一个 tick 内匀速追上物理位置 —— 只靠指数 lerp 永远差一截，
-## 稳态滞后 + 每 tick 补一次 = 走起来一抖一抖（活动室里最明显）。
+## 画面位置不跟物理位置「追平」，而是按速度自己积分：
+##   _vis_pos 每帧 += _vis_vel * delta，再缓慢吸回物理位置。
+## 这样帧率再抖（一帧补两个 tick、或某一帧没等到 tick）都不会出现「停住」——
+## 之前的线性追平会在追上后干等下一 tick，那一帧只挪零点几像素，
+## 看着就是镜头一抖一抖、附近的东西糊成一片。
+var _vis_pos: Vector2 = Vector2.ZERO
+var _vis_vel: Vector2 = Vector2.ZERO
+var _prev_tick_pos: Vector2 = Vector2.ZERO
+var _vis_ready: bool = false
+var _last_tick_ms: int = 0
+## 画面比物理位置晚半个 tick 出：这点提前量让「误差回吸」始终有缓冲可用
+const RENDER_DELAY: float = NetTick.DELTA * 0.5
+## 误差回吸速度（每秒收敛比例）。太大 → 帧间会跳；太小 → 撞墙/急停时收不回来
+const VIS_K: float = 9.0
+## 上一次 _apply_movement 实际挪了多远（像素）。画面用它判断「是在走还是停住」：
+## 停住时不再外推（否则人停了画面还在往前飘）。
 var _step_len: float = 0.0
 ## 被楼挡住时为 true（Arena 每帧设置）：楼和人都变半透明，经典 RPG 做法
 var _occluded: bool = false
@@ -208,7 +220,10 @@ func teleport_to(pos: Vector2) -> void:
 	server_state = {"seq": processed_seq, "position": pos}
 	buffer.entries.clear()
 	correction_offset = Vector2.ZERO
-	_render_lag = Vector2.ZERO
+	_vis_ready = false
+	_vis_pos = pos
+	_vis_vel = Vector2.ZERO
+	_prev_tick_pos = pos
 	_step_len = 0.0
 
 
@@ -567,11 +582,11 @@ func _unhandled_input(event: InputEvent) -> void:
 	# 所以这里不会被「正在看地图」的情况误触发。
 	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			zoom_step(ZOOM_STEP)
+			zoom_step(1.1)
 			get_viewport().set_input_as_handled()
 			return
 		if event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			zoom_step(1.0 / ZOOM_STEP)
+			zoom_step(0.9)
 			get_viewport().set_input_as_handled()
 			return
 	if event.is_action_pressed("emote"):
@@ -581,8 +596,20 @@ func _unhandled_input(event: InputEvent) -> void:
 
 ## 按倍率改视距（滚轮/按钮都走这里）
 func zoom_step(factor: float) -> void:
-	# 量化到 0.05 的整数倍：像素风在非整数缩放下容易闪烁
-	_cam_zoom_target = clampf(snappedf(_cam_zoom_target * factor, 0.05), ZOOM_MIN, ZOOM_MAX)
+	# 只在档位之间跳，不再按倍率连续缩放：非整数缩放下（比如 1.05）地面像素
+	# 一会儿铺 2 个屏幕像素、一会儿 3 个，走动时整片地面都在闪。
+	var idx := 0
+	var best := 1e9
+	for i in ZOOM_LEVELS.size():
+		var d: float = absf(float(ZOOM_LEVELS[i]) - _cam_zoom_target)
+		if d < best:
+			best = d
+			idx = i
+	if factor > 1.0:
+		idx = mini(idx + 1, ZOOM_LEVELS.size() - 1)
+	else:
+		idx = maxi(idx - 1, 0)
+	_cam_zoom_target = float(ZOOM_LEVELS[idx])
 
 
 ## 回到默认视距
@@ -659,6 +686,46 @@ func _on_tick(tick: int) -> void:
 		server_position = position
 		if is_local_player:
 			buffer.drop_through(processed_seq)
+	if is_local_player:
+		_tick_visual()
+
+
+## 每个 tick 记一次「这一 tick 实际走了多远」→ 画面速度。
+## 只给本地玩家的画面用，远端玩家走 RemoteSmoother。
+func _tick_visual() -> void:
+	_last_tick_ms = Time.get_ticks_msec()
+	if not _vis_ready:
+		_vis_ready = true
+		_vis_pos = position
+		_prev_tick_pos = position
+		_vis_vel = Vector2.ZERO
+		return
+	_vis_vel = (position - _prev_tick_pos) / NetTick.DELTA
+	_prev_tick_pos = position
+
+
+## 这一帧该把人物画在哪。
+func _render_pos(delta: float) -> Vector2:
+	if not _vis_ready:
+		return position
+	# 两个多 tick 没有新数据（暂停 / 掉线 / 切后台）：别再往前推，否则人会飘走
+	if Time.get_ticks_msec() - _last_tick_ms > int(NetTick.DELTA * 2500.0):
+		_vis_vel = Vector2.ZERO
+	_vis_pos += _vis_vel * delta
+	# 目标位置带一点「速度超前量」：稳态时画面正好落后物理半个 tick，
+	# 相当于留了半个 tick 的缓冲，误差回吸不会和移动方向打架
+	var target: Vector2 = position - _vis_vel * RENDER_DELAY
+	var err: Vector2 = target - _vis_pos
+	if err.length() > 80.0:
+		# 传送 / 服务端大幅修正：直接归位，别拖出一条长尾巴
+		_vis_pos = target
+	elif err.length() > 0.001:
+		# 回吸**限速**：比例回吸在「这一帧没等到 tick」时会把刚走的那点距离
+		# 又拽回去（一帧只挪 0.3px，比完全不动还怪）。限速后每帧最多修正
+		# 正常步长的 35%，误差靠几帧慢慢吃掉，画面上看不出来。
+		var cap: float = maxf(0.35, _vis_vel.length() * delta * 0.35)
+		_vis_pos += err.limit_length(cap)
+	return _vis_pos
 
 
 ## Client -> server input batch. Unreliable but ordered, on its own channel (1)
@@ -740,19 +807,11 @@ func _apply_movement(command: Dictionary) -> void:
 			if slide.length() > 0.01:
 				move_and_collide(slide)
 	var moved := position - before
-	# 物理位置已经前移，视觉位置留在原处（_render_lag 抵消掉这一步），
-	# 再由 _process 平滑追上去 —— 30Hz 的阶跃就变成了连续移动。
-	_render_lag -= moved
-	# 记下这一步的实际长度：_process 拿它当「这一 tick 要追多少」的基准，
-	# 正好在一个 tick 内匀速追平（斜率恒定 = 视觉匀速，不会被指数 lerp 拖出锯齿）。
+	# 记下这一步的实际长度：渲染时按它判断「是在走还是停住」——
+	# 停住就不再外推，免得人不走了画面还在往前飘。
 	_step_len = moved.length()
-	# ⚠️ 必须在这里立刻把视觉位置也挪回去。
-	# 物理位置是这一 tick 一次性跳过去的，补偿量 _render_lag 也是同一步到位；
-	# 如果只等下一个渲染帧再写 visual.position，就会出现「这一帧人物猛地前进
-	# 1.8px、下一帧又退回来」——每 tick 一次，就是玩家说的抽搐。
-	# 写完 visual 之后，帧间再由 _process 线性追平，位置才是连续单调的。
-	if visual != null:
-		visual.position = correction_offset + _render_lag
+	# 视觉位置不在这里写：物理位置是 30Hz 一次性跳过去的，画面由 _process
+	# 按速度积分（见 _render_pos），帧率再抖也不会「这一帧猛冲、下一帧不动」。
 	# 视觉方向跟着实际输入走（服务端模拟时同样会更新，保证远端看到的朝向一致）
 	if direction.length() > 0.01:
 		_face_dir = direction.normalized()
@@ -847,20 +906,7 @@ func _process(delta: float) -> void:
 		correction_offset = correction_offset.lerp(Vector2.ZERO, minf(delta * 12.0, 1.0))
 	# 视觉平滑：主机自己也要走这段（原来 Net.is_server() 直接 return，
 	# 于是开房间的那个人看到的自己反而是最抖的）。
-	#
-	# 用「线性追平」而不是指数 lerp。物理位置每 tick（30Hz）跳一次，指数衰减
-	# 每帧只追一部分，永远追不平：稳态滞后 + 每 tick 补跳一次 = 走起来一缩一缩
-	# （在活动室这种空旷地面走直线时最明显，宿舍里老撞家具反而不容易看出来）。
-	# 这里按上一步的实际长度算「这一 tick 该追多少」，视觉速度恒定，
-	# 位移阶跃被填成连续匀速 —— 位置对得上，画面也不抖。
-	var _chase: float = 0.0
-	if _step_len > 0.001:
-		_chase = (_step_len / maxf(NetTick.DELTA, 0.001)) * delta
-		_render_lag = _render_lag.move_toward(Vector2.ZERO, _chase)
-	else:
-		# 站住了：残余滞后指数收回，别一下子吸过去
-		_render_lag = _render_lag.lerp(Vector2.ZERO, minf(delta * RENDER_CHASE, 1.0))
-	visual.position = correction_offset + _render_lag
+	visual.position = correction_offset + (_render_pos(delta) - position)
 	# 被楼挡住时自己也淡到 0.55：楼 0.45 + 人 0.55 叠起来能看清轮廓和位置
 	_occl_a = move_toward(_occl_a, OCCL_ALPHA if _occluded else 1.0, delta * 4.0)
 	visual.modulate.a = _occl_a
@@ -873,7 +919,12 @@ func _update_camera_follow() -> void:
 	if not is_local_player:
 		return
 	var cam: Camera2D = $Camera
-	cam.global_position = visual.global_position + _cam_shift
+	var want: Vector2 = visual.global_position + _cam_shift
+	# 把相机贴到「整屏幕像素」上：它移动的最小单位因此是 1 个屏幕像素，
+	# 画面里所有地面像素块的边界永远落在整像素上，滚动时不会出现像素块
+	# 一会儿 2px 一会儿 3px 的爬行（那看着就是「抖 + 糊」）。
+	var q: float = maxf(0.01, cam.zoom.x)
+	cam.global_position = (want * q).round() / q
 
 
 ## 视距平滑逼近目标值（滚一格不要整屏跳一下）
