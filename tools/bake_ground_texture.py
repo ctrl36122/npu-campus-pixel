@@ -31,7 +31,6 @@
 import os
 import sys
 from functools import lru_cache
-from math import sin, tau as TAU
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageMath, ImageStat
 
@@ -196,46 +195,11 @@ def _nz(mask):
     return D._nz(mask)
 
 
-# ---- C. 水面 ---------------------------------------------------------
-# 湖水是 4 种精确色画出来的 8px 马赛克（bake_channels 认水、道具候选都靠这 4 个值）。
-# 直接改颜色会连锁破坏那些判定，所以这里**一个像素值都不改**，只把那 4 种色按
-# 波纹重新排布：色值集合不变 → water_mask 逐像素等价，但空间上从棋盘变成水波。
-WATER_ORDER = [(88, 128, 116), (104, 146, 132), (120, 164, 146), (142, 188, 164)]
-WATER_LEVELS = (0.46, 0.66, 0.86)   # 分档阈值：大部分落在中深两档，浅色成碎光
-## 波纹：主波是横纹（沿 y 变化），相位被 x 上的慢波推着走 → 波纹自然起伏；
-## 再叠一个幅度很小的斜向高频，只用来打散「同一条纹从东到西都一样亮」。
-## 单频正弦叠加容易算出规则点阵（像鱼鳞），所以第二项幅度必须小。
-WATER_WAVE = (0.118, 0.0135, 1.35, 0.052, -0.031, 0.11)
-
-
-def _repaint_water(im, ox, oy):
-    """把水面 4 色马赛克重排成波纹。返回 (新图, 处理像素数)。"""
-    mask = D.water_mask(im)
-    if _nz(mask) == 0:
-        return im, 0
-    W, H = im.size
-    out = im.copy()
-    po = out.load()
-    pm = mask.load()
-    cols = WATER_ORDER
-    lv = WATER_LEVELS
-    ky, kx, kamp, sx, sy, samp = WATER_WAVE
-    n = 0
-    for y in range(H):
-        wy = oy + y
-        for x in range(W):
-            if pm[x, y] < 128:
-                continue
-            wx = ox + x
-            ph = wy * ky + kamp * sin(wx * kx * TAU)
-            t = 0.5 + 0.30 * sin(ph * TAU) + samp * sin((wx * sx + wy * sy) * TAU)
-            k = 0
-            for th in lv:
-                if t > th:
-                    k += 1
-            po[x, y] = cols[k]
-            n += 1
-    return out, n
+# ---- C. 水面：不动 ---------------------------------------------------
+# 湖水是 4 种精确色画的 8px 色块，bake_channels 判水和道具候选网格都靠这 4 个值。
+# 试过「不换色、只按波纹重排这 4 档」——技术上 water_mask 逐像素等价，但视觉上
+# 8px 棋盘被换成一片横纹噪声，比原来的色块更假（2026-11-15 用户否决）。
+# 水面就保持烘焙链原样，要换观感得从 bake_road_edge / bake_channels 的配色改起。
 
 
 class _Field:
@@ -380,9 +344,12 @@ def apply(im, ox=0, oy=0):
                               out, rw)
 
     out, left, total = _enforce(im, out)
-    n_w = 0
-    if WATER_WAVE is not None:
-        out, n_w = _repaint_water(out, ox, oy)
+    # 水岸羽化会把 2~3px 的增量溢进湖里，水色因此轻微偏移。这里无条件恢复：
+    # 水面（含精确 4 色）一个像素都不许动。
+    wm = D.water_mask(im)
+    n_w = _nz(wm)
+    if n_w:
+        out = Image.composite(im, out, wm)
     return out, {"grass_px": n_g, "road_px": n_r, "water_px": n_w,
                  "reverted_px": total,
                  "size": (W, H), "ox": ox, "oy": oy}
