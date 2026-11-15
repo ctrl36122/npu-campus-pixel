@@ -25,11 +25,13 @@ const CHAIR_H := 26
 
 static var _books_tex: Texture2D = null
 static var _seats_tex: Texture2D = null
+static var _dorm_tex: Texture2D = null
 static var _sky_bg_tex: Texture2D = null
 static var _sky_fill_tex: Texture2D = null
 static var _sky_clouds_tex: Texture2D = null
 static var _books_probed := false
 static var _seats_probed := false
+static var _dorm_probed := false
 ## 天空包里的山景四层（远山 / 中景山 / 针叶林 / 近景丘陵），按 key 缓存
 static var _sky_ridge := {}
 static var _sky_ridge_probed := {}
@@ -52,6 +54,35 @@ static func seats_tex() -> Texture2D:
 		if ResourceLoader.exists("res://assets/room_seats.png"):
 			_seats_tex = load("res://assets/room_seats.png")
 	return _seats_tex
+
+
+## 宿舍家具图集（assets/room_dorm.png），由 tools/import_dorm_furniture.py
+## 从 OGA「Top-Down Home Furniture」（hooded-crow，CC-BY 3.0）切片生成。
+## 缺图时各 prop 什么都不画 —— 布局数据仍有效，房间只是空一点，不会崩。
+static func dorm_tex() -> Texture2D:
+	if not _dorm_probed:
+		_dorm_probed = true
+		if ResourceLoader.exists("res://assets/room_dorm.png"):
+			_dorm_tex = load("res://assets/room_dorm.png")
+	return _dorm_tex
+
+
+## 图集里每个家具的矩形（与 import_dorm_furniture.py 的输出一一对应）。
+## 绘制时固定放大 1.5 倍：源图是 2 倍像素密度切的 1:1，再放 1.5 倍
+## 正好落在我们格子的尺度上（床 ≈ 4.7×2.6 格，和人物比例合适）。
+const DORM_SCALE := 1.5
+const DORM_CELLS := {
+	"bed": Rect2(0, 0, 25, 14),
+	"wardrobe": Rect2(27, 0, 15, 20),
+	"bookshelf": Rect2(44, 0, 11, 20),
+	"shelf": Rect2(57, 0, 11, 20),
+	"desk_pc": Rect2(70, 0, 20, 15),
+	"desk": Rect2(92, 0, 20, 14),
+	"table": Rect2(114, 0, 20, 12),
+	"chair": Rect2(136, 0, 8, 11),
+	"stool": Rect2(146, 0, 8, 9),
+	"box": Rect2(156, 0, 7, 10),
+}
 
 
 ## 房间背后那片天的上沿（含日月，窗顶往上看到的就是它）。窗户玻璃是透明的，
@@ -172,6 +203,8 @@ func _draw() -> void:
 			_crate(o, w, h, Color("4a5b46"), Color("36452f"))   # 绿植箱 / 空调
 		"block":
 			_crate(o, w, h, Color("6b563e"), Color("4e3f2d"))
+		"dormbed", "wardrobe", "dbshelf", "dshelf", "pcdesk", "ddesk", "dtable", "dstool", "dbox":
+			_dorm_sprite(o, w, h, _DORM_KIND_CELL[kind])
 		_:
 			_table(o, w, h)
 
@@ -181,6 +214,36 @@ func _draw() -> void:
 ## 落地阴影：宽比物体小一圈、贴着底边，画在正面之前
 func _shadow(o: Vector2, w: float, h: float, spread: float = 2.0) -> void:
 	draw_rect(Rect2(o.x + spread, o.y + h - 3.0, w - spread * 2.0, 5.0), Color(0, 0, 0, 0.30))
+
+
+## OGA 宿舍家具：从 room_dorm.png 图集里取一格，固定放大 DORM_SCALE 倍，
+## 底边对齐 prop 矩形、水平居中（y-sort 按底边比较，和玩家脚底规则一致）。
+## 布局数据里的 rect 按「cell 尺寸 × DORM_SCALE」写，绘制基本 1:1 填满。
+func _dorm_sprite(o: Vector2, w: float, h: float, cell_name: String) -> void:
+	var tex := dorm_tex()
+	var cell: Rect2 = DORM_CELLS.get(cell_name, Rect2())
+	if tex == null or cell.size.x <= 0.0:
+		return
+	if cell_name != "bed":
+		_shadow(o, w, h, 1.5)
+	var dw := cell.size.x * DORM_SCALE
+	var dh := cell.size.y * DORM_SCALE
+	draw_texture_rect_region(tex,
+		Rect2(o.x + (w - dw) * 0.5, o.y + h - dh, dw, dh), cell)
+
+
+## kind → 图集 cell 名
+const _DORM_KIND_CELL := {
+	"dormbed": "bed",
+	"wardrobe": "wardrobe",
+	"dbshelf": "bookshelf",
+	"dshelf": "shelf",
+	"pcdesk": "desk_pc",
+	"ddesk": "desk",
+	"dtable": "table",
+	"dstool": "stool",
+	"dbox": "box",
+}
 
 
 ## 木箱 / 柜子一类：顶面亮、正面暗，加一圈包边
@@ -268,12 +331,17 @@ func _window(o: Vector2, w: float, h: float) -> void:
 	draw_rect(Rect2(o.x + fw, top + fw, w - fw * 2.0, 2.0),
 		Color(0.36, 0.52, 0.62, 0.35))
 
-	# 窗棂：竖向每 30px 一道 + 中间一道横档。窗高 112px，横档落在栏杆高度
-	# 附近，人站在窗前看出去才像窗，不像一整块贴图。
-	var xx := o.x + 30.0
-	while xx < o.x + w - fw - 1.0:
+	# 窗棂：竖向竖档 + 中间一道横档。宽窗（图书馆那排 120px）每 30px 一道；
+	# 窄窗（宿舍 5 格 ≈ 43px）只立一道正中的，不然唯一那道会偏在一边。
+	var xx := 0.0
+	if w >= 60.0:
+		xx = o.x + 30.0
+		while xx < o.x + w - fw - 1.0:
+			draw_rect(Rect2(xx, top + fw, 2.0, wh - fw * 2.0), Color("f4f8fb"))
+			xx += 30.0
+	elif w > 14.0:
+		xx = o.x + w * 0.5 - 1.0
 		draw_rect(Rect2(xx, top + fw, 2.0, wh - fw * 2.0), Color("f4f8fb"))
-		xx += 30.0
 	draw_rect(Rect2(o.x + fw, top + wh * 0.5 - 1.0, w - fw * 2.0, 2.0), Color("f4f8fb"))
 	# 窗台：一条亮边把窗和地板接起来
 	draw_rect(Rect2(o.x - 1.0, o.y + h - 3.0, w + 2.0, 3.0), Color("ffffff"))

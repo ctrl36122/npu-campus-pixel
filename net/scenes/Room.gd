@@ -315,7 +315,7 @@ func _setup_glow() -> void:
 		var kind := String(p.get("k", ""))
 		var cx := (float(p["x"]) + float(p["w"]) * 0.5) * TS
 		match kind:
-			"desk":
+			"desk", "ddesk", "pcdesk", "dtable":
 				# 屏幕中心：桌面靠后那一带
 				spots.append({
 					"pos": Vector2(cx, float(p["y"]) * TS + 5.0),
@@ -479,6 +479,17 @@ func _bake_minimap() -> Texture2D:
 		"cushion": Color("6b5a80"),
 		"pit": Color("232830"),
 		"rail": Color("9fb8c9"),
+		# OGA 宿舍家具（dorm_space 的新 kind）—— 小地图上按类着色，
+		# 未收录的 kind 会落成灰色块，看着像未知的洞
+		"dormbed": Color("cbb9a6"),
+		"ddesk": Color("5d93cc"),
+		"pcdesk": Color("5d93cc"),
+		"dtable": Color("9a7a52"),
+		"wardrobe": Color("866c4a"),
+		"dbshelf": Color("866c4a"),
+		"dshelf": Color("866c4a"),
+		"dstool": Color("866c4a"),
+		"dbox": Color("866c4a"),
 	}
 
 	# 隔间地面：每间一块，小地图上就成了一排小格子 —— 一眼认得出这是「隔间房」
@@ -505,7 +516,7 @@ func _bake_minimap() -> Texture2D:
 		var kind := String(p.get("k", ""))
 		var rect := Rect2(float(p["x"]), float(p["y"]), float(p["w"]), float(p["h"]))
 		_fill_cells(img, rect, k, COL.get(kind, Color("888888")))
-		if kind == "desk":
+		if kind == "desk" or kind == "ddesk" or kind == "pcdesk":
 			# 屏幕画个亮点，小地图上也看得出哪几个机位
 				_fill_cells(img, Rect2(rect.position.x + rect.size.x * 0.26, rect.position.y + 0.8,
 				rect.size.x * 0.48, 1.6), k, Color("b8f0ff"))

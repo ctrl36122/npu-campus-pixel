@@ -606,6 +606,10 @@ macOS 预设的要点写在 `export_presets.example.cfg` 末尾的注释里：�
   （**CC0**，见 `assets/oga_src/mini_park/LICENSE.txt`），由 `tools/import_oga_props.py`
   抠掉纯色绿底后铺进 `assets/props_bench.png`，贴图尺寸不变所以位置/碰撞都不动。
   （花坛、花盆试过同批素材，压到 36×18 / 24×24 后比原版更碎，保留原样）
+- 宿舍家具：床 / 衣柜 / 书架 / 书桌等贴图来自 [OpenGameArt · Top-Down Home Furniture]
+  （© hooded-crow，**CC-BY 3.0**，见 `assets/oga_src/dorm_furniture/LICENSE.txt`）。
+  由 `tools/import_dorm_furniture.py` 从原 sheet 2:1 切片出 `assets/room_dorm.png`，
+  宿舍布局由 `tools/update_dorm_layout.py` 幂等重排
 - 音效：脚步声来自 [kdd] Different Steps 采样包（见 `assets/steps/`）；雨天环境音为第三方录音（`references/Dark_Rainy_Night(ambience).ogg`，不入库，缺文件时自动回退程序合成的雨声）；背景音乐为第三方曲目、不入库
 - 代码：MIT
 - **本项目是校园爱好者的非官方作品**，与西北工业大学官方无关；校名、校徽等标识归学校所有，

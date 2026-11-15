@@ -1,0 +1,9 @@
+OpenGameArt: Top-Down Home Furniture
+https://opengameart.org/content/top-down-home-furniture
+Author: hooded-crow
+License: CC-BY 3.0
+https://creativecommons.org/licenses/by/3.0/
+
+本目录保存切图用的原始 sprite sheet（top_down_bed_room.png）。
+加工后的图集 assets/room_dorm.png 由 tools/import_dorm_furniture.py 生成，
+随游戏一起分发（CC-BY 允许带署名二次分发，署名见 README.md「数据与声明」）。
