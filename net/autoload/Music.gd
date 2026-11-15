@@ -11,6 +11,8 @@ extends Node
 ## 素材放在 assets/music/，**不进 git**（第三方音乐，不做二次分发），
 ## 缺文件时整块静音、不报错，clone 下来的仓库照常能跑。
 ## 想换曲子只改下面的 TRACKS，键名别动（Arena / 设置面板都按键名调用）。
+##
+## 响度：滑杆值(_volume) × AudioLevel.MASTER（全局校准，见 net/scripts/audio_level.gd）。
 
 const TRACKS := {
 	"menu": "res://assets/music/menu.wav",
@@ -202,7 +204,8 @@ func _fade_out(p: AudioStreamPlayer, dur: float) -> void:
 func _gain_db() -> float:
 	if _muted or _volume <= 0.001:
 		return -80.0
-	return linear_to_db(_volume)
+	# 全局响度校准：和脚步、雨声共用同一个系数，别在这里单独写数字
+	return linear_to_db(_volume * AudioLevel.MASTER)
 
 
 func _push_gain() -> void:
@@ -230,6 +233,9 @@ func _load_prefs() -> void:
 
 func _save_prefs() -> void:
 	var cfg := ConfigFile.new()
+	# ⚠️ 必须先 load：audio.cfg 里还有 Sfx 的 sfx / sfx_muted 两栏，
+	# 直接从空 ConfigFile 存会把它们整段冲掉（调一次音乐音量，音效设置就没了）。
+	cfg.load(VOLUME_PATH)
 	cfg.set_value("audio", "music", _volume)
 	cfg.set_value("audio", "muted", _muted)
 	cfg.save(VOLUME_PATH)

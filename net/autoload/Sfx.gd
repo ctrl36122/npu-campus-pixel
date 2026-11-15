@@ -21,6 +21,8 @@ extends Node
 ##
 ## 只给**本地玩家**出声：远端玩家的脚步要靠位置同步 + 距离衰减才有意义，
 ## 现在没有那套东西，硬放会在联机时变成一片乱响。
+##
+## 响度：滑杆值(_volume) × AudioLevel.MASTER（全局校准，见 net/scripts/audio_level.gd）。
 
 const RATE := 22050
 const VOICES := 4                 # 每种材质合成多少个变体
@@ -104,7 +106,8 @@ func footstep(at: Vector2) -> void:
 	# 真录音本身就有强弱变化，音高抖动收窄；合成音是同一个模子，抖宽一点才不机械
 	p.pitch_scale = _rng.randf_range(0.97, 1.03) if is_sample else _rng.randf_range(0.93, 1.08)
 	# 合成音在 _synth 里已经乘过 level；真录音统一按峰值归一，响度平衡得在这里补
-	var gain: float = _volume * _rng.randf_range(0.86, 1.0)
+	# 全局响度校准：和音乐、雨声共用同一个系数
+	var gain: float = _volume * AudioLevel.MASTER * _rng.randf_range(0.86, 1.0)
 	if is_sample:
 		gain *= float(TIMBRE.get(kind, {}).get("level", 0.85))
 	p.volume_db = linear_to_db(gain)

@@ -13,7 +13,7 @@ extends Node
 ##   （恒定音量的白噪听着像电流，会动的才是雨）。零素材、clone 后照样有雨声。
 ##
 ## 音量跟 Weather.rain_strength() 走；进屋（Sfx.indoor）压低一截；
-## 遵守设置里的音效音量与静音。
+## 遵守设置里的音效音量与静音，并和音乐/脚步共用 AudioLevel.MASTER 全局校准。
 
 const SAMPLE := "res://assets/ambience/rain.ogg"
 const LOOP_OFFSET := 24.0     # 秒：跳过源文件开头的静音 + 渐强段，落到平稳雨声
@@ -96,10 +96,12 @@ func _process(delta: float) -> void:
 	var rain := Weather.rain_strength()
 	var target := -80.0
 	if rain > 0.02:
-		# 小雨 -34dB 起，大雨 -14dB 封顶；别盖过 BGM 和脚步
+		# 小雨 -34dB 起，大雨 -14dB 封顶（这是校准前的基准）；别盖过 BGM 和脚步
 		target = lerpf(-34.0, -14.0, clampf(rain * 1.15, 0.0, 1.0))
 		if _using_sample:
 			target += SAMPLE_GAIN
+		# 全局响度校准：雨声是 dB 链路，加同一个系数的 dB 形式
+		target += AudioLevel.trim_db()
 		# 用户在设置里关了音效/拉了音量，得认
 		if Sfx.muted():
 			target = -80.0
