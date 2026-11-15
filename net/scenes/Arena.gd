@@ -1116,6 +1116,12 @@ func _setup_weather() -> void:
 	_wx_fx.name = "Fx"
 	_wx_layer.add_child(_wx_fx)
 
+	# 雨声：程序合成的循环噪声，音量跟雨强走（屋里隔窗听，压一截）
+	var rain_snd := Node.new()
+	rain_snd.name = "RainAudio"
+	rain_snd.set_script(load("res://net/scripts/rain_audio.gd"))
+	_wx_layer.add_child(rain_snd)
+
 
 func _update_weather() -> void:
 	if _wx_mat != null:

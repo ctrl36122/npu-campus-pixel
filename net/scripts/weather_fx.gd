@@ -15,6 +15,7 @@ extends Node2D
 
 const MAX_DROPS := 420
 const MAX_FLAKES := 300
+const MAX_SPLASH := 150
 const WIND_X := -190.0          ## 雨的横向漂移（px/s），负值往西斜
 
 var _dx := PackedFloat32Array()
@@ -22,6 +23,10 @@ var _dy := PackedFloat32Array()
 var _dv := PackedFloat32Array()
 var _dl := PackedFloat32Array()
 var _dp := PackedFloat32Array()
+var _dg := PackedFloat32Array()   # 每滴雨的「落地线」——到这行就溅水花
+
+## 落地水花：{x, y, t}，t 从 0 涨到 0.3 淡掉
+var _splashes: Array = []
 
 var _fx := PackedFloat32Array()
 var _fy := PackedFloat32Array()
@@ -45,6 +50,7 @@ func _build() -> void:
 	_dv.resize(MAX_DROPS)
 	_dl.resize(MAX_DROPS)
 	_dp.resize(MAX_DROPS)
+	_dg.resize(MAX_DROPS)
 	for i in MAX_DROPS:
 		_seed_drop(i, s, true)
 	_fx.resize(MAX_FLAKES)
@@ -68,6 +74,8 @@ func _seed_drop(i: int, s: Vector2, anywhere: bool) -> void:
 	_dv[i] = _rng.randf_range(880.0, 1380.0)
 	_dl[i] = _rng.randf_range(26.0, 56.0)
 	_dp[i] = _rng.randf_range(0.60, 1.0)
+	# 落地线撒在屏幕下 2/3 —— 视野里地面占大头，溅在下 2/3 看着最自然
+	_dg[i] = _rng.randf_range(s.y * 0.30, s.y + 16.0)
 
 
 func _seed_flake(i: int, s: Vector2, anywhere: bool) -> void:
@@ -95,10 +103,22 @@ func _process(delta: float) -> void:
 	for i in n_drop:
 		_dy[i] += _dv[i] * delta
 		_dx[i] += wind * delta
-		if _dy[i] - _dl[i] > s.y or _dx[i] < -30.0:
+		if _dy[i] >= _dg[i]:
+			# 到落地线了：四分之三的雨滴溅个水花（全溅会太闹），然后重新从天上掉
+			if _splashes.size() < MAX_SPLASH and _rng.randf() < 0.75:
+				_splashes.append({"x": _dx[i], "y": _dg[i], "t": 0.0})
 			_seed_drop(i, s, false)
 			_dx[i] = _rng.randf_range(s.x * 0.4, s.x + 30.0) if wind < 0.0 \
 				else _rng.randf_range(-20.0, s.x + 20.0)
+		elif _dy[i] - _dl[i] > s.y or _dx[i] < -30.0:
+			_seed_drop(i, s, false)
+			_dx[i] = _rng.randf_range(s.x * 0.4, s.x + 30.0) if wind < 0.0 \
+				else _rng.randf_range(-20.0, s.x + 20.0)
+
+	# 水花生命周期
+	for sp in _splashes:
+		sp["t"] = float(sp["t"]) + delta
+	_splashes = _splashes.filter(func(sp): return float(sp["t"]) < 0.30)
 
 	# 雪：慢，左右摆
 	for i in n_flake:
@@ -144,3 +164,16 @@ func _draw() -> void:
 		draw_rect(Rect2(x2 - 2.0, y2 - 2.0, 6.0, 6.0),
 			Color(1.0, 1.0, 1.0, 0.16 * _dp[i]))
 		draw_rect(Rect2(x2, y2, 3.0, 3.0), Color(1.0, 1.0, 1.0, 0.94 * _dp[i]))
+	# 落地水花：中间一点 + 左右两个外扩的点，一起变淡
+	for sp in _splashes:
+		var k: float = float(sp["t"]) / 0.30
+		var a := (1.0 - k) * 0.72
+		var cx := float(sp["x"])
+		var cy := float(sp["y"])
+		var e := 1.5 + k * 5.5     # 两侧外扩的距离
+		draw_rect(Rect2(roundf(cx) - 1.0, roundf(cy), 2.0, 2.0),
+			Color(0.92, 0.96, 1.0, a * 0.8))
+		draw_rect(Rect2(roundf(cx - e), roundf(cy - 1.0), 2.0, 1.0),
+			Color(0.88, 0.94, 1.0, a))
+		draw_rect(Rect2(roundf(cx + e), roundf(cy - 1.0), 2.0, 1.0),
+			Color(0.88, 0.94, 1.0, a))
