@@ -613,7 +613,8 @@ macOS 预设的要点写在 `export_presets.example.cfg` 末尾的注释里：�
   （© hooded-crow，**CC-BY 3.0**，见 `assets/oga_src/dorm_furniture/LICENSE.txt`）。
   由 `tools/import_dorm_furniture.py` 从原 sheet 2:1 切片出 `assets/room_dorm.png`，
   宿舍布局由 `tools/update_dorm_layout.py` 幂等重排
-- 音效：脚步声来自 [kdd] Different Steps 采样包（见 `assets/steps/`）；雨天环境音为第三方录音（`references/Dark_Rainy_Night(ambience).ogg`，不入库，缺文件时自动回退程序合成的雨声）；背景音乐为第三方曲目、不入库
+- 音效：脚步声来自 [kdd] Different Steps 采样包（见 `assets/steps/`）；雨天环境音为第三方录音（`references/Dark_Rainy_Night(ambience).ogg`，不入库，缺文件时自动回退程序合成的雨声）；背景音乐为第三方曲目、不入库，由 `tools/import_music.py` 从 `references/` 转码到 `assets/music/`
+- 背景音乐按天气/场景分配（`net/autoload/Music.gd`）：校园晴/阴用 Winter Snow、雨天沿用原校园曲（按昼夜两首）、雪天用 8bit 版 Winter Snow、宿舍用 8bit 版 Next to You、加载/声明页用 Loop-Menu；**图书馆与自习室不放 BGM**，只留下雨时的环境雨声
 - 代码：MIT
 - **本项目是校园爱好者的非官方作品**，与西北工业大学官方无关；校名、校徽等标识归学校所有，
   仅用于校园文化展示，不作商业用途

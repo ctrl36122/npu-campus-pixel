@@ -1,5 +1,5 @@
 extends SceneTree
-## 背景音乐自测：素材能否加载、场景切换键名、循环开关、音量/静音的存档往返。
+## 背景音乐自测：素材能否加载、天气/场景切换键名、图书馆静音、音量/静音的存档往返。
 ##
 ## 用法：
 ##   APPDATA=<临时目录> godot --headless --path . --script res://tools/_test_music.gd
@@ -7,10 +7,16 @@ extends SceneTree
 ##       这些属性照常，够验证逻辑。真机出声另跑截图。
 ##
 ## 用临时 APPDATA 隔离，是因为这条测试会写 user://audio.cfg。
+## ⚠️ --headless --script 下 Godot 仍会挂真的 autoload：Weather 要复用 /root/Weather，
+##    再 add_child 一个同名节点会被自动改名 Weather2，改了桩根本不生效。
 
 var _ok := 0
 var _bad := 0
 var _done := false
+
+
+class WeatherStub extends Node:
+	var kind: int = 0
 
 
 func _process(_d: float) -> bool:
@@ -32,24 +38,32 @@ func _check(name: String, cond: bool, extra: String = "") -> void:
 		print("  FAIL ", name, "  " + extra)
 
 
-## 场景里真的有 autoload 就用它，否则手动建一个（脚本逻辑完全一样）
-func _music() -> Node:
+## 改天气并立刻重算（不等下一帧）
+func _weather(m: Node, k: int) -> void:
+	var w := root.get_node_or_null("/root/Weather")
+	if w != null:
+		w.set("kind", k)
+	m.call("_refresh")
+
+
+func _run() -> void:
+	if root.get_node_or_null("/root/Weather") == null:
+		var stub := WeatherStub.new()
+		stub.name = "Weather"
+		root.add_child(stub)
+		print("  (没挂 Weather autoload，用桩)")
 	var m: Node = root.get_node_or_null("Music")
 	if m == null:
 		m = load("res://net/autoload/Music.gd").new()
 		m.name = "Music"
 		root.add_child(m)
-		print("  (--script 模式没挂 autoload，手动实例化)")
-	return m
-
-
-func _run() -> void:
-	var m := _music()
+		print("  (--script 模式没挂 Music autoload，手动实例化)")
 
 	print("[music] 素材与循环")
-	_check("五首里至少有一首能加载", bool(m.call("available")))
+	_check("六首里至少有一首能加载", bool(m.call("available")))
 	# 菜单那首是 wav（要保持无缝循环），其余是转码过的 mp3
-	for key in ["menu", "campus_day", "campus_night", "dorm", "study"]:
+	for key in ["menu", "campus_clear", "campus_rain_day", "campus_rain_night",
+			"campus_snow", "dorm"]:
 		var ext := ".wav" if key == "menu" else ".mp3"
 		var path := "res://assets/music/%s%s" % [key, ext]
 		if not FileAccess.file_exists(path):
@@ -64,17 +78,48 @@ func _run() -> void:
 	_check("开机默认放菜单曲", str(m.call("current_key")) == "menu", str(m.call("current_key")))
 	m.call("set_menu", false)
 
+	print("[music] 校园按天气选曲")
+	_weather(m, 0)
+	_check("晴 -> campus_clear", str(m.call("current_key")) == "campus_clear",
+		str(m.call("current_key")))
+	_weather(m, 1)
+	_check("阴跟晴天同一首", str(m.call("current_key")) == "campus_clear",
+		str(m.call("current_key")))
+	_weather(m, 2)
+	var rain_key := str(m.call("current_key"))
+	_check("雨 -> 校园雨天曲", rain_key == "campus_rain_day" or rain_key == "campus_rain_night",
+		rain_key)
+	var dn := root.get_node_or_null("/root/DayNight")
+	if dn != null:
+		var want_day := float(dn.call("daylight")) > 0.35
+		_check("  雨天昼夜跟 DayNight 一致", (rain_key == "campus_rain_day") == want_day,
+			"daylight=%s" % dn.call("daylight"))
+	_weather(m, 3)
+	_check("雪 -> campus_snow", str(m.call("current_key")) == "campus_snow",
+		str(m.call("current_key")))
+	_weather(m, 0)
+	_check("回到晴 -> campus_clear", str(m.call("current_key")) == "campus_clear",
+		str(m.call("current_key")))
+
 	print("[music] 场景切换")
 	m.call("set_room_kind", "dorm")
 	_check("宿舍 -> dorm", str(m.call("current_key")) == "dorm", str(m.call("current_key")))
 	_check("宿舍曲在播", bool(m.call("playing")))
 
 	m.call("set_room_kind", "study")
-	_check("自习空间 -> study", str(m.call("current_key")) == "study", str(m.call("current_key")))
+	_check("图书馆 -> 静音（没曲目）", str(m.call("current_key")) == "",
+		str(m.call("current_key")))
+	_check("图书馆不放 BGM", not bool(m.call("playing")))
+	_weather(m, 3)
+	_check("图书馆里换天气也不冒出 BGM", str(m.call("current_key")) == "",
+		str(m.call("current_key")))
 
 	m.call("set_room_kind", "")
-	var campus := str(m.call("current_key"))
-	_check("回校园按昼夜选曲", campus == "campus_day" or campus == "campus_night", campus)
+	_weather(m, 2)
+	var back_key := str(m.call("current_key"))
+	_check("出图书馆回雨天校园", back_key == "campus_rain_day" or back_key == "campus_rain_night",
+		back_key)
+	_weather(m, 0)
 
 	print("[music] 音量 / 静音 / 存档")
 	m.call("set_volume", 0.3)

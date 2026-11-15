@@ -5,16 +5,28 @@
 用法:
     python tools/import_music.py                     # 按下面的 SOURCES 转码
     python tools/import_music.py --dry               # 只看会做什么
+    python tools/import_music.py --only campus_snow  # 只补某一首
+
+输出名 = Music.gd 的曲目键，按用途分（别随便改名）：
+    menu              加载 / 声明页 loop（WAV 原样拷贝，无缝）
+    campus_clear      校园 · 晴 / 阴（原图书馆那首 Winter Snow）
+    campus_rain_day   校园 · 雨天 · 白天
+    campus_rain_night 校园 · 雨天 · 夜晚
+    campus_snow       校园 · 雪天（8bit 版 Winter Snow）
+    dorm              宿舍（8bit 版 Next to You）
+    图书馆 / 自习室  不放 BGM，只留雨天的环境雨声
 
 为什么转码:
-    原素材有的是 320kbps 立体声（3 分钟就 7.7MB），四条加起来 18MB，
-    手机包里太占地方。背景音乐 96kbps 已经完全够用，体积能砍一半。
+    原素材有的是 320kbps 立体声，8bit 那两首更是 48kHz WAV 16MB / 46MB，
+    手机包里太占地方。背景音乐 96~160kbps 已经够用，体积能砍一半以上。
 
 依赖: pip install av   （PyAV，自带 ffmpeg，不用另外装 ffmpeg.exe）
 
 注意:
     assets/music/ 里的成品**不进 git**（第三方音乐不做二次分发），
     但本地打包会带上。clone 后缺文件时 Music.gd 自动静音，不影响跑。
+    新增 / 改名 mp3 后要跑 godot --headless --path . --import，
+    并把新生成的 .import 里 loop 设成 true（Godot 默认给 false）。
 """
 from __future__ import annotations
 
@@ -33,11 +45,15 @@ OUT_DIR = GAME / "assets" / "music"
 
 # 输出名（别改，Music.gd 的 TRACKS 按键名找文件）-> (源文件, 码率)
 SOURCES = {
-    "campus_day": (ROOT / "references" / "walking_to_the_park_at_3_a.m.mp3", 96_000),
-    "campus_night": (ROOT / "references" / "brain_fog.mp3", 96_000),
-    # 宿舍曲：用户指定的 8bit 版（48kHz 立体声 WAV 16MB，转 mp3 省地方）
+    # 晴 / 阴：原来是图书馆那首，用户要求挪到校园晴天
+    "campus_clear": (ROOT / "references" / "Winter Snow.mp3", 96_000),
+    # 雨天：沿用原来那两首校园曲，仍按昼夜分
+    "campus_rain_day": (ROOT / "references" / "walking_to_the_park_at_3_a.m.mp3", 96_000),
+    "campus_rain_night": (ROOT / "references" / "brain_fog.mp3", 96_000),
+    # 雪天：用户指定的 8bit 版 Winter Snow（48kHz 立体声 WAV 46MB）
+    "campus_snow": (ROOT / "references" / "8bit-Winter Snow.wav", 160_000),
+    # 宿舍曲：用户指定的 8bit 版 Next to You（48kHz 立体声 WAV 16MB）
     "dorm": (ROOT / "references" / "8bit-Next to You.wav", 160_000),
-    "study": (ROOT / "references" / "Winter Snow.mp3", 96_000),
 }
 
 # 菜单循环曲只有 ~15 秒，**不做有损转码**：lossy 编码会在首尾补静音，

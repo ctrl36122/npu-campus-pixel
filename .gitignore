@@ -84,7 +84,7 @@ assets/room_seats.png
 assets/room_seats.png.import
 
 # ── 背景音乐（第三方音乐，不做二次分发）─────────────────────
-# 四条曲子由 tools/import_music.py 从 references/*.mp3 转码到 assets/music/，
+# 六首曲子由 tools/import_music.py 从 references/ 转码到 assets/music/，
 # 只留本机、不进仓库；clone 后缺文件时 Music.gd 自动静音，游戏照常能跑。
 assets/music/
 
