@@ -602,10 +602,13 @@ macOS 预设的要点写在 `export_presets.example.cfg` 末尾的注释里：�
   （© Luis Zuno / @ansimuz，**CC0**，见 `assets/oga_src/trees_bushes/license.txt`）。
   用 PSD 的透明 `vegetation` 图层按 `tools/import_oga_trees.py` 铺进 `assets/decor_0.png` 前 5 格；
   完整原包（含 PSD）不入库，放在项目根 `references/oga/trees_bushes/`
-- 长椅：176 张公园长椅来自 [OpenGameArt · Park - Mini Sprite Pack](https://opengameart.org/content/park-mini-sprite-pack)
-  （**CC0**，见 `assets/oga_src/mini_park/LICENSE.txt`），由 `tools/import_oga_props.py`
-  抠掉纯色绿底后铺进 `assets/props_bench.png`，贴图尺寸不变所以位置/碰撞都不动。
-  （花坛、花盆试过同批素材，压到 36×18 / 24×24 后比原版更碎，保留原样）
+- 长椅：176 张公园长椅来自 [OpenGameArt · Cozy Farm Village Lite](https://opengameart.org/content/cozy-farm-village-lite-16x16-cottage-cobblestone-baker)
+  （© Bramble & Byte，**CC-BY 4.0**，见 `assets/oga_src/cozy_farm/LICENSE.txt`）。
+  署名：「Cozy Farm Village Lite」by Bramble & Byte — https://aquumgifts.itch.io 。
+  由 `tools/import_oga_props.py` 把 `props/2x/bench.png` 等比降到 24×11、再纵向拉到 24×18
+  铺进 `assets/props_bench.png`，保住横向 2:1 比例、贴图尺寸不变所以位置/碰撞都不动。
+  （早前那版 Park - Mini Sprite Pack 把 59×29 的横向长椅硬压成方形，靠背网格变成黑白棋盘，已弃用；
+  花坛、花盆试过同批素材，压到 36×18 / 24×24 后比原版更碎，保留原样）
 - 宿舍家具：床 / 衣柜 / 书架 / 书桌等贴图来自 [OpenGameArt · Top-Down Home Furniture]
   （© hooded-crow，**CC-BY 3.0**，见 `assets/oga_src/dorm_furniture/LICENSE.txt`）。
   由 `tools/import_dorm_furniture.py` 从原 sheet 2:1 切片出 `assets/room_dorm.png`，
