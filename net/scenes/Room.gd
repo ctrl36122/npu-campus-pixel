@@ -12,6 +12,7 @@ const RoomProp := preload("res://net/scripts/room_prop.gd")
 const RoomGlow := preload("res://net/scripts/room_glow.gd")
 const RoomDoor := preload("res://net/scripts/room_door.gd")
 const RoomSky := preload("res://net/scripts/room_sky.gd")
+const RoomWindowView := preload("res://net/scripts/room_window_view.gd")
 
 const TS := 8.0
 const ROOM_SCALE := 2.0
@@ -20,6 +21,10 @@ const EDGE_T := 24.0
 ## 房间背后那片天左右各外扩多少（局部像素）。相机横向本来就够不到房间外，
 ## 这里只是让「地板边缘 → 天空」那条交界不会在地板外侧露出黑色。
 const SKY_PAD := 320.0
+## 窗洞那条「窗外」带子在房间局部坐标里的上下沿（像素）。北墙立面在 3..16，
+## 带子上下各留几像素余量：山脚压在带子底边往上 5px，正好落在窗台后面。
+const WINDOW_VIEW_TOP := -2.0
+const WINDOW_VIEW_BOTTOM := 21.0
 
 ## 本节点在父空间里的缩放。独立跑（调试）时是 2.0；挂进 campus/Objects
 ## （那里已经是 8px/格 的局部空间）时要设 1.0，否则整个房间会被放大一倍。
@@ -132,15 +137,27 @@ func title() -> String:
 
 
 ## 房间最北的可视内容在哪儿（局部像素，负值＝伸出房间矩形上沿之外）。
-## 北墙落地窗是往上长的，会超出房间矩形一大截；相机边界必须按它放宽，
+## 图书馆那面玻璃幕墙是往上长的，会超出房间矩形一大截；相机边界必须按它放宽，
 ## 否则镜头推到顶也只看得见窗最下面那一条，窗外那片天等于白做。
-## 没有窗的房间（宿舍 / B1 活动室）返回 0，相机限制保持原样。
+##
+## 宿舍的落地窗嵌在墙立面里（y = 0.4 格起，全在房间矩形内），最小 y 落在 0，
+## 因此**不会**触发放宽 —— 宿舍的镜头保持原样，不加高、不抬高。
 func view_top_px() -> float:
 	var top := 0.0
 	for item in data.get("props", []):
 		if String((item as Dictionary).get("k", "")) == "window":
 			top = minf(top, float((item as Dictionary).get("y", 0.0)) * TS)
 	return top
+
+
+## 这间屋有没有「嵌在墙立面里的窗」（宿舍那种）。有的话才需要那条窗外带子 ——
+## 图书馆的幕墙是往上伸出房间的，窗里看到的直接就是 RoomSky 本身。
+func _has_panel_window() -> bool:
+	for item in data.get("props", []):
+		var p: Dictionary = item
+		if String(p.get("k", "")) == "window" and bool(p.get("panel", false)):
+			return true
+	return false
 
 
 # ---------------------------------------------------------------- 搭建
@@ -158,6 +175,17 @@ func _build() -> void:
 	sky.z_index = -200
 	sky.call("setup", size_px, SKY_PAD)
 	add_child(sky)
+
+	# 北墙窗洞里看到的「窗外」：一条压扁的天空带 + 四层远山，夹在天空层和
+	# 地板之间。地板在北墙那道墙脚上挖了洞（见 _bake_floor 末尾）、墙立面在
+	# 窗的位置也留了空（face_gap），所以窗玻璃是真的透 —— 透出来的就是这条带子。
+	# 没有嵌墙窗的房间（图书馆的幕墙是往上伸的）不需要它。
+	if _has_panel_window():
+		var view := RoomWindowView.new()
+		view.name = "WindowView"
+		view.z_index = -150
+		add_child(view)
+		view.call("setup", size_px.x, WINDOW_VIEW_TOP, WINDOW_VIEW_BOTTOM)
 
 	var floor_spr := Sprite2D.new()
 	floor_spr.name = "Floor"
@@ -269,6 +297,12 @@ func _add_prop(kind: String, r: Dictionary, z: int = 0) -> void:
 	# 同类道具换款式（沙发/扶手椅选哪一张）—— 数据里写 "v"，没写就是 0
 	if r.has("v"):
 		n.set("variant", int(r["v"]))
+	# 窗的画法：true = 嵌在墙里的落地窗（宿舍），false = 往上伸的玻璃幕墙（图书馆）
+	if r.has("panel"):
+		n.set("panel", bool(r["panel"]))
+	# 窗洞段：立面留空（只画墙顶的挤出），玻璃透出去就是房间背后那片天
+	if r.has("face_gap"):
+		n.set("face_gap", bool(r["face_gap"]))
 	n.call("setup", kind, Rect2(float(r["x"]), float(r["y"]), float(r["w"]), float(r["h"])), z)
 
 
@@ -446,6 +480,22 @@ func _bake_floor() -> Image:
 		for i in range(1, 6):
 			var ly := ey + int(float(eh) * float(i) / 6.0)
 			_blend(img, Rect2i(ex + 3, ly, ew - 6, 1), Color(1, 1, 1, 0.05))
+
+	# ── 窗洞：地板在北墙那道墙脚上挖空 ──
+	# 窗玻璃是透明的，可它后面原本压着这张地板图（墙脚那一带也是地板烘出来的）。
+	# 不挖掉，透出来的就是地板色 —— 窗变成一块刷了漆的板子。挖空之后，
+	# 玻璃透出来的是房间背后那片天（RoomSky 的云和山），窗里窗外同一个天色。
+	# 挖的尺寸跟 RoomProp._window_panel 的玻璃一致（四边各让 1px 给框、1px 给窗台）。
+	for item in data.get("props", []):
+		var wn: Dictionary = item
+		if String(wn.get("k", "")) != "window" or not bool(wn.get("panel", false)):
+			continue
+		var hx := int(roundf(float(wn["x"]) * TS)) + 1
+		var hy := int(roundf(float(wn["y"]) * TS)) + 1
+		var hw := int(roundf(float(wn["w"]) * TS)) - 2
+		var hh := int(roundf(float(wn["h"]) * TS)) - 3
+		if hw > 0 and hh > 0:
+			img.fill_rect(Rect2i(hx, hy, hw, hh), Color(0, 0, 0, 0))
 
 	return img
 

@@ -21,7 +21,8 @@ const SOFA_H := 54
 const CHAIR_W := 22
 const CHAIR_H := 26
 ## 窗外天空只有一张贴图：房间背后那层天（assets/room_sky_bg.png）。
-## 窗户玻璃本身是透明的，直接透出它，所以这里不需要再存一份「窗景」。
+## 窗玻璃本身是透明的，屋里那点「洞」透的就是它 —— 所以窗里窗外永远是
+## 同一个天色，不另存一份「窗景」，也就不会有第二套地平线。
 
 static var _books_tex: Texture2D = null
 static var _seats_tex: Texture2D = null
@@ -138,6 +139,12 @@ var kind: String = "table"
 var cell := Rect2()
 ## 亮房（图书馆自习空间）：墙/桌面换成浅色，宿舍与活动室保持原样。
 var bright := false
+## 窗的画法：true = 嵌在墙立面里的落地窗（宿舍），false = 往上伸的玻璃幕墙（图书馆）。
+## 由房间数据里的 "panel" 带进来，默认 false。
+var panel := false
+## 墙的立面留空（窗洞段）：只画墙顶那道挤出，正面（立面）不画 —— 那段墙的
+## 位置留给窗，玻璃是透明的，透出来就是房间背后那片天。
+var face_gap := false
 ## 同类道具换款式用的下标：沙发/扶手椅选哪一张、摊开的书选哪一色。
 ## 由房间数据里的 "v" 字段带进来，默认 0。
 var variant: int = 0
@@ -288,7 +295,6 @@ func _rail(o: Vector2, w: float, h: float) -> void:
 # ---------------------------------------------------------------- 隔断墙
 
 func _wall(o: Vector2, w: float, h: float) -> void:
-	_shadow(o, w, h)
 	# 亮房的墙是米白涂料，暗房是深灰隔板 —— 同一套挤出画法，只换色
 	var face := Color("b9c6d2") if bright else Color("39414b")
 	var face_lo := Color("a3b3c1") if bright else Color("2b323b")
@@ -296,14 +302,19 @@ func _wall(o: Vector2, w: float, h: float) -> void:
 	var top_hi := Color("ffffff") if bright else Color("7f8b99")
 	var top_l := Color("f2f7fb") if bright else Color("69737f")
 	var top_r := Color("c3d0db") if bright else Color("4b535e")
-	# 正面（背光）
-	draw_rect(Rect2(o.x, o.y + h - RISE_WALL, w, RISE_WALL), face)
-	draw_rect(Rect2(o.x, o.y + h - RISE_WALL, w, 1.0), face_lo)
+	# 正面（背光）。face_gap 段是窗洞：立面整段留空，墙顶那道挤出照画，
+	# 墙的轮廓才不会在窗上开天窗
+	if not face_gap:
+		_shadow(o, w, h)
+		draw_rect(Rect2(o.x, o.y + h - RISE_WALL, w, RISE_WALL), face)
+		draw_rect(Rect2(o.x, o.y + h - RISE_WALL, w, 1.0), face_lo)
 	# 顶面（受光）
 	draw_rect(Rect2(o.x, o.y - RISE_WALL, w, h), top)
 	draw_rect(Rect2(o.x, o.y - RISE_WALL, w, 1.0), top_hi)
-	draw_rect(Rect2(o.x, o.y - RISE_WALL, 1.0, h), top_l)
-	draw_rect(Rect2(o.x + w - 1.0, o.y - RISE_WALL, 1.0, h), top_r)
+	# 窗洞段的左右是墙的延续，不能画 1px 边线，否则墙顶面被切成一段一段
+	if not face_gap:
+		draw_rect(Rect2(o.x, o.y - RISE_WALL, 1.0, h), top_l)
+		draw_rect(Rect2(o.x + w - 1.0, o.y - RISE_WALL, 1.0, h), top_r)
 	# 顶面的板缝：每 16px 一道，看得出是拼起来的隔板
 	var xx := 16.0
 	while xx < w - 2.0:
@@ -311,13 +322,23 @@ func _wall(o: Vector2, w: float, h: float) -> void:
 		xx += 16.0
 
 
-## 落地窗：贴在墙内侧、往上长出一整面玻璃。不画落地阴影（窗不是家具），
-## 也不参与碰撞。只用在 bright 房间，暗房里没有这个 kind。
+## 窗户。两种画法，由数据里的 "panel" 决定 ——
 ##
-## **玻璃本身不画**：只画窗框、窗棂和窗台，中间是透明的，直接透出房间背后
-## 那层天（room_sky.gd）。所以窗外不是另一张贴图，就是外面那片天本身 ——
-## 走远走近、白天黑夜，窗里窗外永远是同一个天色，也不会有第二套地平线。
+## panel = false（图书馆北墙玻璃幕墙）：整面玻璃往上伸出房间矩形，
+## **玻璃本身不画**，只画框和棂，中间透出房间背后那层天（room_sky.gd）。
+##
+## panel = true（宿舍北墙落地窗）：窗嵌在墙的立面里、不伸出房间矩形，
+## 见 _window_panel()。亮房暗房都用得上。
 func _window(o: Vector2, w: float, h: float) -> void:
+	if panel:
+		_window_panel(o, w, h)
+		return
+	_window_curtain(o, w, h)
+
+
+## 玻璃幕墙（往上伸出房间矩形的那种大窗）。不画落地阴影（窗不是家具），
+## 也不参与碰撞。只用在 bright 房间，暗房里没有这种窗。
+func _window_curtain(o: Vector2, w: float, h: float) -> void:
 	# 窗户的高度直接取 rect 高度（北墙那排是 14 格 = 112px 的落地窗）。
 	var top := o.y
 	var wh := h
@@ -345,6 +366,67 @@ func _window(o: Vector2, w: float, h: float) -> void:
 	draw_rect(Rect2(o.x + fw, top + wh * 0.5 - 1.0, w - fw * 2.0, 2.0), Color("f4f8fb"))
 	# 窗台：一条亮边把窗和地板接起来
 	draw_rect(Rect2(o.x - 1.0, o.y + h - 3.0, w + 2.0, 3.0), Color("ffffff"))
+
+
+## 宿舍的落地窗：嵌在北墙的**立面**里，窗台压在地板线上、窗顶到墙顶。
+##
+## 墙的立面只有 13px 高（RISE_WALL），所以窗就是一条 50×13 的横长窗 ——
+## 宿舍的墙就这么点高，窗再大就越过墙顶、飘在墙上，看着像一排贴纸（第一版
+## 做了 43×72 的「落地窗」，把整间屋压到屏幕下半截，被否了）。
+##
+## **玻璃不画**：这一段墙的立面由 Room 留空（face_gap），地板也在这一块挖了洞，
+## 透出来的是房间背后那片天本身（RoomSky 的云和山）—— 窗里窗外同一个天色，
+## 走远走近、白天黑夜都是真的背景，不是拍在墙上的一张风景照。
+##
+## 三处衔接：外框压一圈暗边（玻璃嵌进墙里的厚度）、窗台一条亮石色压在
+## 地板线上、窗台下方一抹随日照变淡的窗光洒在地上。
+func _window_panel(o: Vector2, w: float, h: float) -> void:
+	var x0 := roundf(o.x)
+	var y0 := roundf(o.y)
+	var x1 := roundf(o.x + w)
+	var y1 := roundf(o.y + h)
+	# 玻璃：框 1px、窗台 1px，剩下都是洞
+	var pane := Rect2(x0 + 1.0, y0 + 1.0, x1 - x0 - 2.0, y1 - y0 - 2.0)
+	if pane.size.x < 4.0 or pane.size.y < 4.0:
+		return
+	# 1) 窗棂：正中一道竖档（两扇对开），1px 就够，窗本身就小
+	var fc := _frame_col()
+	var mx := roundf(pane.position.x + pane.size.x * 0.5)
+	draw_rect(Rect2(mx, pane.position.y, 1.0, pane.size.y), fc)
+	# 2) 玻璃的内阴影：四边各压 1px 暗，玻璃才是「嵌进去」而不是「贴上去」；
+	#    上沿再留 1px 冷反光，正面看过去有一点玻璃的硬边
+	draw_rect(Rect2(pane.position.x, pane.position.y, pane.size.x, 1.0), Color(0, 0, 0, 0.34))
+	draw_rect(Rect2(pane.position.x, pane.position.y, 1.0, pane.size.y), Color(0, 0, 0, 0.16))
+	draw_rect(Rect2(pane.end.x - 1.0, pane.position.y, 1.0, pane.size.y), Color(0, 0, 0, 0.16))
+	draw_rect(Rect2(pane.position.x, pane.end.y - 1.0, pane.size.x, 1.0), Color(0, 0, 0, 0.22))
+	draw_rect(Rect2(pane.position.x, pane.position.y + 1.0, pane.size.x, 1.0),
+		Color(1.0, 1.0, 1.0, 0.10))
+	# 3) 框：外圈 1px 铝框 + 贴墙的 1px 暗缝（窗洞在墙上的厚度）
+	draw_rect(Rect2(x0, y0, x1 - x0, 1.0), fc)
+	draw_rect(Rect2(x0, y1 - 2.0, x1 - x0, 1.0), fc)
+	draw_rect(Rect2(x0, y0, 1.0, y1 - y0), fc)
+	draw_rect(Rect2(x1 - 1.0, y0, 1.0, y1 - y0), fc)
+	draw_rect(Rect2(x0 - 1.0, y0 - 1.0, x1 - x0 + 2.0, 1.0), Color(0, 0, 0, 0.32))
+	# 4) 窗台：一条亮石色压在地板线上，两端各多出 1px，像窗台板压住墙脚
+	draw_rect(Rect2(x0 - 1.0, y1 - 1.0, x1 - x0 + 2.0, 1.0),
+		Color("c9d6df") if bright else Color("9fb0bd"))
+	draw_rect(Rect2(x0 - 1.0, y1, x1 - x0 + 2.0, 1.0), Color(0, 0, 0, 0.26))
+	# 5) 窗光落地：窗台正下方一小片，越远越淡，夜里（daylight→0）自然消失
+	var day: float = clampf(DayNight.daylight(), 0.0, 1.0) if DayNight != null else 0.6
+	var spill := 9.0
+	for i in range(int(spill)):
+		var k := 1.0 - float(i) / spill
+		var a := 0.10 * day * k * k
+		if a <= 0.004:
+			continue
+		draw_rect(Rect2(x0 + 2.0 - float(i) * 0.25, y1 + 1.0 + float(i),
+			(x1 - x0 - 4.0) + float(i) * 0.5, 1.0), Color(1.0, 0.96, 0.86, a))
+
+
+## 窗框颜色：亮房是浅铝白，暗房（宿舍）压成灰蓝 —— 纯白框在深色墙面上
+## 会先跳出来，比窗里的天还亮。
+func _frame_col() -> Color:
+	return Color("dfe9f0") if bright else Color("a9bac6")
 
 
 ## 当前该取哪两行天空、混合多少（[行A, 行B, 混合度]）。

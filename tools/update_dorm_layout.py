@@ -2,10 +2,13 @@
 # -*- coding: utf-8 -*-
 """重排宿舍（dorm_space.json）：
 
-1. 北墙分节：每间北屋的北墙开一段玻璃（glass:true，不画墙），窗 prop
-   伸到房间矩形上沿之外（y=-9..0）—— 玻璃是透明的，透出房间背后那层天
-   （RoomSky），和图书馆北墙落地窗同一套做法。有窗之后 Arena 的
-   view_top_px() 会自动放宽相机上边界、镜头上抬，背景才看得见。
+1. 北墙按窗位置切段：窗洞那几段的墙「立面」留空（face_gap），墙顶那道挤出
+   照画 —— 墙的轮廓还在，但窗后面没有任何墙面挡着。窗本身是独立 prop
+   （panel:true，画框/窗棂/窗台），玻璃是**真透明**的，透出来的就是房间
+   背后那片天（Room._bake_floor 还会在窗底下把地板挖个洞）。
+   ⚠️ 窗**不能伸出房间矩形**（y 必须 ≥ 0）：Arena.view_top_px() 一看到窗在
+   房间上沿之外就会放宽相机上边界并整体抬镜头，整间宿舍被压到屏幕下半截 ——
+   11-15 做过一版 43×72 的「真·落地窗」，直接被否了。
 2. 每间屋的家具从「床+箱+桌+植物 全部一样」换成四种款式轮换
    （学习 / 储物 / 书桌 / 电竞），家具用 OGA 切片图集的新 kind
    （见 room_prop.gd 的 _DORM_KIND_CELL），尺寸 = cell × DORM_SCALE。
@@ -28,11 +31,14 @@ NORTH_X = [2, 15, 28, 41, 54, 67, 80]
 NORTH_Y = 2
 SOUTH_Y = 20
 
-# 窗：每间北屋一扇，跨在北墙开口上、向上伸出房间矩形（局部格）
-WIN_W = 5.4
-WIN_X_OFF = 3.3     # 开口左缘相对 pod 左缘
-WIN_Y = -9.0
-WIN_H = 9.0
+# 窗：每间北屋一扇，嵌在北墙立面里（RISE_WALL=13px 高的那条立面）。
+# 墙在 y=0..2 格（0..16px），立面画在 3..16px；窗就落在这个区间里：
+#   y = 0.4 格 → 3.2px（窗顶贴着墙立面顶端）
+#   h = 1.6 格 → 12.8px，下沿正好 16px = pod 地板线
+WIN_W = 6.2
+WIN_X_OFF = 2.9     # 相对 pod 左缘，pod 宽 12 格 ⇒ 窗居中
+WIN_Y = 0.4
+WIN_H = 1.6
 
 # 家具尺寸（格）= 图集 cell 像素 × DORM_SCALE(1.5) ÷ 8px/格
 BED = (4.6875, 2.625)
@@ -63,13 +69,16 @@ VARIANTS = [
         ],
     },
     {
-        "bed": (6.9, 4.3),
+        # 床回左上角：原来那版把床摆在右下（6.9, 4.3），正好盖住门内侧的
+        # 猫窝（Arena 按「门中心 +1.5 格、y=7.4」摆 CatBed），实机是床压着窝。
+        # 矮书架和纸箱挪到左下角，圆凳贴着书桌放。
+        "bed": (0.6, 0.9),
         "props": [
             ("ddesk", DESK_POS, DESK),
-            ("dormbed", (6.9, 4.3), BED),
-            ("dshelf", (0.7, 4.0), SHELF),
-            ("dbox", (3.0, 5.9), BOX),
-            ("dstool", (9.9, 3.3), STOOL),
+            ("dormbed", (0.6, 0.9), BED),
+            ("dshelf", (0.7, 4.4), SHELF),
+            ("dbox", (3.2, 6.1), BOX),
+            ("dstool", (5.5, 1.5), STOOL),
         ],
     },
     {
@@ -87,7 +96,7 @@ VARIANTS = [
             ("ddesk", DESK_POS, DESK),
             ("dormbed", (0.7, 0.9), BED),
             ("pcdesk", (0.7, 6.6), PCDESK),
-            ("wardrobe", (9.0, 4.2), WARDROBE),
+            ("wardrobe", (8.9, 6.2), WARDROBE),
         ],
     },
 ]
@@ -106,7 +115,12 @@ CORRIDOR_PROPS = [
 
 
 def split_north_wall(walls):
-    """北墙 (0,0,94,2) 按窗开口切段：开口处 glass:true（不画墙、保留碰撞）。"""
+    """北墙按窗位置切段：窗洞段的墙「立面」留空（face_gap），墙顶的挤出照画。
+
+    这样窗是真的洞：墙的轮廓还在（上面那道墙顶面不断），但窗后面没有任何
+    墙面挡着，玻璃透出来的就是房间背后那片天（RoomSky 的云和山）。
+    窗本身是独立 prop（见下面的 windows），画框、窗棂和窗台。
+    """
     openings = sorted((px + WIN_X_OFF, px + WIN_X_OFF + WIN_W) for px in NORTH_X)
     x = 0.0
     for a, b in openings:
@@ -114,7 +128,7 @@ def split_north_wall(walls):
             continue
         if a > x:
             walls.append({"x": x, "y": 0, "w": a - x, "h": 2})
-        walls.append({"x": a, "y": 0, "w": b - a, "h": 2, "glass": True})
+        walls.append({"x": a, "y": 0, "w": b - a, "h": 2, "face_gap": True})
         x = b
     if x < 94.0:
         walls.append({"x": x, "y": 0, "w": 94.0 - x, "h": 2})
@@ -127,16 +141,16 @@ def main():
     walls = []
     for w in data["walls"]:
         if w["y"] == 0:
-            continue    # 北墙那一条（含旧整条 / 已切好的段），每次从整条重切
+            continue    # 北墙：整条重来（旧版切过段 / 整条都有可能）
         walls.append(w)
     split_north_wall(walls)
-    # 幂等：split 输入是干净的整条，输出段数固定；防手滑再保险一层
+    # 幂等：7 扇窗 ⇒ 15 段，每段都是从整条重切出来的，跑多少遍都一样
     assert len([w for w in walls if w["y"] == 0]) == 15, walls
     data["walls"] = walls
 
-    # 窗 prop（无碰撞，玻璃透明）
+    # 窗 prop：嵌在墙立面里，不伸出房间矩形（y>=0，相机因此保持原样）
     windows = [{"k": "window", "x": px + WIN_X_OFF, "y": WIN_Y,
-                "w": WIN_W, "h": WIN_H} for px in NORTH_X]
+                "w": WIN_W, "h": WIN_H, "panel": True} for px in NORTH_X]
 
     # 保留：门、电梯；其余 pod 内家具全部重建
     keep = [p for p in data["props"] if p.get("k") in ("door", "elevator")]
@@ -158,6 +172,20 @@ def main():
 
     data["props"] = props
     data["beds"] = beds
+
+    # 猫窝留位自检：Arena 把 CatBed 摆在各间屋门的右侧（门中心 +1.5 格，
+    # 北排 y=7.4 / 南排 y=25.8），这里按 pod 内 (6..9, 4.4..6.8) 格留空。
+    # 家具压上去就是实机里「床盖住猫窝」，改布局时这一步别删。
+    bad = []
+    for p in props:
+        if p["k"] in ("door", "window"):
+            continue
+        for px, py in [(x, NORTH_Y) for x in NORTH_X] + [(x, SOUTH_Y) for x in NORTH_X]:
+            box = (px + 6.0, py + 4.2, px + 10.0, py + 5.5)
+            r = (p["x"], p["y"], p["x"] + p["w"], p["y"] + p["h"])
+            if r[0] < box[2] and r[2] > box[0] and r[1] < box[3] and r[3] > box[1]:
+                bad.append((p["k"], round(p["x"], 2), round(p["y"], 2)))
+    assert not bad, "这些家具压到猫窝了：%s" % bad
 
     with open(PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=1)
