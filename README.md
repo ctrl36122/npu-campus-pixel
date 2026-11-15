@@ -598,6 +598,10 @@ macOS 预设的要点写在 `export_presets.example.cfg` 末尾的注释里：�
 - 地图数据 © [OpenStreetMap](https://www.openstreetmap.org/copyright) 贡献者，ODbL 协议
 - 字体：界面用 **Silver**（© [Poppy Works](https://poppy.works)，CC BY 4.0，
   见 `assets/fonts/silver-LICENCE.txt`）；Silver 未收录的字符回落到思源黑体（Noto Sans SC）子集，SIL Open Font License
+- 树木：校园 260 棵树的贴图来自 [OpenGameArt · Trees & Bushes](https://opengameart.org/content/trees-bushes)
+  （© Luis Zuno / @ansimuz，**CC0**，见 `assets/oga_src/trees_bushes/license.txt`）。
+  用 PSD 的透明 `vegetation` 图层按 `tools/import_oga_trees.py` 铺进 `assets/decor_0.png` 前 5 格；
+  完整原包（含 PSD）不入库，放在项目根 `references/oga/trees_bushes/`
 - 音效：脚步声来自 [kdd] Different Steps 采样包（见 `assets/steps/`）；雨天环境音为第三方录音（`references/Dark_Rainy_Night(ambience).ogg`，不入库，缺文件时自动回退程序合成的雨声）；背景音乐为第三方曲目、不入库
 - 代码：MIT
 - **本项目是校园爱好者的非官方作品**，与西北工业大学官方无关；校名、校徽等标识归学校所有，
