@@ -35,7 +35,8 @@ OUT_DIR = GAME / "assets" / "music"
 SOURCES = {
     "campus_day": (ROOT / "references" / "walking_to_the_park_at_3_a.m.mp3", 96_000),
     "campus_night": (ROOT / "references" / "brain_fog.mp3", 96_000),
-    "dorm": (ROOT / "references" / "Next to You.mp3", 112_000),
+    # 宿舍曲：用户指定的 8bit 版（48kHz 立体声 WAV 16MB，转 mp3 省地方）
+    "dorm": (ROOT / "references" / "8bit-Next to You.wav", 160_000),
     "study": (ROOT / "references" / "Winter Snow.mp3", 96_000),
 }
 
@@ -77,12 +78,19 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry", action="store_true")
     ap.add_argument("--force", action="store_true", help="已存在也重转")
+    ap.add_argument("--only", default="", help="只处理这些键名，逗号分隔（如 dorm）")
     args = ap.parse_args()
+    only = [x.strip() for x in args.only.split(",") if x.strip()]
+
+    def want(name: str) -> bool:
+        return not only or name in only
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     total_in = total_out = 0
 
     for name, src in WAV_COPY.items():
+        if not want(name):
+            continue
         if not src.exists():
             print(f"[跳过] {name}: 找不到 {src}")
             continue
@@ -99,6 +107,8 @@ def main() -> None:
             total_out += dst.stat().st_size
 
     for name, (src, br) in SOURCES.items():
+        if not want(name):
+            continue
         if not src.exists():
             print(f"[跳过] {name}: 找不到 {src}")
             continue
