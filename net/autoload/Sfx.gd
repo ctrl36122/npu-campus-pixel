@@ -9,10 +9,15 @@ extends Node
 ##   wood     室内（宿舍/自习空间木地板、瓷砖）
 ##   water 等极少见的情况归到草地（湖面本身走不上去）
 ##
-## 素材策略沿用项目里「缺素材就程序补」的习惯：
-##   1. 先找 assets/steps/<材质>_*.wav（真录音，丢进去就用）；
-##   2. 找不到就**现场合成**（噪声爆发 + 低频冲击 + 可选的高频「嗒」）。
-## 每次播放随机挑一个变体 + 轻微随机音高/音量，避免连续几步像复读机。
+## 素材策略：
+##   1. 先找 assets/steps/<材质>_*.wav（真录音，见 tools/import_steps.py）；
+##      目前来自 [kdd]DifferentSteps：草地=leaves、沥青=gravel、石板=stone、室内=wood。
+##   2. 找不到就**现场合成**（噪声爆发 + 低频冲击 + 可选的高频「嗒」），
+##      所以 clone 后没带素材也能跑，只是音色朴素一点。
+## 每次播放随机挑一个变体（不连着重复）+ 轻微随机音高/音量，避免连续几步像复读机。
+##
+## 触发时机由 PlayerAvatar 按**行走动画的触地帧**给（见 PlayerAvatar.STEP_FRAMES），
+## 声音和看到的那一步是同一下，不受网络 tick 抖动影响。
 ##
 ## 只给**本地玩家**出声：远端玩家的脚步要靠位置同步 + 距离衰减才有意义，
 ## 现在没有那套东西，硬放会在联机时变成一片乱响。
@@ -47,6 +52,8 @@ var _muted := false
 var _players: Array[AudioStreamPlayer] = []
 var _next := 0
 var _cache: Dictionary = {}       # 材质名 -> Array[AudioStream]
+var _is_sample: Dictionary = {}   # 材质名 -> 这一套是真录音还是合成音
+var _last_idx: Dictionary = {}    # 材质名 -> 上一步用的变体编号（避开连续重复）
 var _rng := RandomNumberGenerator.new()
 
 
@@ -86,13 +93,25 @@ func footstep(at: Vector2) -> void:
 		return
 	var p := _players[_next]
 	_next = (_next + 1) % _players.size()
-	p.stream = list[_rng.randi() % list.size()]
-	p.volume_db = linear_to_db(_volume * _rng.randf_range(0.82, 1.0))
-	# 音高抖一点，连续几步才不会像复读机
-	p.pitch_scale = _rng.randf_range(0.93, 1.08)
+	# 别连着两步放同一个样本（草地只有 2 个变体，不避开很容易听出「复读」）
+	var idx := _rng.randi() % list.size()
+	if list.size() > 1 and idx == int(_last_idx.get(kind, -1)):
+		idx = (idx + 1) % list.size()
+	_last_idx[kind] = idx
+	p.stream = list[idx]
+
+	var is_sample: bool = bool(_is_sample.get(kind, false))
+	# 真录音本身就有强弱变化，音高抖动收窄；合成音是同一个模子，抖宽一点才不机械
+	p.pitch_scale = _rng.randf_range(0.97, 1.03) if is_sample else _rng.randf_range(0.93, 1.08)
+	# 合成音在 _synth 里已经乘过 level；真录音统一按峰值归一，响度平衡得在这里补
+	var gain: float = _volume * _rng.randf_range(0.86, 1.0)
+	if is_sample:
+		gain *= float(TIMBRE.get(kind, {}).get("level", 0.85))
+	p.volume_db = linear_to_db(gain)
 	p.play()
 	if OS.has_environment("XGD_SFX_DEBUG"):
-		print("[sfx] step ", kind, "  pitch ", snappedf(p.pitch_scale, 0.01),
+		print("[sfx] step ", kind, (" sample" if is_sample else " synth"),
+			" #", idx, "  pitch ", snappedf(p.pitch_scale, 0.01),
 			"  vol ", snappedf(p.volume_db, 0.1), "dB")
 
 
@@ -147,6 +166,9 @@ func _streams(kind: String) -> Array:
 	if out.is_empty():
 		for i in VOICES:
 			out.append(_synth(kind, i))
+		_is_sample[kind] = false
+	else:
+		_is_sample[kind] = true
 	_cache[kind] = out
 	return out
 

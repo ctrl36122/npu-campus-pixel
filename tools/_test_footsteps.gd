@@ -87,38 +87,73 @@ func _run() -> void:
 		var k := str(ground.call("kind_at", pos))
 		_check("%s -> %s" % [c[0], c[2]], k == str(c[2]), "实际 " + k)
 
-	print("[steps] 四种音色")
+	print("[steps] 音源（真录音优先，缺了退回合成）")
 	var bright := {}
-	var peaks := {}
 	for kind in KINDS:
 		var list: Array = sfx.call("_streams", kind)
-		_check("%s 有 4 个变体" % kind, list.size() == 4, str(list.size()))
+		_check("%s 至少一个变体" % kind, list.size() >= 1, str(list.size()))
+		_check("  %s 用的是真录音" % kind, bool(sfx.call("using_samples", kind)))
 		var w: AudioStreamWAV = list[0]
 		var a := _samples(w)
-		_check("  %s 格式正确" % kind,
-			w.format == AudioStreamWAV.FORMAT_16_BITS and not w.stereo and w.mix_rate == SAMPLE_RATE)
 		var pk := _peak(a, 0, a.size())
-		_check("  %s 有声音不削波" % kind, pk > 0.3 and pk <= 0.95, "peak=%.2f" % pk)
-		var head := _peak(a, 0, a.size() / 5)
-		var tail := _peak(a, a.size() * 4 / 5, a.size())
-		_check("  %s 响一下后衰减" % kind, tail < head * 0.4, "head=%.2f tail=%.2f" % [head, tail])
-		_check("  %s 首样本接近 0（不爆音）" % kind, absf(a[0]) < 0.05, "%.3f" % a[0])
+		var dur := float(a.size()) / float(SAMPLE_RATE)
+		_check("  %s 单声道 22.05k 16bit" % kind,
+			w.format == AudioStreamWAV.FORMAT_16_BITS and not w.stereo and w.mix_rate == SAMPLE_RATE)
+		# 一步大概 0.2~0.35s；太长会和下一步叠在一起糊掉，太短听起来像敲木鱼
+		_check("  %s 是一步的长度" % kind, dur > 0.1 and dur < 0.5, "%.2fs" % dur)
+		_check("  %s 归一化到 0.85 不削波" % kind, pk > 0.6 and pk <= 0.95, "peak=%.2f" % pk)
+		# 尾巴要收干净，否则连续走会叠成一片
+		var tail := _peak(a, a.size() * 9 / 10, a.size())
+		_check("  %s 尾部已收" % kind, tail < pk * 0.3, "tail=%.2f" % tail)
+		_check("  %s 首尾不爆音" % kind,
+			absf(a[0]) < 0.12 and absf(a[a.size() - 1]) < 0.12,
+			"%.3f / %.3f" % [a[0], a[a.size() - 1]])
 		bright[kind] = _zcr(a)
-		peaks[kind] = pk
 
+	# 真录音的明暗是素材自带的，只确认四种材质确实互不相同（别再拿合成音的排序当断言）
 	print("  明暗（过零率）", bright)
-	_check("草地比沥青闷", float(bright["grass"]) < float(bright["asphalt"]),
-		"%.3f vs %.3f" % [bright["grass"], bright["asphalt"]])
-	_check("沥青比石板闷", float(bright["asphalt"]) < float(bright["stone"]),
-		"%.3f vs %.3f" % [bright["asphalt"], bright["stone"]])
-	_check("草地比石板轻", float(peaks["grass"]) < float(peaks["stone"]),
-		"%.2f vs %.2f" % [peaks["grass"], peaks["stone"]])
+	var lo := 9.0
+	var hi := 0.0
+	for kind in KINDS:
+		lo = minf(lo, float(bright[kind]))
+		hi = maxf(hi, float(bright[kind]))
+	_check("四种材质音色互不相同", hi - lo > 0.02, "%.3f ~ %.3f" % [lo, hi])
+
+	print("[steps] 脚步声跟行走动画帧对齐")
+	var pa = load("res://net/scripts/player/PlayerAvatar.gd")
+	var consts: Dictionary = pa.get_script_constant_map()
+	var step_frames: Array = consts.get("STEP_FRAMES", [])
+	_check("PlayerAvatar 定义了触地帧", step_frames.size() == 2, str(step_frames))
+	var sf: SpriteFrames = load("res://assets/sandbox/frames_adam.tres")
+	for dir in ["up", "down", "left", "right"]:
+		var anim := StringName(dir + "_walk")
+		var n := sf.get_frame_count(anim)
+		_check("  %s_walk 有帧" % dir, n >= 4, str(n))
+		for f in step_frames:
+			_check("  %s_walk 里第 %d 帧存在" % [dir, int(f)], int(f) < n)
+		# 6 帧 @10fps = 0.6s 一个循环，两步正好 0.3s 一步
+		var cyc := float(n) / sf.get_animation_speed(anim)
+		_check("  %s_walk 每步约 0.3s" % dir, absf(cyc / 2.0 - 0.3) < 0.06, "%.2fs/步" % (cyc / 2.0))
 
 	print("[steps] 室内外")
 	sfx.call("set_indoor", true)
 	_check("进楼 -> 室内", bool(sfx.call("indoor")))
 	sfx.call("set_indoor", false)
 	_check("出楼 -> 室外", not bool(sfx.call("indoor")))
+
+	print("[steps] 变体轮换（草地只有 2 个样本，不能连着放同一个）")
+	var grass_pos := Vector2(150 * 8 + 4, 650 * 8 + 4)
+	_check("测试点是草地", str(ground.call("kind_at", grass_pos)) == "grass")
+	var prev := -1
+	var repeats := 0
+	for i in 20:
+		sfx.call("footstep", grass_pos)
+		var last: Dictionary = sfx.get("_last_idx")
+		var idx := int(last.get("grass", -1))
+		if idx == prev:
+			repeats += 1
+		prev = idx
+	_check("连续 20 步不重复同一样本", repeats == 0, "重复 %d 次" % repeats)
 
 	print("[steps] 音量 / 静音 / 存档")
 	sfx.call("set_volume", 0.35)

@@ -16,6 +16,8 @@ extends CharacterBody2D
 ## 局部速度。Players 空间已归一成校园局部坐标（视觉再被 campus 放大 2 倍），
 ## 全局速度 = 110 × 2 = 220px/s，和旧的 0.5 空间时代一致
 const SPEED: float = 110.0
+## 按住 Shift 的加速倍率；动画 speed_scale 也用它，跑步时脚步才不会和画面对不上
+const SPRINT_MUL: float = 1.55
 const EMOTES: Array[String] = ["Hello!", "Here!", "Thanks!", "Help!"]
 ## 渲染平滑：移动跑在 30 Hz 的网络 tick 上，画面却是 60 fps 画的。
 ## 直接把 position 画出来，等于「每两帧跳一步」，看着就是在抽搐。
@@ -98,12 +100,13 @@ var correction_offset: Vector2 = Vector2.ZERO
 var _face_dir: Vector2 = Vector2.DOWN
 var _moving: bool = false
 var _last_pos: Vector2 = Vector2.ZERO
-## 脚步声：按「走过的距离」积累，满一步响一次（用定时器会在贴墙/变速时对不上拍）
-## 30 局部像素 ≈ 0.55s 一步（约每秒 1.8 步），比真人走路略快，像素游戏一直是这个手感
-const STEP_DIST: float = 30.0
-var _step_acc: float = 0.0
-var _step_prev: Vector2 = Vector2.ZERO
-var _idle_time: float = 0.0
+## 脚步声：跟**行走动画的触地帧**对齐，而不是按「走过多少距离」累计。
+## 6 帧一个循环（10fps = 0.6s），触地帧是 0 和 3 —— 各踩一次，正好一左一右。
+## 这样变速、刚起步、顶墙卡住时都不会和画面脱拍；走路速度变了动画跟着变，声音自动跟上。
+const STEP_FRAMES: Array = [0, 3]
+const STEP_MIN_MS: int = 110      # 两步最短间隔：转身重播动画时不会连响两下
+var _step_ms: int = 0
+var _sprinting: bool = false
 var _applied_hero: String = ""
 var _emote_timer: SceneTreeTimer
 var _bubble_timer: SceneTreeTimer
@@ -176,6 +179,9 @@ func _ready() -> void:
 		cam.limit_right = int(3392.0 * cs)
 		cam.limit_bottom = int(6400.0 * cs)
 	NetTick.network_tick.connect(_on_tick)
+	# 脚步声挂在动画帧上：播到触地帧响一下（见 _on_anim_frame）
+	if sprite != null:
+		sprite.frame_changed.connect(_on_anim_frame)
 
 
 func _update_name() -> void:
@@ -509,39 +515,38 @@ func _update_visual() -> void:
 	var anim_name := StringName(dir_name + ("_walk" if _moving else "_idle"))
 	if sprite.animation != anim_name:
 		sprite.animation = anim_name
+	# 冲刺时动画也按同样的倍率加速：不然人已经跑出两步了，脚还在慢慢抬，
+	# 画面和脚步声会一起「踩空」。脚步声跟着帧走，这里一改就自动跟上。
+	sprite.speed_scale = SPRINT_MUL if (_sprinting and _moving) else 1.0
 	if not sprite.is_playing():
 		sprite.play()
 
 
-## 脚步声（只给本地玩家）。按实际位移积累，走满一步响一次：
-## 停下来立刻不响，贴墙原地踏步也不会空响「哒哒哒」。
+## 脚步声（只给本地玩家）。由动画的触地帧触发，不走「按距离累计」那套：
+## 停下来动画就停了、自然不响；顶着墙原地踏步时 _moving 为 false、动画不播，也不会空响。
 ## 室内/室外两套音色由 Sfx 自己按 Arena 告知的状态挑。
-##
-## ⚠️ 位移是 30Hz 网络 tick 跳的，而 _process 跑 60+ fps —— 隔一帧就会有一帧
-## 位移为 0。所以「这一帧没动」不能当成「停下了」（那样累加器会被反复清零，
-## 永远攒不满一步）。改成连续静止 0.25s 才清零。
-func _update_footsteps(delta: float) -> void:
-	var now: Vector2 = position
-	var moved: float = (now - _step_prev).length()
-	_step_prev = now
-	if not is_local_player:
+func _on_anim_frame() -> void:
+	if not is_local_player or sprite == null:
 		return
-	# 瞬移（出生、进出房间、_step_out 补偿）不该被算成走路
-	if moved > 40.0 or sit_dir != 0 or ui_blocked:
-		_step_acc = 0.0
-		_idle_time = 0.0
+	if sit_dir != 0 or ui_blocked:
 		return
-	if moved > 0.05:
-		_idle_time = 0.0
-		_step_acc += moved
-		if _step_acc >= STEP_DIST:
-			_step_acc = 0.0
-			# position 是校园层局部坐标，正好等于地面贴图像素 —— Sfx 拿它查脚下材质
-			Sfx.footstep(position)
+	# 只有 *_walk 有脚步，待机/坐姿/躺下的帧一律忽略
+	if not String(sprite.animation).ends_with("_walk"):
 		return
-	_idle_time += delta
-	if _idle_time > 0.25:
-		_step_acc = 0.0
+	if not STEP_FRAMES.has(sprite.frame):
+		return
+	# 再兜一层：这一 tick 真的挪动过（顶着墙硬推时 _step_len 会是 0）
+	if _step_len <= 0.5:
+		return
+	var now: int = Time.get_ticks_msec()
+	if now - _step_ms < STEP_MIN_MS:
+		return
+	if OS.has_environment("XGD_SFX_DEBUG"):
+		print("[sfx-dbg] 触地帧 %d  %s  间隔 %dms" % [
+			sprite.frame, "跑" if _sprinting else "走", now - _step_ms])
+	_step_ms = now
+	# position 是校园层局部坐标，正好等于地面贴图像素 —— Sfx 拿它查脚下材质
+	Sfx.footstep(position)
 
 
 func _on_emote(id: int, index: int) -> void:
@@ -716,8 +721,9 @@ func _apply_movement(command: Dictionary) -> void:
 		_step_len = 0.0
 		return
 	var speed: float = SPEED
-	if bool(command.get("sprint", false)):
-		speed *= 1.55
+	_sprinting = bool(command.get("sprint", false))
+	if _sprinting:
+		speed *= SPRINT_MUL
 	velocity = direction * speed
 	var before := position
 	# move_and_collide 撞上东西就停、不沿墙滑：宿舍家具密，斜着蹭到床/桌子/门框
@@ -823,7 +829,6 @@ func _process(delta: float) -> void:
 		ui_blocked = GameThemeScript.is_move_blocked()
 	_hold_local_pose()
 	_update_visual()
-	_update_footsteps(delta)
 	_update_camera_zoom(delta)
 	if not Net.is_server():
 		var seq: int = int(server_state.get("seq", 0))
