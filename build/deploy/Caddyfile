@@ -93,10 +93,10 @@
 			# 下面四条是给「已经发出去的老链接」兜底的 302，
 			# 不要再把 zip 放回 /opt/xgd/web/dl/，否则又占这条 100Mbps 出口。
 			# ------------------------------------------------------------------
-			redir /dl/XGD-Campus-win64.zip  https://ghfast.top/https://github.com/ctrl36122/npu-campus-pixel/releases/download/v1.2.4/XGD-Campus-win64.zip  302
-			redir /dl/XGD-Campus-macos.zip  https://ghfast.top/https://github.com/ctrl36122/npu-campus-pixel/releases/download/v1.2.4/XGD-Campus-macos.zip  302
-			redir /dl/XGD-Campus-android.zip https://ghfast.top/https://github.com/ctrl36122/npu-campus-pixel/releases/download/v1.2.4/XGD-Campus-android.zip 302
-			redir /dl/SHA256SUMS.txt        https://ghfast.top/https://github.com/ctrl36122/npu-campus-pixel/releases/download/v1.2.4/SHA256SUMS.txt 302
+			redir /dl/XGD-Campus-win64.zip  https://ghfast.top/https://github.com/ctrl36122/npu-campus-pixel/releases/download/v1.2.5/XGD-Campus-win64.zip  302
+			redir /dl/XGD-Campus-macos.zip  https://ghfast.top/https://github.com/ctrl36122/npu-campus-pixel/releases/download/v1.2.5/XGD-Campus-macos.zip  302
+			redir /dl/XGD-Campus-android.zip https://ghfast.top/https://github.com/ctrl36122/npu-campus-pixel/releases/download/v1.2.5/XGD-Campus-android.zip 302
+			redir /dl/SHA256SUMS.txt        https://ghfast.top/https://github.com/ctrl36122/npu-campus-pixel/releases/download/v1.2.5/SHA256SUMS.txt 302
 
 			root * /opt/xgd/web
 			file_server {
