@@ -1092,6 +1092,18 @@ func touch_toggle_pets() -> void:
 		_pet_panel.call("toggle")
 
 
+## 右下橙色交互键：把 E 键那一下原样转给 Arena。
+## 它不是面板，所以不走 _build_map_ui 那一套；Arena 还没就绪时安静忽略。
+func touch_interact() -> void:
+	var ar: Node = null
+	if _arena != null and is_instance_valid(_arena):
+		ar = _arena
+	else:
+		ar = get_tree().get_first_node_in_group("arena")
+	if ar != null and ar.has_method("touch_interact"):
+		ar.call("touch_interact")
+
+
 ## 全屏浮层（校园地图 / 大聊天窗）打开时把 HUD 让开：
 ## 顶部状态条、时钟、小地图都被压在下面，叠着看很乱，先藏起来。
 func set_overlay(v: bool) -> void:

@@ -26,6 +26,12 @@ const BTN_GAP := 18.0       # 触屏横排间隙
 const BTN_LEFT := 14.0      # 桌面竖排：离屏幕左边
 const BTN_TOP := 14.0
 const BTN_GAP_DESK := 10.0
+## 交互键（替代 E）：一块横放的牌子，贴在功能键那一排的正上方。
+## 用矩形而不是圆钮有两个原因：一是要写字（写清「这一步是干什么」），
+## 二是它就是拇指自然落点上方那一条，方形比圆形更好按、也不容易和圆钮混在一起。
+const ACT_W := 158.0
+const ACT_H := 68.0
+const ACT_GAP := 46.0       # 和下面那排圆钮之间的净空
 
 const C_JOY_BG := Color(0.07, 0.10, 0.15, 0.52)
 const C_JOY_RING := Color(0.78, 0.82, 0.86, 0.70)
@@ -65,6 +71,12 @@ var _actions_on := {}           # 当前按下的动作，避免重复 press
 var _font: Font
 ## 大聊天窗展开时把右下三个按钮收起来：它们会和输入框叠在一起，还容易误触
 var hide_buttons := false
+## 「现在能按 E」——由 Arena 每帧推过来。只有为真时才画交互牌：
+## 手机上根本没有 E 键，走到宿舍门口 / 椅子边 / 船边光看提示条点不到。
+var interact_on := false
+## 牌子上写什么：Arena 按当前提示翻成一个动词（进入 / 坐下 / 躺下 / 离开…）。
+## 写字而不是画图标 —— 手机上拇指盖着半个钮，图标那点细节根本看不清。
+var interact_label := "交互"
 var _hide_reasons := {}          # 谁要求隐藏按钮（地图 / 大聊天窗），避免两处互相覆盖
 ## 谁在占用触摸（大聊天窗 / 全屏地图）：占用期间整套触摸都不接管，
 ## 否则点浮层下半部分会落进摇杆判定区，人会一边看面板一边往前走
@@ -184,6 +196,46 @@ func _btn_size() -> float:
 	return BTN_TOUCH if _touch_mode else BTN_DESK
 
 
+## Arena 推过来的「现在有可交互对象」+ 这一步到底要做什么（文字）。
+## 只在触屏上画 —— 桌面上 E 键就在手边，多一块牌子只会挡画面。
+func set_interact_available(v: bool, label := "交互") -> void:
+	if not _touch_mode:
+		v = false
+	label = label.strip_edges()
+	if label == "":
+		label = "交互"
+	var label_changed := label != interact_label
+	interact_label = label
+	if interact_on == v and not label_changed:
+		return
+	interact_on = v
+	# 藏起来的那一帧如果还有手指压在它上面，把手势一起收掉，免得松手时误触发
+	if not v:
+		for f in _btn_finger.keys():
+			if String(_btn_finger[f]) == "interact":
+				_btn_finger.erase(f)
+	queue_redraw()
+
+
+## 交互牌：右下那排圆钮的**正上方、宽向居中**。
+## 不贴屏幕角：贴着角时右缘就压在屏幕边上，拇指得往外抠；居中到那排按钮的
+## 中线上，正好落在「拇指自然停住」的位置，也不会偏心压住某一颗圆钮。
+func _interact_rect() -> Rect2:
+	var s := _viewport_size()
+	var safe := GameTheme.safe_insets(s)
+	var row_top := s.y - BTN_BOTTOM - safe.w - BTN_TOUCH
+	var cx := s.x * 0.5
+	if _touch_mode and not BUTTONS.is_empty():
+		# 用最左/最右两颗圆钮的中心算横排中线（按钮增减都不用改这里）
+		cx = (_btn_center(str(BUTTONS[BUTTONS.size() - 1]["id"])).x +
+			_btn_center(str(BUTTONS[0]["id"])).x) * 0.5
+	return Rect2(cx - ACT_W * 0.5, row_top - ACT_GAP - ACT_H, ACT_W, ACT_H)
+
+
+func _interact_visible() -> bool:
+	return interact_on and not hide_buttons and not is_touch_grabbed()
+
+
 func _btn_center(id: String) -> Vector2:
 	var s := _viewport_size()
 	var safe := GameTheme.safe_insets(s)
@@ -205,6 +257,9 @@ func _btn_center(id: String) -> Vector2:
 func _btn_hit(pos: Vector2) -> String:
 	if hide_buttons:
 		return ""
+	# 交互牌先判：它在圆钮上方、命中框还向外放宽 8px，重叠时该它赢
+	if _interact_visible() and _interact_rect().grow(8.0).has_point(pos):
+		return "interact"
 	var r := _btn_size() * 0.5 + 6.0
 	for b in BUTTONS:
 		if pos.distance_to(_btn_center(str(b["id"]))) <= r:
@@ -221,6 +276,15 @@ func _input(event: InputEvent) -> void:
 			_touches[event.index] = event.position
 			# 第二根手指落下 = 想缩放了：撤销摇杆，进入捏合
 			if _touches.size() == 2:
+				# 例外：第二根手指落在按钮上 —— 那是「左手推着摇杆、右手去按交互」，
+				# 手机端最常见的操作。当成捏合的话摇杆会被撤掉、按钮也按不动，
+				# 于是走到宿舍门口按交互永远没反应。按钮优先，捏合只留给两指都在空白处。
+				var hit2 := _btn_hit(event.position)
+				if hit2 != "":
+					_btn_finger[event.index] = hit2
+					_fire(hit2)
+					queue_redraw()
+					return
 				_cancel_joy()
 				_pinch_start_dist = _two_dist()
 				_pinch_prev = _pinch_start_dist
@@ -377,6 +441,10 @@ func _fire(id: String) -> void:
 	if boot == null or not is_instance_valid(boot):
 		return
 	match id:
+		"interact":
+			# 和大聊天窗一样走 boot 转发，最终落到 Arena._try_interact()，
+			# 与 E 键、与头顶提示条点按是同一条链路（优先级、节流都在那一处）
+			boot.call("touch_interact")
 		"chat":
 			boot.call("touch_open_chat")
 		"map":
@@ -444,6 +512,41 @@ func _draw() -> void:
 			draw_set_transform(c, 0.0, Vector2(sc, sc))
 			_draw_btn_icon(id, Vector2.ZERO, ink)
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+	# 交互牌最后画（盖在圆钮之上）：暖橙色，和深蓝的功能键区分开，
+	# 让它在「能按」的那几秒里一眼就能找到。
+	if _interact_visible():
+		_draw_interact_plate()
+
+
+## 交互牌：一块暖橙色实心矩形 + 正中两个字（进入 / 坐下 / 离开…）。
+## 硬边 + 2.5px 描边 + 3px 投影，跟画面里其它像素 UI 一套规矩，不做圆角。
+## 文字而不是图标：手机上拇指盖住半个钮，图标那点细节等于没有；
+## 而「这一步要干什么」直接写出来，比一个抽象图标省一次猜测。
+func _draw_interact_plate() -> void:
+	var r := _interact_rect()
+	var down: bool = _btn_finger.values().has("interact") or _btn_mouse == "interact"
+	var bg := Color(0.15, 0.10, 0.04, 0.92)
+	var edge := Color(1.0, 0.76, 0.40, 0.94)
+	var ink := Color(1.0, 0.89, 0.66, 1.0)
+	if down:
+		bg = Color(1.0, 0.71, 0.31, 0.96)
+		edge = Color(1.0, 0.94, 0.82, 1.0)
+		ink = Color(0.12, 0.07, 0.02, 1.0)
+	draw_rect(Rect2(r.position + Vector2(0, 3), r.size), Color(0, 0, 0, 0.40))
+	draw_rect(r, bg)
+	draw_rect(r, edge, false, 2.5)
+	if not down:
+		# 上沿一道更亮的线：不按时也有一点「牌子」的体积
+		draw_rect(Rect2(r.position + Vector2(2.5, 2.5), Vector2(r.size.x - 5.0, 1.5)),
+			Color(1, 1, 1, 0.12))
+	# 文字：竖直方向用「字身高度的一半」对齐光学中心，不用 size.y*0.5（中文字面偏下）
+	var fs := GameTheme.fs(27)
+	var tw := _font.get_string_size(interact_label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	draw_string(_font,
+		Vector2(r.position.x + (r.size.x - tw) * 0.5,
+			r.position.y + r.size.y * 0.5 + float(fs) * 0.36),
+		interact_label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, ink)
 
 
 ## 五个图标全部现画：空心气泡 / 折页地图 / 双人 / 猫头 / 设置滑杆

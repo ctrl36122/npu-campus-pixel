@@ -16,8 +16,13 @@ const MAX_HISTORY := 60         # 最多保留多少条
 const IDLE_FADE := 12.0         # 多久没消息开始变淡
 const FADE_ALPHA := 0.68
 
-const SMALL_W_RATIO := 0.42     # 收起时的窗口宽度（占视口宽的比例）
-const SMALL_H_RATIO := 0.16     # 收起时的窗口高度（占视口高的比例）
+## 收起时的窗口宽度（占视口宽的比例）。
+## 手机竖屏的逻辑视口是 1280 宽，而顶部时钟条居中、左右各占 233 —— 小窗右缘
+## 必须留在 x≈407 以内，否则两个半透明黑框会叠成一团。0.30 在 1280 上正好
+## 停在 394，贴着时钟条左缘但不相交，因此小窗可以整块上提到左上角，
+## 不用再为躲时钟而多让 46px 的高度（原来「偏下、偏大」就是这么来的）。
+const SMALL_W_RATIO := 0.30
+const SMALL_H_RATIO := 0.16     # 收起时的窗口高度（占视口高的比例，仅桌面参考）
 const DESK_W := 392.0           # 收起时的窗口尺寸（桌面）
 const DESK_H := 212.0
 
@@ -185,14 +190,15 @@ func _apply_layout() -> void:
 				maxf(lo, avail + safe.y - _panel.size.y - GameTheme.px(8.0))))
 	else:
 		if touch:
-			# 按视口比例算：手机上文字放大 1.6 倍，窗口也得跟着变大，否则只能塞两行
-			var w := clampf(vs.x * SMALL_W_RATIO, GameTheme.px(300.0), GameTheme.px(660.0))
-			# 消息区现在正确地从标题栏下方开始（旧值把它压在标题栏上才显得「能多显示几行」），
-			# 所以小窗要略高一点，手机上才不至于只剩三条消息
-			var h := clampf(vs.y * 0.26, GameTheme.px(210.0), GameTheme.px(340.0))
-			# 顶部中央还有一条时间条：小窗整体让到它下面，不然黑框叠黑框
-			_panel.position = Vector2(GameTheme.px(12.0) + safe.x,
-				GameTheme.px(14.0) + safe.y + GameTheme.top_hud_reserve())
+			# 按视口比例算：手机上文字放大 1.6 倍，窗口也得跟着变大，否则只能塞两行。
+			# 上下限都收了一档（原来 300~660 宽、210~340 高，1280 宽下直接顶到 538×544，
+			# 占掉左上角一大块，用户反馈「太大」）。
+			var w := clampf(vs.x * SMALL_W_RATIO, GameTheme.px(196.0), GameTheme.px(470.0))
+			var h := clampf(vs.y * 0.17, GameTheme.px(168.0), GameTheme.px(250.0))
+			# 左下角贴边：小窗已经窄到不碰居中的时钟条，所以不再为它让出顶部 46px，
+			# 整块提到安全区内侧（原来在 px(14)+顶部预留 的位置，看着偏右下）。
+			_panel.position = Vector2(GameTheme.px(6.0) + safe.x,
+				GameTheme.px(6.0) + safe.y)
 			_panel.size = Vector2(w, h)
 		else:
 			_panel.position = Vector2(12.0, vs.y - DESK_H - 46.0)

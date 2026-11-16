@@ -207,6 +207,8 @@ func _ready() -> void:
 	_collect_study_entries()
 	_collect_campus_seats()
 	_build_door_hint()
+	# 右下角交互键（触屏）要能找到 Arena，不依赖 boot 是否已经把它记下来
+	add_to_group("arena")
 	_build_voice_btn()
 	Net.seat_changed.connect(_on_seat_changed)
 	# 别人的认领公告一到（或自己认领成功）立刻刷新门牌；名单变化会影响「谁跟你同层」
@@ -2464,7 +2466,7 @@ func _pet_cat(cat: Node2D) -> void:
 	_cat_msg = "「%s」%s" % [str(cat.call("cat_name")), reply]
 	_cat_msg_t = 1.8
 	if _door_hint != null:
-		_door_hint.text = _cat_msg
+		_set_hint(_cat_msg)
 		_door_hint.visible = true
 
 
@@ -3590,7 +3592,12 @@ func _hint_h() -> float:
 
 
 func _place_hint_above_player() -> void:
-	if _door_hint == null or not _door_hint.visible:
+	if _door_hint == null:
+		return
+	# 交互键的亮灭挂在这里：只有这个函数每帧都跑，visible 的最终状态它最清楚
+	# （提示条在 _update_interact_hint 里跳 8Hz，还有几处直接设 visible=false）
+	_sync_interact_btn()
+	if not _door_hint.visible:
 		return
 	var me: Node = _local_avatar()
 	if me == null:
@@ -3778,7 +3785,7 @@ func _update_interact_hint(delta: float) -> void:
 		_near_buddy = {}
 		_door_hint.visible = true
 		var can_land := _shore_near(_boats[_my_boat]["pos"])
-		_door_hint.text = "按 E 下船" if can_land else "靠岸后按 E 下船"
+		_set_hint("按 E 下船" if can_land else "靠岸后按 E 下船")
 		return
 
 	if _pose_of(me) != 0:
@@ -3789,7 +3796,7 @@ func _update_interact_hint(delta: float) -> void:
 		# 姿势一律问 pose_now()，不要读同步属性 sit_dir：那是每 33ms 被服务器盖回来的
 		# 一份旧值，本地权威姿势要等玩家自己的 _process 才贴回，而 Arena 是父节点、
 		# 先跑一步 —— 提示条采样到窗口里那一帧，就会在「起床 / 躺到床上」之间反复跳。
-		_door_hint.text = "按 E %s" % ("起床" if bool(me.call("is_lying")) else "站起来")
+		_set_hint("按 E %s" % ("起床" if bool(me.call("is_lying")) else "站起来"))
 		# 坐在 B1 某个单间里、队里留了语音 / 屏幕共享链接 → 右下角按需亮按钮
 		_refresh_action_btns(pos)
 		return
@@ -3802,7 +3809,7 @@ func _update_interact_hint(delta: float) -> void:
 		_near_seat = {}
 		_near_dorm = ""
 		_door_hint.visible = true
-		_door_hint.text = _buddy_hint(buddy)
+		_set_hint(_buddy_hint(buddy))
 		return
 
 	var seat := _nearest_seat(pos)
@@ -3811,9 +3818,9 @@ func _update_interact_hint(delta: float) -> void:
 		_near_dorm = ""
 		_door_hint.visible = true
 		if String(seat["kind"]) == "bed":
-			_door_hint.text = "按 E 躺到床上"
+			_set_hint("按 E 躺到床上")
 		else:
-			_door_hint.text = "按 E 坐下"
+			_set_hint("按 E 坐下")
 		return
 
 	# 自己房间里的猫：E 摸摸，F 牵出门遛（和 _try_interact / _try_leash_cat 一一对应）
@@ -3824,14 +3831,14 @@ func _update_interact_hint(delta: float) -> void:
 			_door_hint.visible = true
 			# 刚摸完先让反馈（「喵～ · 亲密 3」）占一会儿，再回到操作提示
 			if _cat_msg_t > 0.0:
-				_door_hint.text = _cat_msg
+				_set_hint(_cat_msg)
 				return
 			_restore_leash()
 			var rc_name := str(room_cat.call("cat_name"))
 			if _leash_idx >= 0 and _leash_idx == _room_cat_index(room_cat):
-				_door_hint.text = "「%s」跟着你 · 点它摸摸 · F 放回窝里" % rc_name
+				_set_hint("「%s」跟着你 · 点它摸摸 · F 放回窝里" % rc_name)
 			else:
-				_door_hint.text = "点「%s」摸摸 · 按 F 牵出门遛" % rc_name
+				_set_hint("点「%s」摸摸 · 按 F 牵出门遛" % rc_name)
 			return
 
 	# 房间里：只有站到门口才提示离开（房间中间按 E 不做任何事，
@@ -3840,16 +3847,16 @@ func _update_interact_hint(delta: float) -> void:
 		_near_dorm = ""
 		if _note_open():
 			_door_hint.visible = true
-			_door_hint.text = "点这里 / 按 E 关掉公告"
+			_set_hint("点这里 / 按 E 关掉公告")
 		elif _floor_open:
 			_door_hint.visible = true
-			_door_hint.text = "按 E / Esc 关掉电梯面板"
+			_set_hint("按 E / Esc 关掉电梯面板")
 		elif _near_elevator(pos):
 			_door_hint.visible = true
-			_door_hint.text = "按 E 乘电梯去其他楼层"
+			_set_hint("按 E 乘电梯去其他楼层")
 		elif _near_door(pos):
 			_door_hint.visible = true
-			_door_hint.text = "按 E 离开「%s」" % _room_title
+			_set_hint("按 E 离开「%s」" % _room_title)
 		else:
 			# 自习空间没有单间门 / 组队板，房间中间不该挂着任何提示
 			if current_floor == STUDY_FLOOR:
@@ -3864,12 +3871,12 @@ func _update_interact_hint(delta: float) -> void:
 					var cur: Dictionary = Net.room_claims.get("%d:%d" % [BASEMENT_FLOOR, bi], {})
 					_door_hint.visible = true
 					if cur.is_empty():
-						_door_hint.text = "%s · 空队 · 按 E 开队" % _team_board_name(bi)
+						_set_hint("%s · 空队 · 按 E 开队" % _team_board_name(bi))
 					elif Net.is_my_team_board(cur):
-						_door_hint.text = "%s · 我的队 · 按 E 编辑招募" % _team_board_name(bi)
+						_set_hint("%s · 我的队 · 按 E 编辑招募" % _team_board_name(bi))
 					else:
-						_door_hint.text = "%s ·「%s」的队 · 按 E 看招募" % [
-							_team_board_name(bi), String(cur.get("name", "?"))]
+						_set_hint("%s ·「%s」的队 · 按 E 看招募" % [
+							_team_board_name(bi), String(cur.get("name", "?"))])
 				return
 			var rd := _nearest_room_door(pos)
 			if rd.is_empty():
@@ -3880,13 +3887,14 @@ func _update_interact_hint(delta: float) -> void:
 				_door_hint.visible = true
 				match String(gate["state"]):
 					"empty":
-						_door_hint.text = "%d 号房 · 空房 · 按 E 认领" % no
+						_set_hint("%d 号房 · 空房 · 按 E 认领" % no)
 					"mine":
-						_door_hint.text = "%d 号房（你的）· E 写公告 · F 撕下名牌" % no
+						_set_hint("%d 号房（你的）· E 写公告 · F 撕下名牌" % no)
 					"friend":
-						_door_hint.text = "%d 号房 ·「%s」的房间 · 好友可进" % [no, String(gate["name"])]
+						# 好友房：按 E 就是进去，文案里没写 E，显式标可交互
+						_set_hint("%d 号房 ·「%s」的房间 · 好友可进" % [no, String(gate["name"])], 1)
 					_:
-						_door_hint.text = "%d 号房 ·「%s」的房间 · 门锁着（E 看公告）" % [no, String(gate["name"])]
+						_set_hint("%d 号房 ·「%s」的房间 · 门锁着（E 看公告）" % [no, String(gate["name"])])
 		return
 
 	# 岸边小船：站在船边按 E 上船；被人占着就只提示、不抢。
@@ -3897,9 +3905,9 @@ func _update_interact_hint(delta: float) -> void:
 		_near_buddy = {}
 		_door_hint.visible = true
 		if int(_boats[boat_idx]["rider"]) == 0 or int(_boats[boat_idx]["rider"]) == Net.my_id():
-			_door_hint.text = "按 E 上船"
+			_set_hint("按 E 上船")
 		else:
-			_door_hint.text = "这艘小船已经有人了"
+			_set_hint("这艘小船已经有人了")
 		return
 
 	var cell: Vector2 = pos / TS
@@ -3915,7 +3923,7 @@ func _update_interact_hint(delta: float) -> void:
 		_near_dorm = ""
 		_door_hint.visible = true
 		# 不在世界里立牌子、也不在 UI 上标空间名：只有走近了才给这一条提示
-		_door_hint.text = "图书馆 · 按 E 进入"
+		_set_hint("图书馆 · 按 E 进入")
 		return
 	var hit := ""
 	for d in _dorms:
@@ -3926,12 +3934,12 @@ func _update_interact_hint(delta: float) -> void:
 	_near_dorm = hit
 	if hit != "":
 		_door_hint.visible = true
-		_door_hint.text = "%s · 按 E 进入「宿舍空间」" % hit
+		_set_hint("%s · 按 E 进入「宿舍空间」" % hit)
 		return
 	# 摸猫反馈短暂占住提示条，之后回到「点它摸摸」
 	if _cat_msg_t > 0.0:
 		_door_hint.visible = true
-		_door_hint.text = _cat_msg
+		_set_hint(_cat_msg)
 		return
 	var cat := _nearest_cat(pos)
 	if cat != null:
@@ -3939,15 +3947,15 @@ func _update_interact_hint(delta: float) -> void:
 		var nm := str(cat.call("cat_name"))
 		if cat == _leash_cat:
 			# 牵着溜达的那只：名字是你起的，别再走领养流程
-			_door_hint.text = "「%s」跟着你 · 点它摸摸 · 回宿舍就收工" % nm
+			_set_hint("「%s」跟着你 · 点它摸摸 · 回宿舍就收工" % nm)
 			return
 		var left := ADOPT_PETS - int(cat.get("pet_count"))
 		if _ensure_adopted().size() >= ADOPT_MAX:
-			_door_hint.text = "点「%s」摸摸 · 猫窝已满" % nm
+			_set_hint("点「%s」摸摸 · 猫窝已满" % nm)
 		elif left <= 0:
-			_door_hint.text = "点「%s」领养回宿舍" % nm
+			_set_hint("点「%s」领养回宿舍" % nm)
 		else:
-			_door_hint.text = "点「%s」摸摸 · 再点 %d 次可领养" % [nm, left]
+			_set_hint("点「%s」摸摸 · 再点 %d 次可领养" % [nm, left])
 		return
 	_door_hint.visible = false
 
@@ -3969,6 +3977,104 @@ func _near_door(pos: Vector2) -> bool:
 ## 点提示文字 = 按 E。手机上唯一的交互入口。
 func _on_hint_pressed() -> void:
 	_try_interact()
+
+
+## 右下角那颗橙色交互键（只在触屏上出现）。和 E 键、点头顶提示条
+## 走的是同一条链路，优先级与节流全在 _try_interact 里，这里不加第二套判断。
+func touch_interact() -> void:
+	_try_interact()
+
+
+## 提示条现在这一条「到底能不能按 E」——触屏上右下角交互牌跟着它亮灭。
+var _hint_act := false
+## 牌子上那两个字（进入 / 坐下 / 离开…），由当前提示翻出来
+var _hint_label := "交互"
+## 上一次推给 touch_pad 的状态：每帧都发会让它一直 queue_redraw
+var _touch_act_on := false
+var _touch_act_label := ""
+
+
+## 统一设置提示条文案（原来 29 处各写各的 _door_hint.text）。
+## 两个副作用都在这里收口：
+##   1. 触屏上抹掉「按 E / E / Esc」这些键盘前缀 —— 手机没有这些键，
+##      留着只会把人引向一个不存在的地方；按钮就在右下角，不需要再指路。
+##   2. 记下这一条能不能按，交互键据此决定出不出场。
+##
+## act 不传＝按文案里有没有「E」推断。只有两处文案看不出来，才显式给：
+##   「N 号房 ·「某某」的房间 · 好友可进」—— 好友房按 E 就是进去，
+##   但文案里没写 E，不补一句交互键会缺这一档。
+func _set_hint(t: String, act := -1) -> void:
+	if _door_hint == null:
+		return
+	if act >= 0:
+		_hint_act = act == 1
+	else:
+		# 「靠岸后按 E 下船」是「现在按了没用」，别让按钮亮起来骗人
+		_hint_act = t.contains("E") and not t.begins_with("靠岸后")
+	_hint_label = _hint_action_word(t)
+	_door_hint.text = _hint_touch_text(t) if GameTheme.touch_ui() else t
+
+
+## 把一条提示翻成牌子上的动词。只在触屏上用，所以文案短、两三个字就好。
+## 匹配不到就写「交互」—— 宁可笼统，也不要写出一个和实际动作不符的词。
+func _hint_action_word(t: String) -> String:
+	if t.contains("离开"):
+		return "离开"
+	if t.contains("下船"):
+		return "下船"
+	if t.contains("上船"):
+		return "上船"
+	if t.contains("关掉"):
+		return "关闭"
+	if t.contains("躺到床上"):
+		return "躺下"
+	if t.contains("起床"):
+		return "起床"
+	if t.contains("站起来"):
+		return "起身"
+	if t.contains("坐下"):
+		return "坐下"
+	if t.contains("电梯"):
+		return "电梯"
+	if t.contains("认领"):
+		return "认领"
+	if t.contains("开队") or t.contains("招募"):
+		return "组队板"
+	if t.contains("公告"):
+		return "公告"
+	# 好友房「可进」：动作是进门，不是加好友
+	if t.contains("可进") or t.contains("进入"):
+		return "进入"
+	if t.contains("好友"):
+		return "交友"
+	return "交互"
+
+
+func _hint_touch_text(t: String) -> String:
+	var s := t
+	s = s.replace("点这里 / 按 E ", "")     # 「点这里 / 按 E 关掉公告」
+	s = s.replace("按 E / Esc ", "")        # 「按 E / Esc 关掉电梯面板」
+	s = s.replace("靠岸后按 E ", "靠岸后")  # 船还没靠岸：按了也没用，别写成可操作
+	s = s.replace("按 E ", "")
+	s = s.replace("按 E", "")
+	s = s.replace("· E 写公告", "· 写公告")     # 「N 号房（你的）· E 写公告」
+	s = s.replace("（E 看公告）", "（看公告）")
+	return s.strip_edges()
+
+
+## 交互牌亮灭 + 文案。状态和文案都没变就不往下发（touch_pad 收到一次要重画一次）。
+func _sync_interact_btn() -> void:
+	if _door_hint == null:
+		return
+	var want := _door_hint.visible and _hint_act
+	var lab := _hint_label if want else ""
+	if want == _touch_act_on and lab == _touch_act_label:
+		return
+	_touch_act_on = want
+	_touch_act_label = lab
+	var tp := get_tree().get_first_node_in_group("touch_pad")
+	if tp != null and tp.has_method("set_interact_available"):
+		tp.call("set_interact_available", want, lab)
 
 
 func _nearest_seat(pos: Vector2) -> Dictionary:
