@@ -5,8 +5,10 @@
   何尊（9.5m 青铜方尊、喇叭口/饕餮纹/宅兹中国铭文）立在东边水池里。
   资料：百度百科「何尊广场」「为国铸剑」、西工大软件学院参观稿。
 
+⚠️ b52 勇士贴图已改由 tools/gen_warrior_fence.py 生成（含方形围栏）；本脚本只负责 props_hezun.png。
+
 本脚本产出：
-  assets/_buildings_src/b52.png  勇士源图（草地上、横托剑、名牌基座）
+  assets/props_hezun.png         独立何尊道具（草地上、横托剑、名牌基座）
       —— 再走 tools/bake_facade.py 的 apply 烘焙成 assets/buildings/b52.png，
          facade 只落实心像素上的名牌「为国铸剑」，alpha/semi/glass 自检不变。
   assets/props_hezun.png         独立何尊道具（青铜方尊立在石砌圆池里）
