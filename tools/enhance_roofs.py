@@ -39,7 +39,17 @@ OUT = os.path.join(ROOT, "assets", "buildings")
 BAK = os.path.join(os.path.dirname(ROOT), "backup", "before-roof-20261117")
 RECTS = os.path.join(BAK, "skylight_rects.json")
 
-TARGETS = [53, 54, 55, 56, 57]
+TARGETS = [53, 54, 55, 56, 57]   # 海天苑大楼群：纯色大板 → 采光天窗 / 内院绿化
+# 11/25/32/43 这类「深蓝灰 + 40px 网格」的大屋顶试过压顶 + 板块明暗：板块会切出
+# 硬边田字格，实机像屋顶裂成几块，比原样更差，所以不做。它们本来就够规整。
+ARCH = []                        # 翱翔游泳馆试过「柔化密横条纹 + 弧面受光 + 顶部采光带」：
+                                 # 采光带像白色相框；柔化后中部糊成一块亮矩形，比原图的
+                                 # 清晰等距条纹更差。保留原样。
+
+ARCH_BAND = (204, 219, 229)      # 采光带玻璃
+ARCH_BAND_LINE = (108, 122, 136)  # 采光带分格
+ARCH_BAND_IN = 20                # 采光带起始深度（距轮廓层数）
+ARCH_BAND_W = 13                 # 采光带宽度（层数）
 
 PALE_RGB = (188, 194, 200)      # 纯色大板的底色
 PALE_TOL = 14
@@ -230,18 +240,83 @@ def draw_green_roof(a, roof):
     return int(m.sum())
 
 
+def draw_arch_roof(a_in, a, roof, idx):
+    """拱顶（游泳馆）：减弱原有的密横条纹 → 弧面受光 → 沿轮廓一圈采光带。
+
+    实景是银灰金属穹顶，顶部沿弧面有一圈天窗采光带。原贴图是等间距密横条纹，
+    实机看像瓦楞纸/百叶，压住了整体的「穹顶」观感。
+    """
+    H, W = a.shape[:2]
+    # 1) 横条纹向局部均值收敛 32%，保留大尺度明暗
+    base = Image.fromarray(a_in.astype(np.uint8), "RGBA").convert("RGB")
+    soft = np.asarray(base.filter(ImageFilter.GaussianBlur(3.2))).astype(np.float32)
+    idxm = roof
+    for c in range(3):
+        a[:, :, c] = np.where(idxm, a[:, :, c] * 0.68 + soft[:, :, c] * 0.32, a[:, :, c])
+
+    # 2) 弧面受光：中间亮、两侧暗（俯视穹顶的受光）
+    xs = np.where(roof.any(axis=0))[0]
+    if len(xs) < 10:
+        return 0
+    cx = (xs.min() + xs.max()) / 2.0
+    half = max(1.0, (xs.max() - xs.min()) / 2.0)
+    X = np.indices((H, W))[1]
+    dn = np.abs(X - cx) / half
+    lamp = (1.05 - 0.16 * dn ** 2).astype(np.float32)
+    for c in range(3):
+        a[:, :, c] = np.where(roof, a[:, :, c] * lamp, a[:, :, c])
+
+    # 3) 采光带：试过「沿轮廓一圈」的画法 —— 13px 宽的一圈浅色在实机里像给屋顶
+    #    套了个白色相框，比原来的密条纹更糟。实景的天窗是跟着屋面分板走的，
+    #    程序化画不准，索性不画，靠弧面受光表达穹顶。
+    return 0
+
+
 def wall_shadow(a, roof):
-    rings = dist_layers(roof, WALL_RING + 7)
-    for i, rg in enumerate(rings[:WALL_RING]):
-        k = 1.0 - (1.0 - WALL_K) * (1.0 - i / WALL_RING)
+    """女儿墙：外 3 层是受光压顶（加法提亮，不改色相），往里是墙投在屋面的影。"""
+    rings = dist_layers(roof, WALL_RING + 10)
+    CAP = 16.0
+    for rg in rings[:3]:
+        for c in range(3):
+            a[rg, c] = np.minimum(255.0, a[rg, c] + CAP)
+    for i, rg in enumerate(rings[3:WALL_RING + 4]):
+        k = 1.0 - (1.0 - WALL_K) * (1.0 - i / (WALL_RING + 2))
         a[rg, 0] *= k
         a[rg, 1] *= k
         a[rg, 2] *= k
-    for i, rg in enumerate(rings[WALL_RING:WALL_RING + 7]):
-        k = 1.0 - (1.0 - WALL_K) * 0.55 * (1.0 - (i + 1) / 7.0)
+    for i, rg in enumerate(rings[WALL_RING + 4:WALL_RING + 10]):
+        k = 1.0 - (1.0 - WALL_K) * 0.5 * (1.0 - (i + 1) / 7.0)
         a[rg, 0] *= k
         a[rg, 1] *= k
         a[rg, 2] *= k
+
+
+PATTERN_STEP = 124       # 屋面板块尺寸：必须远大于贴图自带的 40px 网格，否则互相打架
+PATTERN_AMP = 0.0        # 实测硬边板块在实机像「屋顶裂成几块」，关掉；压顶/阴影已够
+
+
+def roof_pattern(a, roof, idx):
+    """大尺度屋面板块明暗：把「一块均匀毯子」打散成几块拼接的屋面。
+
+    刻意只用 84px 的大块、幅度很小 —— 小幅高频噪声会把屋顶弄脏（地图降噪
+    那轮已经吃过这个教训）。
+    """
+    H, W = a.shape[:2]
+    inner = roof.copy()
+    for rg in dist_layers(roof, 14):
+        inner &= ~rg
+    if inner.sum() < 2000:
+        return 0
+    for cy in range(0, H, PATTERN_STEP):
+        for cx in range(0, W, PATTERN_STEP):
+            y2, x2 = min(cy + PATTERN_STEP, H), min(cx + PATTERN_STEP, W)
+            m = inner[cy:y2, cx:x2]
+            if not m.any():
+                continue
+            d = (hashf(cx // PATTERN_STEP, cy // PATTERN_STEP, idx + 71) - 0.5) * PATTERN_AMP
+            part = a[cy:y2, cx:x2, :3]
+            part[m] += d
+    return int(inner.sum())
 
 
 def pane_top(a):
@@ -276,11 +351,24 @@ def enhance(a_in, idx):
         stat["sky"] += draw_skylight(a, rect)
         stat["rects"].append([int(v) for v in rect])
     stat["green"] = draw_green_roof(a, roof)
+    if idx in ARCH:
+        stat["arch"] = draw_arch_roof(a_in, a, roof, idx)
+    # 绿化区已有自己的草簇起伏，别再叠大板块差
+    r_, g_, b_ = a[:, :, 0].astype(int), a[:, :, 1].astype(int), a[:, :, 2].astype(int)
+    green_now = (g_ > r_ + 30) & (g_ > b_ + 30) & (a[:, :, 3] == 255)
+    stat["pattern"] = roof_pattern(a, roof & ~green_now, idx)
     wall_shadow(a, roof)
 
     out = np.clip(a, 0, 255).astype(np.uint8)
     out[:, :, 3] = a_in[:, :, 3]
     g1 = glass_mask(out)
+    # 压顶提亮可能把个别「b-g 正好卡在阈值附近」的像素推进玻璃集合 ——
+    # 夜间窗光是按玻璃位置预烘的，多一个像素就错一个亮点，所以一律回退。
+    fix = g1 & ~g0
+    if fix.any():
+        out[fix] = a_in[fix]
+        g1 = glass_mask(out)
+    stat["glass_fix"] = int(fix.sum())
     stat["glass_add"] = int((g1 & ~g0).sum())
     stat["glass_lost"] = int((g0 & ~g1).sum())
     stat["alpha_same"] = bool(np.array_equal(out[:, :, 3], a_in[:, :, 3]))
@@ -345,7 +433,7 @@ def main():
     os.makedirs(BAK, exist_ok=True)
     bad = 0
     rects = {}
-    for idx in TARGETS:
+    for idx in TARGETS + ARCH:
         src_p = os.path.join(SRC, f"b{idx}.png")
         bak_p = os.path.join(BAK, f"b{idx}.png")
         if not os.path.exists(src_p):
