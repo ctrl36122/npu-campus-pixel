@@ -140,6 +140,7 @@
 [ext_resource type="Texture2D" path="res://assets/props_forge/decor_78.png" id="130_ou5tn"]
 [ext_resource type="Texture2D" path="res://assets/props_bin.png" id="133_qn65p"]
 [ext_resource type="Texture2D" path="res://assets/props_cars_sheet.png" id="900_carsheet"]
+[ext_resource type="Texture2D" path="res://assets/props_hezun.png" id="901_hezun"]
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_7huuw"]
 atlas = ExtResource("82_t2jyq")
@@ -2670,6 +2671,18 @@ offset = Vector2(0, -873.6)
 
 [node name="Collision" type="CollisionPolygon2D" parent="Objects/亚洲最大水上图书馆" unique_id=2067226140]
 polygon = PackedVector2Array(366.40002, -492.80005, 288.79993, -505.6001, 237.59998, -507.19995, 161.59998, -492, 100.79993, -456, 70.400024, -428.80005, 54.400024, -398.3999, 31.199951, -356.80005, 16.799927, -304.80005, 16, -255.19995, 20, -209.6001, 29.599976, -176, 166.40002, -167.19995, 166.40002, -119.19995, 52.799927, -126.3999, 104, -64.80005, 248, -56, 255.19995, 0, 287.19995, -2.3999023, 259.19995, -254.3999, 234.40002, -256, 236.79993, -233.6001, 191.19995, -236, 184.79993, -343.19995, 512.7999, -327.19995, 494.40002, -396, 437.59998, -453.6001, 366.40002, -492.80005)
+
+[node name="何尊雕塑" type="StaticBody2D" parent="Objects" unique_id=1713146423]
+position = Vector2(2864, 2776)
+
+[node name="Sprite" type="Sprite2D" parent="Objects/何尊雕塑" unique_id=1771325605]
+texture_filter = 1
+texture = ExtResource("901_hezun")
+centered = false
+offset = Vector2(0, -96)
+
+[node name="Collision" type="CollisionPolygon2D" parent="Objects/何尊雕塑" unique_id=1132483199]
+polygon = PackedVector2Array(-64, -16, 64, -16, 64, 0, -64, 0)
 
 [node name="为国铸剑" type="StaticBody2D" parent="Objects" unique_id=1463291213]
 position = Vector2(3032, 2804.8)
