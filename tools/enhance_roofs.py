@@ -509,7 +509,8 @@ def main():
               f"天窗={st['sky']:5d} 绿化={st['green']:5d} "
               f"玻璃+{st['glass_add']}/-{st['glass_lost']} alpha{'✓' if st['alpha_same'] else '✗'} "
               f"{'OK' if ok else '!! 违反红线'}")
-        if not dry and ok:
+        hit = st["sky"] > 0 or st["green"] > 0 or st.get("arch", 0) > 0
+        if not dry and ok and hit:
             Image.fromarray(out, "RGBA").save(src_p, optimize=True)
     if dry:
         print("\n[dry] 未写文件")
