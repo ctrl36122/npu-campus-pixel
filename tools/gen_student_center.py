@@ -1,179 +1,164 @@
-"""按卫星俯视图重画「翱翔学生中心」(b11) 贴图，可复现。
+"""修正「翱翔学生中心」(b11) 俯视屋顶贴图，可复现。
 
-照片/卫星依据：用户提供的卫星俯视图 + .tmp/imgs2/student_center/00.jpg、01.jpg。
-平面：左块狭长深褐屋顶（带回字内凹中庭）、右块白色矩形顶 + 蓝灰竖分格玻璃斜顶、
-      中间浅色网格连接体、前方是广场（不画台阶）。
+## 教训（2026-11-18，用户强烈不满后返工）
+这张贴图是**2.5D 建筑**:上半部(y<~430)是俯视屋顶，下半部(y>=440)是面向
+镜头的**楼体立面**——整齐的蓝玻璃窗网格 + 白瓷砖墙 + 门厅。
+上一版把整个下半部立面连同窗户一起涂成纯色块，等于把楼"抹平"了，
+这才是「像垃圾色块」的真正原因。00/01.jpg 的飞碟顶还是别的楼（体育馆），
+照它画蓝色大板更是错上加错。
 
-关键：源图里有三块与主体**完全不连通**的孤立 solid —— 左上电梯井(x135..187,y65..87)、
-底部门厅石柱(x177..211,y635..658)和台阶(x172..217,y662..673)。这正是「电梯井跑到楼外、
-门独立出来」的根源。脚本直接把它们从 alpha 清成透明（都不是 bbox 边界像素）。
+## 本版原则
+  * 立面原样保留：y>=440 的玻璃窗/墙面/门厅像素逐字节不动（夜间窗光依赖玻璃 mask）。
+  * 只重绘俯视屋顶 y<440：按用户卫星图 .tmp/sc_sat_zoom.png 的灰白矩形屋面 +
+    两条白色天窗 + 网格，配色中性灰白，不再是蓝色大板/死褐色。
+  * 清掉三块跑到楼外的孤立 solid（电梯井/独立门厅）——沿用上一版纠错。
+  * alpha 除孤立块外逐字节不变；bbox 不变；不新增玻璃色。
 
-流程:
-    python tools/gen_student_center.py          # 写 assets/_buildings_src/b11.png
-    # 再走标准链：bake_facade.apply(src,11,bld) -> assets/buildings/b11.png
-    # 因为玻璃位置全变，必须重烘窗光：python tools/bake_art.py
-    # （全量会重写其它楼的 glow，注意只保留 b11 的变化，其余恢复）
-    最后 Godot --headless --import 刷新资源。
-"""
-"""翱翔学生中心 b11 按卫星俯视图重画（只改 RGB，alpha/半透明/bbox 不变）。
+## 依据
+  * 卫星图 .tmp/sc_sat_zoom.png（用户提供）
+  * 官方竖排招牌照片 .tmp/imgs2/student_center/02.jpg（方正 LED 屏大楼）
 
-依据用户提供的卫星图（.tmp/sc_sat_zoom.png）：
-  左块（狭长）—— 深褐色大屋顶，中上部一个「回」字深色内凹中庭（中间浅、四周深），
-                  下端两排小圆采光点。
-  右块（较宽）—— 北侧一大块白色矩形屋顶；其下是浅米色带竖向细分的斜屋顶（飞碟顶
-                  俯视的样子），底边一排小突起；屋顶最上有一条深色带。
-  中间下部    —— 浅色网格连接体。
-  前方        —— 台阶门厅（连着主体，不再独立）。
-
-同时修掉原贴图两处游离结构：左上独立电梯井、底部独立石柱门厅。
-夜间窗光在落地后单独重烘 glow_winb_11.png。
+## 流程
+  python tools/gen_student_center.py          # 写 assets/_buildings_src/b11.png
+  python tools/bake_facade.py --ids 11 --apply --force
+  python tools/bake_art.py                    # 重烘 glow（只保留 b11 变化）
+  godot --headless --import
 """
 import sys
 sys.path.insert(0, 'tools')
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 W, H = 390, 685
 src = Image.open('backup/before-sc-20261118/b11_src.png').convert('RGBA')
-a0 = np.asarray(src)
+a0 = np.asarray(src).copy()
 alpha = a0[:, :, 3].copy()
 
-# 清掉三块与主体完全不连通的孤立 solid（正是用户说的「电梯井跑到楼外」「门独立出来」）：
-#   x135..187,y65..87  = 左上独立电梯井小方块
-#   x177..211,y635..658 / x172..217,y662..673 = 底部独立门厅石柱+台阶
-# 这些块都在贴图内部，清掉不影响不透明 bbox（bbox 边界由其它像素撑着）。
+# 清掉三块与主体完全不连通的孤立 solid（跑出楼外的电梯井 / 独立门厅）
 alpha[63:90, 133:190] = 0
 alpha[633:660, 175:214] = 0
 alpha[660:676, 170:220] = 0
-
 solid = alpha == 255
 Y, X = np.indices((H, W))
 
-def isgl(r, g, b):
-    r, g, b = int(r), int(g), int(b)
-    L = (r + g + b) / 3.0
-    return b > r + 8 and b > g + 15 and L > 120 and b > 110
+# 输出图：先整体复制原图，再只改俯视屋顶区域 —— 立面/窗户/门厅原样保留
+out = a0.copy()
 
-g0 = np.array([[isgl(*a0[y, x, :3]) for x in range(W)] for y in range(H)]) & solid
+# 清掉的孤立块也把 RGB 归零（alpha=0 时 RGB 无所谓，保持一致）
+for (y0, y1, x0, x1) in ((63, 90, 133, 190), (633, 660, 175, 214), (660, 676, 170, 220)):
+    out[y0:y1, x0:x1, :3] = 0
 
-img = Image.new('RGBA', (W, H), (0, 0, 0, 0))
+img = Image.fromarray(out, 'RGBA')
 d = ImageDraw.Draw(img)
 
-def fill(mask, color):
-    for y in range(H):
-        xs = np.where(mask[y])[0]
-        for x in xs:
-            img.putpixel((int(x), int(y)), color)
 
-# 左右块的划分：以 x=200 为界（从贴图行范围看，右块在 x200..372）
-left = solid & (X < 200)
-right = solid & (X >= 200)
+def is_solid(x, y):
+    return 0 <= x < W and 0 <= y < H and solid[y, x]
 
-# ---------- 左块：深褐色屋顶 ----------
-fill(left, (150, 140, 122, 255))
-# 深褐色调加轻微明暗（大块，不做高频噪声）
-for y in range(40, 620):
-    for x in range(16, 200):
-        if x < W and solid[y, x] and X[y, x] < 200:
-            v = int(150 - (y - 40) / 600.0 * 16)
-            img.putpixel((x, y), (v, v - 10, v - 28, 255))
 
-# 「回」字形内凹中庭（卫星图左块中上部）：外深内浅的矩形环
-# 位置约 x60..150, y150..330
-d.rectangle([58, 150, 152, 330], fill=(70, 66, 58, 255))
-d.rectangle([72, 166, 138, 314], fill=(168, 160, 142, 255))
-d.rectangle([86, 182, 124, 298], fill=(150, 144, 128, 255))
-# 中庭中间的深色长条（天窗缝）
-d.rectangle([92, 190, 118, 290], fill=(64, 60, 54, 255))
+def noise_rect(x0, y0, x1, y1, base, amp, seed=11):
+    for y in range(max(0, y0), min(H, y1)):
+        for x in range(max(0, x0), min(W, x1)):
+            if not solid[y, x]:
+                continue
+            n = int((np.sin(x * 12.9898 + y * 78.233 + seed) * 43758.5453) % 1.0 * 2 - 1)
+            dv = n * amp
+            c = tuple(max(0, min(255, v + dv)) for v in base) + (255,)
+            img.putpixel((x, y), c)
 
-# 左块下端两排小圆采光点（卫星图可见）
-for yy in (430, 470):
-    for xx in range(30, 180, 26):
-        if solid[yy, xx]:
-            d.ellipse([xx - 4, yy - 4, xx + 4, yy + 4], fill=(120, 130, 122, 255))
 
-# 左块最顶的浅色网格小方块（卫星图左上角）
-d.rectangle([20, 44, 92, 108], fill=(196, 196, 182, 255))
+# ================= 只重绘俯视屋顶 y < 440 =================
+# 先把屋顶 solid 统一铺成灰白基色（中性，不会判成玻璃）
+for y in range(0, 440):
+    for x in range(W):
+        if solid[y, x]:
+            img.putpixel((x, y), (176, 178, 174, 255))
+
+# ---- 左块（x<200）：配套裙房屋面 + 铺装庭院 ----
+noise_rect(16, 40, 200, 200, (166, 163, 154), 4, 11)
+noise_rect(16, 200, 200, 440, (172, 169, 160), 4, 12)
+# 庭院铺装分格（细线，低对比）
+for gy in range(60, 440, 18):
+    d.line([(16, gy), (199, gy)], fill=(158, 154, 146, 255), width=1)
+for gx in range(20, 200, 20):
+    d.line([(gx, 40), (gx, 439)], fill=(162, 158, 150, 255), width=1)
+
+# 左上浅灰网格小屋面（卫星图左上独立方块）
+d.rectangle([20, 44, 92, 108], fill=(188, 188, 180, 255))
 for k in range(24, 92, 12):
-    d.line([k, 44, k, 108], fill=(168, 168, 156, 255), width=1)
+    d.line([(k, 44), (k, 108)], fill=(170, 170, 162, 255), width=1)
 for k in range(48, 108, 12):
-    d.line([20, k, 92, k], fill=(168, 168, 156, 255), width=1)
+    d.line([(20, k), (92, k)], fill=(170, 170, 162, 255), width=1)
 
-# ---------- 右块：白色矩形顶 + 浅米色竖分格斜顶 ----------
-# 顶部一条深色带（卫星图上缘的深色阴影）
-for y in range(40, 200):
-    for x in range(200, 373):
-        if x < W and solid[y, x]:
-            img.putpixel((x, y), (72, 80, 86, 255))
-# 北侧白色大矩形屋顶
-d.rectangle([222, 100, 360, 176], fill=(228, 230, 226, 255))
-d.rectangle([222, 100, 360, 103], fill=(248, 248, 246, 255))
-# 白色屋顶下的横向分界
-d.line([222, 176, 360, 176], fill=(120, 126, 130, 255), width=2)
+# 中上部「回」字裙房（卫星图深色结构）——深灰屋面+女儿墙+内天井+天窗
+d.rectangle([58, 150, 152, 330], fill=(96, 96, 92, 255))
+d.rectangle([64, 156, 146, 324], fill=(108, 107, 102, 255))
+d.rectangle([74, 166, 136, 314], fill=(80, 80, 77, 255))
+d.rectangle([80, 172, 130, 308], fill=(120, 119, 112, 255))
+d.rectangle([86, 184, 92, 296], fill=(176, 178, 174, 255))
+d.rectangle([118, 184, 124, 296], fill=(176, 178, 174, 255))
+for ex, ey in ((68, 170), (140, 170), (68, 310), (140, 310)):
+    d.rectangle([ex, ey, ex + 6, ey + 8], fill=(132, 132, 126, 255))
 
-# 浅米色斜屋顶（飞碟顶俯视），带竖向细分 + 两侧收边
-for y in range(178, 430):
-    for x in range(200, 373):
-        if x >= W or not solid[y, x]:
-            continue
-        # 中间亮两侧暗的曲面感
-        dn = abs(x - 286) / 86.0
-        base = int(218 - dn * 22 - (y - 178) / 252.0 * 10)
-        img.putpixel((x, y), (base - 24, base + 1, base + 20, 255))
-# 竖向分格线（飞碟顶的径向肋），每 20px 一条
-for x in range(206, 370, 20):
-    for y in range(180, 428):
-        if y < H and x < W and solid[y, x]:
-            r, g, b, _ = img.getpixel((x, y))
-            img.putpixel((x, y), (r - 24, g - 24, b - 24, 255))
-# 底边一排小突起（卫星图可见的齿状结构）
+# 左块下部两排树/采光井（只在上半屋顶区 y<440 的那排）
+for xx in range(30, 180, 26):
+    yy = 430
+    if is_solid(xx, yy):
+        d.ellipse([xx - 5, yy - 5, xx + 5, yy + 5], fill=(100, 114, 96, 255))
+        d.ellipse([xx - 2, yy - 3, xx + 2, yy + 1], fill=(128, 142, 118, 255))
+
+# ---- 右块（x>=200）：主楼矩形屋顶 ----
+# 北侧深绿阴影带
+noise_rect(200, 40, 373, 100, (84, 90, 84), 4, 13)
+# 两条白色屋面天窗（卫星图北侧两个白矩形）
+for (ry0, ry1) in ((100, 138), (142, 178)):
+    d.rectangle([222, ry0, 360, ry1], fill=(214, 216, 212, 255))
+    d.line([(222, ry0), (360, ry0)], fill=(232, 234, 230, 255), width=2)
+    d.line([(222, ry1), (360, ry1)], fill=(152, 154, 150, 255), width=1)
+    for k in range(230, 360, 22):
+        d.line([(k, ry0), (k, ry1)], fill=(202, 204, 200, 255), width=1)
+# 南侧灰白网格屋面
+noise_rect(200, 180, 373, 430, (206, 206, 198), 3, 14)
+for gx in range(204, 372, 14):
+    d.line([(gx, 180), (gx, 430)], fill=(188, 188, 180, 255), width=1)
+for gy in range(184, 430, 16):
+    d.line([(200, gy), (372, gy)], fill=(190, 190, 182, 255), width=1)
+# 屋面设备平台
+d.rectangle([250, 200, 282, 228], fill=(190, 190, 182, 255))
+d.rectangle([314, 250, 340, 274], fill=(190, 190, 182, 255))
+# 底边女儿墙压顶齿
 for x in range(205, 370, 16):
-    if x + 6 < W and solid[428, x]:
-        d.rectangle([x, 428, x + 6, 438], fill=(150, 142, 128, 255))
+    if is_solid(x, 428):
+        d.rectangle([x, 428, x + 6, 434], fill=(178, 176, 168, 255))
 
-# ---------- 中间下部：浅色网格连接体 ----------
-d.rectangle([150, 430, 250, 510], fill=(214, 214, 206, 255))
-for x in range(152, 250, 12):
-    d.line([x, 430, x, 510], fill=(176, 176, 168, 255), width=1)
-for y in range(432, 510, 12):
-    d.line([150, y, 250, y], fill=(176, 176, 168, 255), width=1)
-
-# ---------- 底部：不画台阶（卫星图前方是广场），把所有 solid 铺成建筑基座色 ----------
-# 原独立门厅的 solid 也一并变成主体基座，不再有孤立的门
-for yy in range(560, 685):
-    for xx in range(W):
-        if solid[yy, xx]:
-            img.putpixel((xx, yy), (196, 192, 180, 255))
-# 基座檐口线
-for yy in (586, 610):
-    for xx in range(W):
-        if solid[yy, xx]:
-            img.putpixel((xx, yy), (158, 154, 146, 255))
-
-# ---------- 右块下半（y430..560）solid 全部铺成基座/屋顶色，盖掉原图残留的深色阴影 ----------
-for yy in range(430, 565):
-    for xx in range(195, 375):
-        if xx < W and solid[yy, xx]:
-            img.putpixel((xx, yy), (206, 202, 190, 255))
-
-# ---------- 名牌：画在左块褐色屋顶的实心区（不能落在清掉的孤立块上） ----------
-from PIL import ImageFont
+# ---- 屋顶区内的名牌（画在左块实心区，避开孤立块）----
 f = ImageFont.truetype('assets/fonts/noto_sc_game.ttf', 13)
 d.rectangle([36, 118, 152, 140], fill=(52, 58, 64, 255))
 d.text((40, 119), '翱翔学生中心', font=f, fill=(238, 242, 246, 255))
 
-# ---------- 合成：alpha/半透明/bbox 不变 ----------
-out = np.asarray(img).copy()
-out[:, :, 3] = alpha
-g1 = np.array([[isgl(*out[y, x, :3]) for x in range(W)] for y in range(H)]) & solid
+# ================= 合成：alpha 除孤立块外不变，玻璃 mask 不变 =================
+out2 = np.asarray(img).copy()
+out2[:, :, 3] = alpha
+
+
+def isgl(r, g, b):
+    r, g, b = int(r), int(g), int(b)
+    return b > r + 8 and b > g + 15 and (r + g + b) / 3.0 > 120 and b > 110
+
+
+g0 = np.array([[isgl(*a0[y, x, :3]) for x in range(W)] for y in range(H)]) & (a0[:, :, 3] == 255)
+g1 = np.array([[isgl(*out2[y, x, :3]) for x in range(W)] for y in range(H)]) & solid
 print('glass add', int((g1 & ~g0).sum()), 'lost', int((g0 & ~g1).sum()))
-print('alpha same', np.array_equal(out[:, :, 3], a0[:, :, 3]))
-ys0, xs0 = np.where(a0[:, :, 3] > 0); ys1, xs1 = np.where(out[:, :, 3] > 0)
+# alpha 只允许孤立块那几处变化
+diff = np.where(alpha != a0[:, :, 3])
+print('alpha diff pixels', len(diff[0]), '(expect only isolated blocks)')
+ys0, xs0 = np.where(a0[:, :, 3] > 0); ys1, xs1 = np.where(out2[:, :, 3] > 0)
 print('bbox same', (xs0.min(), xs0.max(), ys0.min(), ys0.max()) == (xs1.min(), xs1.max(), ys1.min(), ys1.max()))
-Image.fromarray(out, 'RGBA').save('.tmp/sc_satcand6.png')
+Image.fromarray(out2, 'RGBA').save('assets/_buildings_src/b11.png')
+Image.fromarray(out2, 'RGBA').save('.tmp/sc_new_src.png')
 
 board = Image.new('RGB', (W * 2 + 30, H + 34), (232, 234, 238))
 board.paste(src.convert('RGB'), (8, 26))
-board.paste(Image.fromarray(out, 'RGBA').convert('RGB'), (W + 22, 26))
-board.save('.tmp/sc_satcompare6.png')
+board.paste(Image.fromarray(out2, 'RGBA').convert('RGB'), (W + 22, 26))
+board.save('.tmp/sc_new_compare.png')
 print('saved')
