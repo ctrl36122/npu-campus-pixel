@@ -24,6 +24,7 @@
 """
 import os
 import sys
+from collections import deque
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
@@ -39,7 +40,8 @@ OUT = os.path.join(ROOT, "assets", "buildings")
 BAK = os.path.join(os.path.dirname(ROOT), "backup", "before-roof-20261117")
 RECTS = os.path.join(BAK, "skylight_rects.json")
 
-TARGETS = [53, 54, 55, 56, 57]   # 海天苑大楼群：纯色大板 → 采光天窗 / 内院绿化
+TARGETS = [53, 54, 55, 56, 57,   # 海天苑大楼群：纯色大板 → 采光天窗 / 内院绿化
+           27, 28, 29, 30, 31, 36, 37, 38, 39]  # 教学西楼/东楼 9 栋：带分隔线的浅灰板 → 采光顶
 # 11/25/32/43 这类「深蓝灰 + 40px 网格」的大屋顶试过压顶 + 板块明暗：板块会切出
 # 硬边田字格，实机像屋顶裂成几块，比原样更差，所以不做。它们本来就够规整。
 ARCH = []                        # 翱翔游泳馆试过「柔化密横条纹 + 弧面受光 + 顶部采光带」：
@@ -52,9 +54,11 @@ ARCH_BAND_IN = 20                # 采光带起始深度（距轮廓层数）
 ARCH_BAND_W = 13                 # 采光带宽度（层数）
 
 PALE_RGB = (188, 194, 200)      # 纯色大板的底色
-PALE_TOL = 14
+PALE_TOL = 18
 PALE_MIN_AREA = 3000
-PALE_MIN_FILL = 0.88            # bbox 内覆盖率下限，防止把散点当大板
+PALE_MIN_FILL = 0.88            # 纯色矩形的 bbox 覆盖率下限
+PALE_SPLIT_FILL = 0.55          # 带分隔线大板的 bbox 内原色占比下限
+CLOSE_K = 13                    # 形态学闭运算核：弥合教学楼板上的深灰分隔线
 
 SKY_BASE = (200, 212, 220)      # 天窗玻璃底（偏青，反射天空）
 SKY_CELL = 46                   # 格架间距
@@ -123,22 +127,73 @@ def roof_region(a, gtop):
     return (a[:, :, 3] == 255) & (Y < gtop) & (Y > 2)
 
 
+def largest_component(m):
+    """4 邻域最大连通块（不引 scipy）。"""
+    H, W = m.shape
+    seen = np.zeros_like(m, bool)
+    ys, xs = np.where(m)
+    best, best_n = None, 0
+    for sy, sx in zip(ys, xs):
+        if seen[sy, sx]:
+            continue
+        q = deque([(sy, sx)])
+        seen[sy, sx] = True
+        pts = []
+        while q:
+            y, x = q.popleft()
+            pts.append((y, x))
+            for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                ny, nx = y + dy, x + dx
+                if 0 <= ny < H and 0 <= nx < W and m[ny, nx] and not seen[ny, nx]:
+                    seen[ny, nx] = True
+                    q.append((ny, nx))
+        if len(pts) > best_n:
+            best, best_n = pts, len(pts)
+    return best, best_n
+
+
 def find_pale_slabs(a, roof):
+    """找屋顶上的浅灰大板，返回 [(bbox, 绘制掩膜 or None)]。
+
+    两种形态：
+      * 海天苑那种纯色完美矩形 —— 直接按原色掩膜画；
+      * 教学楼那种被深灰分隔线切开的板 —— 先形态学闭运算弥合缝，
+        再取最大连通块作为绘制掩膜（重新画格架，缝不用保留）。
+    """
     r, g, b = a[:, :, 0].astype(int), a[:, :, 1].astype(int), a[:, :, 2].astype(int)
     m = (np.abs(r - PALE_RGB[0]) < PALE_TOL) & (np.abs(g - PALE_RGB[1]) < PALE_TOL) \
         & (np.abs(b - PALE_RGB[2]) < PALE_TOL) & roof
     if m.sum() < PALE_MIN_AREA:
         return []
-    # 只保留主体块：腐蚀后剩下的最大连通区域用 bbox 近似（这些板实测都是矩形）
+
+    # 1) 纯色矩形
     core = erode(m, 2)
-    if not core.any():
+    if core.any():
+        ys, xs = np.where(core)
+        x0, x1, y0, y1 = xs.min(), xs.max(), ys.min(), ys.max()
+        box = m[y0:y1 + 1, x0:x1 + 1]
+        if box.sum() / box.size >= PALE_MIN_FILL:
+            return [((int(x0), int(y0), int(x1), int(y1)), None)]
+
+    # 2) 带分隔线：闭运算补缝 → 最大连通块
+    im = Image.fromarray((m * 255).astype(np.uint8), "L")
+    im = im.filter(ImageFilter.MaxFilter(CLOSE_K)).filter(ImageFilter.MinFilter(CLOSE_K))
+    closed = np.asarray(im) > 127
+    pts, n = largest_component(closed)
+    if pts is None or n < PALE_MIN_AREA:
         return []
-    ys, xs = np.where(core)
-    x0, x1, y0, y1 = xs.min(), xs.max(), ys.min(), ys.max()
-    box = m[y0:y1 + 1, x0:x1 + 1]
-    if box.sum() / box.size < PALE_MIN_FILL:
+    py = np.array([p[0] for p in pts])
+    px = np.array([p[1] for p in pts])
+    x0, x1, y0, y1 = int(px.min()), int(px.max()), int(py.min()), int(py.max())
+    if (y1 - y0 + 1) * (x1 - x0 + 1) == 0:
         return []
-    return [(x0, y0, x1, y1)]
+    # 原色在这个 bbox 里必须占多数，避免把屋顶上零散的浅灰连成一片
+    fill = m[y0:y1 + 1, x0:x1 + 1].sum() / ((y1 - y0 + 1) * (x1 - x0 + 1))
+    if fill < PALE_SPLIT_FILL:
+        return []
+    mask = np.zeros_like(m, bool)
+    mask[py, px] = True
+    return [((x0, y0, x1, y1), mask)]
 
 
 def draw_skylight(a, rect, mask=None):
@@ -347,8 +402,9 @@ def enhance(a_in, idx):
     solid_before = a_in[:, :, 3] == 255
     stat = {"roof": int(roof.sum()), "gtop": gtop, "sky": 0, "green": 0, "rects": []}
 
-    for rect in find_pale_slabs(a_in, roof):
-        stat["sky"] += draw_skylight(a, rect)
+    for rect, pmask in find_pale_slabs(a_in, roof):
+        local = None if pmask is None else pmask[rect[1]:rect[3] + 1, rect[0]:rect[2] + 1]
+        stat["sky"] += draw_skylight(a, rect, mask=local)
         stat["rects"].append([int(v) for v in rect])
     stat["green"] = draw_green_roof(a, roof)
     if idx in ARCH:
