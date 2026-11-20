@@ -121,6 +121,7 @@ var _warm_mat: ShaderMaterial
 var _glow_root: Node2D
 var _lamp_tex: Texture2D          ## 路灯：灯头光晕（白图，染暖色）
 var _lamp_glows: Array = []       ## 每盏路灯一组光（带轻微闪烁 phase）
+var _lamp_glows_dark: bool = false  ## 白天已把灯晕全部压到 0（跳过逐盏 sin）
 var _glow_tex_empty: Texture2D    ## 没有烘焙窗光的楼用的 1×1 透明贴图
 ## MC 式格子光照图：路灯当光源做 flood-fill 传播，夜里用它把路面"点亮"
 var _light_tex: Texture2D
@@ -1543,11 +1544,21 @@ func _update_daynight() -> void:
 		bm.set_shader_parameter("night_alpha", night_a)
 		bm.set_shader_parameter("night_color", nc)
 		bm.set_shader_parameter("glow_strength", g)
-	# 路灯：在窗户光基础上加一点正弦闪烁，更像真实气体/LED 灯
-	var tnow := Time.get_ticks_msec() / 1000.0
-	for item in _lamp_glows:
-		var fl := 0.85 + 0.15 * sin(tnow * 3.0 + float(item["phase"]))
-		(item["sprite"] as Sprite2D).modulate.a = g * fl
+	# 路灯：在窗户光基础上加一点正弦闪烁，更像真实气体/LED 灯。
+	# 白天 glow_strength() 精确为 0（太阳高度 > 0.4），灯晕本就是全透明；
+	# 这时把 700+ 盏的 sin + modulate 整帧跳过，只在入夜后逐盏算，
+	# 画面完全一致但省掉白天的空算。_lamp_glows_dark 只用于「转白天时清一次」。
+	if g <= 0.004:
+		if not _lamp_glows_dark:
+			for item in _lamp_glows:
+				(item["sprite"] as Sprite2D).modulate.a = 0.0
+			_lamp_glows_dark = true
+	else:
+		_lamp_glows_dark = false
+		var tnow := Time.get_ticks_msec() / 1000.0
+		for item in _lamp_glows:
+			var fl := 0.85 + 0.15 * sin(tnow * 3.0 + float(item["phase"]))
+			(item["sprite"] as Sprite2D).modulate.a = g * fl
 
 
 func _process(delta: float) -> void:

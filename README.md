@@ -152,7 +152,7 @@ xattr -cr 像素工大.app && codesign --force --deep --sign - 像素工大.app
 停车场贴图（`tools/gen_parking_cars.py` 的 `lot_art`）也补了同一套「外圈深接缝 + 内侧亮路缘
 + 2px 碎石颗粒」，否则同样是地面铺装，停车场会比旁边的路「薄」一截。
 
-**路网按 OSM 中心线重画：主干道 4 格 / 次干道 2.75 格 / 步道 2 格，边缘有路缘石。**
+**路网按 OSM 中心线重画：主干道 5 格 / 次干道 2.75 格 / 步道 2 格，边缘有路缘石。**
 
 原来的路面是当年一把烘进地面图的：所有路都是 1 格宽、边缘毛糙，主干道和小径一样宽 ——
 所以整体像踩出来的土道。`tools/bake_roads.py` 改成按**矢量**重画：
@@ -160,7 +160,7 @@ xattr -cr 像素工大.app && codesign --force --deep --sign - 像素工大.app
 - 中心线来自 `sxgd-tiled-vertion/src/data.js` 的 73 条折线（`parse_osm.py` 的产物，
   已解析成 `assets/roads_src.json` 入库）。实测把它们按 `px = 格 × 8` 画回去，
   有 99.7% 的点落在现有路面内 —— 当年地面图就是拿这批折线烘的，坐标系一致
-- 按长度分三级定宽：**主干道 32px（4 格）/ 次干道 22px / 步道 16px**（8px = 1 格）。
+- 按长度分三级定宽：**主干道 40px（5 格）/ 次干道 22px / 步道 16px**（8px = 1 格）。
   73 条全是 `residential`，没有 `highway=primary` 可用，长度只能当重要性代理
 - 路面统一重铺沥青（`ASPHALT_BASE=124` 做基准 + 2×2 颗粒 + 1.5% 石子点），
   不再是砖缝石材 —— 砖纹的尺度是 10px 一块（≈3.5 m），加宽之后反而更假
@@ -586,7 +586,7 @@ sxgd-game/
 **改地图** — 编辑 `assets/world.json` 后重新烘焙场景：
 
 ```bash
-godot --headless --path . --script tools/build_world_scene.gd --force
+godot --headless --path . --script res://tools/build_world_scene.gd -- --force
 ```
 
 **改字体** — 中文用的是按需裁剪的思源黑体子集（166 KB，只含游戏里出现的字）：
