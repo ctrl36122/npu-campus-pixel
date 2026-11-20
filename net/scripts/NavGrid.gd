@@ -84,11 +84,16 @@ func _fill_poly(s: PackedByteArray, poly: Array, hp: float) -> void:
 
 ## 这个格能不能站（给撒猫锚点用）。直接查障碍表，不依赖 AStarGrid2D 的查询 API。
 func is_walkable(cell: Vector2i) -> bool:
+	return is_walkable_xy(cell.x, cell.y)
+
+
+## 同上，但收裸坐标：猫绕路时一次 BFS 要查上千格，省掉 Vector2i 的构造能快一倍
+func is_walkable_xy(x: int, y: int) -> bool:
 	if _solid.is_empty():
 		return false
-	if cell.x < 0 or cell.y < 0 or cell.x >= _W or cell.y >= _H:
+	if x < 0 or y < 0 or x >= _W or y >= _H:
 		return false
-	return _solid[cell.y * _W + cell.x] == 0
+	return _solid[y * _W + x] == 0
 
 
 func _to_cell(px: Vector2) -> Vector2i:

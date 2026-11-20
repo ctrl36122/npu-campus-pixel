@@ -28,7 +28,24 @@ const FOLLOW_BACK := 26.0   # 跟在人身后这么远（校园局部 px，约 3
 const FOLLOW_STOP := 4.0    # 离该待的位置这么近就彻底站住
 const FOLLOW_GAIN := 5.5    # 速度 = 还差多远 × 这个系数（比例控制，不会过冲）
 const FOLLOW_MAX := 172.0   # 刚够追上冲刺的 110×1.55≈170，再快就是「猫在飞」
-const TELEPORT_R := 150.0   # 被楼挡住绕不过去就拉这么远，然后直接跟到脚边
+## 直线被楼/水挡住时不能只做「擦墙滑动」：两个切向轮流试，会在墙角原地左右抖，
+## 看着就是疯狂抽搐。绕路交给局部 A*（见 _build_local_path）。
+const PATH_EVERY := 0.35    # 绕路时多久重算一次路径（每帧算太浪费）
+const PATH_RETRY := 1.2     # 算不出路时的退避（别每 0.35 秒重试一次白烧 CPU）
+const PATH_SLACK := 24.0    # 目标点挪了这么远就立刻重算
+const PATH_REACH := 5.0     # 离路点这么近就算走到了，换下一个
+## 只搜猫周围这么多格。整张校园是 424×800 格，用 AStarGrid2D 全图搜一次要 77ms
+## （不可达时更惨），每 0.35 秒来一下就是明显卡顿；而猫只需要绕开身边十几格内的楼。
+const PATH_CELLS := 26      # 局部搜索半径上限（格）；实际半径按「离目标多远」收窄
+## 最多展开这么多格。A* 是朝目标铺的，绕一堵墙通常几十个节点就够；
+## 这条只是「到不了」时的止损 —— 真到不了就让上层瞬移，别把整圈搜完（GDScript 很慢）。
+const PATH_NODES := 320
+const DIRS8: Array[Vector2i] = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1),
+		Vector2i(1, 1), Vector2i(1, -1), Vector2i(-1, 1), Vector2i(-1, -1)]
+const STUCK_LIMIT := 0.6    # 一步都挪不动这么久 → 直接落到脚边（不脱离人）
+const STUCK_R := 56.0       # 但只有落后超过这么远才值得瞬移（约 7 格），贴着人就别闪
+const LOSE_R := 260.0       # 拉这么远又没有可走的路（玩家上船/被关起来）就瞬移
+const WARP_GAPS: Array[float] = [20.0, 34.0, 48.0]   # 落地兜底时由近到远找站位
 
 ## row = Cat Animation List 的动作编号（1 起），n = 该行实际帧数，fps = 播放速度。
 ## 1..3 站↔坐、4..6 站↔睡、7 站立待机、8 吃、9 走、10 跑、
@@ -119,6 +136,14 @@ var _sprite: Sprite2D = null
 var _size_k := 1.0
 var _speed_k := 1.0
 var _anim_rate := 1.0        # 行走/跑步的帧率倍率：跟得越快腿要动得越快，不然像滑冰
+## 绕路状态：A* 给出的路点队列 + 上次算路的时刻/目标
+var _path: Array[Vector2] = []
+var _path_goal := Vector2.INF
+var _path_t := 0.0
+var _path_ok := false        # 上次算路成功了没有：成功后走完要立刻重算，失败就退避
+var _stuck_t := 0.0          # 连续一步没挪的时长
+var _block_t := 0.0          # 连续被挡的时长（小于 0.08 秒不换姿势，免得闪）
+var _was_pos := Vector2.INF
 var _doze := 0.3
 var _rng := RandomNumberGenerator.new()
 var _nav: NavGrid = null     # 可走网格（Arena 传入）；漫游时避开楼和水
@@ -347,9 +372,12 @@ func _process(delta: float) -> void:
 			wait -= delta
 			if wait <= 0.0:
 				_leave_rest()
-	# 兜底：万一还是被挤到障碍格边缘，轻轻拉回自己的活动中心
+	# 兜底：万一还是被挤到障碍格边缘，就近找一格站住。
+	# **别直接扔回 home** —— 那是一次很显眼的瞬移，卡在墙角时会变成一帧一跳。
 	if _nav != null and not _can_walk(pos):
-		pos = home
+		var fix := _walkable_near(pos)
+		pos = fix if fix != Vector2.INF else home
+		_clear_path()
 	position = pos
 	# 原图猫朝右；朝左时整个节点（连同 sprite）镜像
 	scale = Vector2(BASE_SCALE * _size_k * face, BASE_SCALE * _size_k)
@@ -360,77 +388,345 @@ func _process(delta: float) -> void:
 		queue_redraw()   # 影子是静态的，只有爱心动画需要逐帧重绘
 
 
-## 好感够了 / 牵出去遛：跟在玩家身后一小段（约 3 格），落后越多跑得越快，
-## 靠近了自然减速；跟到就原地待机。**别贴到人身上**（见 FOLLOW_BACK 的注释）。
+## 好感够了 / 牵出去遛：跟在玩家身后一小段（约 3 格），落后越多跑得越快。
+##
+## 三条路，按顺序挑：
+##   1. 到目标点的直线整条能走 → 直接走（最平滑）
+##   2. 被楼/水挡住 → 在猫周围跑一次局部 A* 绕过去
+##      （**不要**原地左右擦墙，那看着就是疯狂抽搐）
+##   3. 连路都没有（玩家上船、被关在围栏里）→ 离得远就直接落到脚边，离得近就站着等
+## 另外还有卡住兜底：连着 0.6 秒一步没挪、又落后 56px 以上，直接跟到脚边。
 func _follow_player(delta: float) -> void:
 	var pn := _follow_node as Node2D
+	if pn == null:
+		return
+	# 掉帧（切场景/加载）时 delta 可能到 1 秒：按它算步长会一步迈 170px（等于瞬移），
+	# 按它记「卡住多久」又会立刻触发兜底。统一压到 0.1 秒以内。
+	var dt := minf(delta, 0.1)
 	# 目标点：从玩家出发、朝「猫所在的那一侧」退开 FOLLOW_BACK。
 	# 人走它跟着走；人一停，猫就停在身后不动（不会慢慢蹭到人脚下）。
 	var away := pos - pn.position
 	var dir := away.normalized() if away.length() > 0.5 else Vector2(-1.0, 0.0)
 	var goal: Vector2 = pn.position + dir * FOLLOW_BACK
 	var to := goal - pos
+	var dist := pos.distance_to(pn.position)
 	moving = false
-	# 被落得太远（穿过了楼、玩家传送/上下船、房间里绕不出来）就直接跟到身边，
-	# 不要让「遛猫」变成「猫卡在墙后面一直叫」
-	if to.length() > TELEPORT_R:
-		var at := _walkable_near(goal)
-		if at == Vector2.INF:
-			# 脚边一圈全踩不得水（玩家上船了）：留在原地等，别浮到湖面上
-			if anim != "stand":
-				_play("stand", true)
-			wait = 0.3
-			return
-		pos = at
-		position = pos
-		_play("stand", true)
-		wait = 0.3
-		return
+	# 已经站到该待的位置：站着别动（动一下就抖）
 	if to.length() <= FOLLOW_STOP:
-		if anim != "stand":
-			_play("stand", true)
-		wait = 0.5   # 跟随结束后稍等一下再恢复自己溜达
+		_clear_path()
+		_stand()
 		return
-	# 比例控制：离该待的位置越远跑越快，靠近了自然减速，不会冲过头再来回摆
+
+	# 拉得实在太远（玩家传送/上船/过河）：直接跟到脚边，别让它从 260px 外跑过来。
+	# 落不下来（玩家在水面上）就继续按下面的逻辑站着等。
+	if dist > LOSE_R and _warp_near(goal):
+		return
+
+	# 挑这一步往哪走：
+	#   · 到目标点的直线整条都能走 → 直接走（最平滑）
+	#   · 中途有楼/水 → 走局部 BFS 给的绕路点；有路就一直沿着走，不要一步一改主意
+	#   · 算不出路（被围死/玩家在船上）→ 远就落到脚边，近就站着（绝不原地空跑）
+	var aim := goal
+	var blocked := not _line_clear(pos, goal)
+	if blocked or not _path.is_empty():
+		var way := _path_step(goal, dt)
+		if way == Vector2.INF:
+			if blocked:
+				_clear_path()
+				if dist > STUCK_R and _warp_near(goal):
+					return
+				_stand()
+				return
+			# 路走完了、直线也通了：落回「直接朝目标点走」
+		else:
+			aim = way
+
 	var spd := clampf(to.length() * FOLLOW_GAIN, WALK_SPEED, FOLLOW_MAX)
-	# 走 ↔ 跑留一点回差：卡在阈值上时每帧来回换，换一次 _play 就把 anim_t 归零，
-	# 看着也是一跳一跳的。还牵着的这只不算「抽搐」的原因，但一并管住。
+	var mv := aim - pos
+	if mv.length() < 0.5:
+		mv = to
+	var step := mv.normalized() * spd * dt
+	if _can_walk(pos + step):
+		pos += step
+		_face_step(step)
+	else:
+		# 斜着迈会切到墙角（BFS/A* 的斜向允许「只有一边能走」，连续移动却会拒绝）。
+		# 拆成只走 x / 只走 y 各试一次：贴着墙滑过去，而不是原地干站。
+		var sx := Vector2(step.x, 0.0)
+		var sy := Vector2(0.0, step.y)
+		if absf(step.x) > 0.01 and _can_walk(pos + sx):
+			pos += sx
+			_face_step(sx)
+		elif absf(step.y) > 0.01 and _can_walk(pos + sy):
+			pos += sy
+			_face_step(step)
+		else:
+			# 真的一步都挪不动：先按原姿势撑 0.08 秒（别闪），再站着；
+			# 卡久了就直接落到脚边 —— 宁可闪一下，也不能把人跟丢。
+			_block_t += dt
+			if _block_t > 0.08:
+				_stand()
+			if _block_t > STUCK_LIMIT and dist > STUCK_R and _warp_near(goal):
+				return
+			return
+	_block_t = 0.0
+
+	# 卡住兜底：连着 STUCK_LIMIT 秒一步没挪，就落到脚边（宁可闪一下也不能脱离人）
+	if _was_pos != Vector2.INF and pos.distance_to(_was_pos) < 0.05:
+		_stuck_t += dt
+	else:
+		_stuck_t = 0.0
+	_was_pos = pos
+	if _stuck_t > STUCK_LIMIT and dist > STUCK_R and _warp_near(goal):
+		return
+
+	# 动作：走 ↔ 跑留一点回差，卡在阈值上时不要每帧来回换
 	var run_now := spd > (30.0 if anim == "run" else 40.0)
 	var want_anim := "run" if run_now else "walk"
 	if anim != want_anim:
 		_play(want_anim, true)
-	# 腿按实际速度摆，但**别加太多**：run 那一行只有 4 帧、原本就 12fps，
-	# 再乘 2 就是 24fps 在翻 12px 高的四条腿 —— 看着就是抖。
-	# 1.25 已经够表示「跑得急」，再快只剩噪点。
+	# 腿按实际速度摆，但别加太多：run 那行只有 4 帧 / 12fps，
+	# 乘 2 就是 24fps 翻 12px 高的四条腿，看着就是抖。
 	_anim_rate = clampf(spd / (RUN_SPEED if want_anim == "run" else WALK_SPEED), 1.0, 1.25)
-	var step := to.normalized() * spd * delta
-	if _can_walk(pos + step):
-		pos += step
-		if absf(step.x) > 0.01:
-			face = 1.0 if step.x > 0.0 else -1.0
-	else:
-		# 直线被楼/水挡住：沿墙切向挪一步（只往脸朝的那边绕，免得左右抖），
-		# 实在绕不过去就等 TELEPORT_R 那个兜底
-		var tan := Vector2(-to.y, to.x).normalized()
-		if face < 0.0:
-			tan = -tan
-		var slide := tan * spd * delta
-		if _can_walk(pos + slide):
-			pos += slide
-		elif _can_walk(pos - slide):
-			pos -= slide
 	wait = 0.5
 
 
-## 目标点踩不住（楼 / 水）时，绕着它找一圈最近的落脚点；一圈都不行返回 Vector2.INF
+## 直线 a→b 整条是不是都能走（每 5px 采一个点）。只看一步的探针太短，
+## 会让猫在「能走/不能走」之间反复改主意，绕着楼打转。
+func _line_clear(a: Vector2, b: Vector2) -> bool:
+	var d := b - a
+	var n := int(d.length() / 5.0) + 1
+	for i in range(1, n + 1):
+		if not _can_walk(a + d * (float(i) / float(n))):
+			return false
+	return true
+
+
+## 站着待机（不重复播放，免得每帧把 anim_t 归零）
+func _stand() -> void:
+	if anim != "stand":
+		_play("stand", true)
+	wait = 0.5
+
+
+## 转身：竖直方向跟随的时候 step.x 只有极小的正负噪声，按它翻转会让猫左右抖，
+## 所以横向分量明显大于纵向噪声时才真的改朝向。
+func _face_step(step: Vector2) -> void:
+	if absf(step.x) < 0.05:
+		return
+	if absf(step.x) < absf(step.y) * 0.35:
+		return
+	face = 1.0 if step.x > 0.0 else -1.0
+
+
+## 绕路：返回「下一步该朝哪个路点走」，没有路可走返回 Vector2.INF。
+## 只在猫周围 PATH_CELLS 格里做 A*（够绕开身边的楼/水），路径每 PATH_EVERY 秒
+## 或目标点挪了 PATH_SLACK 才重算一次。
+func _path_step(goal: Vector2, delta: float) -> Vector2:
+	if _nav == null:
+		return Vector2.INF
+	_path_t -= delta
+	var stale := _path_t <= 0.0 or _path_goal == Vector2.INF \
+			or _path_goal.distance_to(goal) > PATH_SLACK \
+			or (_path_ok and _path.is_empty())      # 算出来的路走完了：立刻接着算下一段
+	if stale:
+		_path_goal = goal
+		_path = _build_local_path(goal)
+		_path_ok = not _path.is_empty()
+		_path_t = PATH_EVERY if _path_ok else PATH_RETRY
+	# 已经走到的路点丢掉
+	while not _path.is_empty() and pos.distance_to(_path[0]) < PATH_REACH:
+		_path.pop_front()
+	if _path.is_empty():
+		return Vector2.INF
+	return _path[0]
+
+
+## 在猫周围 PATH_CELLS 格里跑一次 A*（8 向、不许切墙角），
+## 返回一串格心像素路点（不含脚下那一格）。到不了就返回空数组。
+## 用 A* 而不是 BFS：BFS 按圈铺开，绕一堵墙还没摸到目标就把节点额度烧光了。
+func _build_local_path(goal: Vector2) -> Array[Vector2]:
+	var out: Array[Vector2] = []
+	if _nav == null:
+		return out
+	var start_c := Vector2i(int(floor(pos.x / TS)), int(floor(pos.y / TS)))
+	var dst := Vector2i(int(floor(goal.x / TS)), int(floor(goal.y / TS)))
+	# 目标格本身踩不住（猫窝在墙里/玩家站在障碍上）→ 就近挪到能站的格
+	if not _nav.is_walkable_xy(dst.x, dst.y):
+		var alt := Vector2i(-1, -1)
+		for ring in range(1, 4):
+			for dx in range(-ring, ring + 1):
+				for dy in range(-ring, ring + 1):
+					if _nav.is_walkable_xy(dst.x + dx, dst.y + dy):
+						alt = dst + Vector2i(dx, dy)
+						break
+				if alt.x >= 0:
+					break
+			if alt.x >= 0:
+				break
+		if alt.x < 0:
+			return out
+		dst = alt
+	if start_c == dst:
+		return out
+
+	# 半径按「离目标几格」收：目标就在隔壁就别开 26 格的大窗口
+	var cells_to_goal := maxi(absi(dst.x - start_c.x), absi(dst.y - start_c.y))
+	var rad := clampi(cells_to_goal + 6, 10, PATH_CELLS)
+	var lo := Vector2i(start_c.x - rad, start_c.y - rad)
+	var hi := Vector2i(start_c.x + rad, start_c.y + rad)
+	var span := hi - lo + Vector2i.ONE
+	var total := span.x * span.y
+	var g := PackedFloat32Array()
+	g.resize(total)
+	g.fill(INF)
+	var f := PackedFloat32Array()
+	f.resize(total)
+	f.fill(INF)
+	var prev := PackedInt32Array()
+	prev.resize(total)
+	prev.fill(-1)
+	var state := PackedByteArray()      # 0 没见过 / 1 在堆里 / 2 已出堆
+	state.resize(total)
+
+	var start_i := (start_c.y - lo.y) * span.x + (start_c.x - lo.x)
+	var goal_i := (dst.y - lo.y) * span.x + (dst.x - lo.x)
+	g[start_i] = 0.0
+	f[start_i] = _octile(start_c, dst)
+	var heap: Array[int] = [start_i]
+	state[start_i] = 1
+	var expanded := 0
+	var found := false
+	while not heap.is_empty():
+		if expanded >= PATH_NODES:
+			break                      # 到不了就别硬搜：交给上层「远就落到脚边」
+		expanded += 1
+		var cur := _heap_pop(heap, f)
+		if state[cur] == 2:
+			continue                  # 堆里的旧副本（同一个格被改小过）
+		state[cur] = 2
+		if cur == goal_i:
+			found = true
+			break
+		var cx := cur % span.x + lo.x
+		var cy := cur / span.x + lo.y
+		for dv in DIRS8:
+			var nx := cx + dv.x
+			var ny := cy + dv.y
+			if nx < lo.x or ny < lo.y or nx > hi.x or ny > hi.y:
+				continue
+			var n_i := (ny - lo.y) * span.x + (nx - lo.x)
+			if state[n_i] == 2:
+				continue
+			if not _nav.is_walkable_xy(nx, ny):
+				continue
+			# 斜着不许切墙角（否则会一头顶进楼角，看着就是在墙边来回蹭）
+			if dv.x != 0 and dv.y != 0:
+				if not _nav.is_walkable_xy(cx + dv.x, cy) \
+						or not _nav.is_walkable_xy(cx, cy + dv.y):
+					continue
+			var step_cost := 1.41421356 if (dv.x != 0 and dv.y != 0) else 1.0
+			var ng := g[cur] + step_cost
+			if ng < g[n_i]:
+				g[n_i] = ng
+				prev[n_i] = cur
+				f[n_i] = ng + _octile(Vector2i(nx, ny), dst) * 1.05   # 微加权，快一点
+				_heap_push(heap, f, n_i)      # 懒删除：同一格可能进堆多次，出堆时跳过旧的
+				state[n_i] = 1
+	if not found:
+		return out
+	# 回溯成路点，反过来
+	var cells: Array[int] = []
+	var c_i := goal_i
+	while c_i != start_i:
+		cells.append(c_i)
+		c_i = prev[c_i]
+		if c_i < 0:
+			return out
+	cells.reverse()
+	for ci in cells:
+		out.append(Vector2(ci % span.x + lo.x + 0.5, ci / span.x + lo.y + 0.5) * TS)
+	return out
+
+
+## 八方向网格上的启发式距离（格数）
+func _octile(a: Vector2i, b: Vector2i) -> float:
+	var dx := absi(a.x - b.x)
+	var dy := absi(a.y - b.y)
+	return float(maxi(dx, dy)) + 0.41421356 * float(mini(dx, dy))
+
+
+# ---------------------------------------------------------------- 二叉堆（键在外部数组里）
+func _heap_push(heap: Array[int], keys: PackedFloat32Array, v: int) -> void:
+	heap.append(v)
+	var i := heap.size() - 1
+	while i > 0:
+		var p := (i - 1) >> 1
+		if keys[heap[p]] <= keys[heap[i]]:
+			break
+		var t := heap[p]
+		heap[p] = heap[i]
+		heap[i] = t
+		i = p
+
+
+func _heap_pop(heap: Array[int], keys: PackedFloat32Array) -> int:
+	var top: int = heap[0]
+	var last: int = heap.pop_back()
+	if not heap.is_empty():
+		heap[0] = last
+		var i := 0
+		var n := heap.size()
+		while true:
+			var l := i * 2 + 1
+			var r := l + 1
+			var m := i
+			if l < n and keys[heap[l]] < keys[heap[m]]:
+				m = l
+			if r < n and keys[heap[r]] < keys[heap[m]]:
+				m = r
+			if m == i:
+				break
+			var t := heap[m]
+			heap[m] = heap[i]
+			heap[i] = t
+			i = m
+	return top
+
+
+func _clear_path() -> void:
+	_path.clear()
+	_path_ok = false
+	_path_goal = Vector2.INF
+	_path_t = 0.0
+
+
+## 直接落到目标附近能站的地方（绕不过去/被落太远时的兜底）。成功返回 true。
+func _warp_near(at: Vector2) -> bool:
+	var spot := _walkable_near(at)
+	if spot == Vector2.INF:
+		return false      # 脚边一圈全是水（玩家在船上）：留在原地等
+	pos = spot
+	position = pos
+	_clear_path()
+	_stuck_t = 0.0
+	_was_pos = pos
+	_block_t = 0.0
+	_play("stand", true)
+	wait = 0.3
+	return true
+
+
+## 目标点踩不住（楼 / 水）时，一圈一圈往外找最近的落脚点；都不行返回 Vector2.INF
 func _walkable_near(at: Vector2) -> Vector2:
 	if _can_walk(at):
 		return at
-	for i in 8:
-		var a := TAU * float(i) / 8.0
-		var cand := at + Vector2(cos(a), sin(a)) * 20.0
-		if _can_walk(cand):
-			return cand
+	for gap in WARP_GAPS:
+		for i in 12:
+			var a := TAU * float(i) / 12.0
+			var cand := at + Vector2(cos(a), sin(a)) * gap
+			if _can_walk(cand):
+				return cand
 	return Vector2.INF
 
 
