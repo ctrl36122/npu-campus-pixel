@@ -238,6 +238,10 @@ func _ready() -> void:
 	# 调试：进房间后走到 1 号房门口，验证门会自动滑开、人过得去
 	if OS.has_environment("XGD_TEST_GATE"):
 		_auto_walk_gate()
+	# 调试：XGD_TEST_PET=1（配合 XGD_ROOM=1）—— 走一遍「按 F 牵绳」和「宠物面板改名」，
+	# 盯的是房间局部坐标被当成校园坐标那类回归（算错时距离恒 12000px，永远牵不上）
+	if OS.has_environment("XGD_TEST_PET"):
+		_auto_test_pet()
 	# 调试：按住方向键走几秒（XGD_TEST_WALK=秒数）。用来核对「我动了，对面那边跟着动」
 	if OS.has_environment("XGD_TEST_WALK"):
 		_auto_walk_sync()
@@ -2116,6 +2120,7 @@ const CAT_HIT := Rect2(-19.0, -32.0, 38.0, 40.0)
 const ADOPT_PATH := "user://adopted_cats.json"
 const ADOPT_MAX := 2           # 宿舍猫窝最多养几只
 const ADOPT_PETS := 3          # 摸满几次可以领养（与 Cat.gd 的 can_adopt() 一致）
+const PET_NAME_MAX := 12       # 名字上限，和 Net._sanitize_pets 的 left(12) 对齐
 var _wildlife_ground: Node2D = null   # campus/Objects/WildlifeGround，猫都在它下面
 var _cat_nav: NavGrid = null          # 撒锚点 + 给猫做漫游碰撞判定
 var _cat_msg := ""             # 摸猫后短暂占住提示条的反馈文字
@@ -2466,7 +2471,7 @@ func _pet_cat(cat: Node2D) -> void:
 	_cat_msg = "「%s」%s" % [str(cat.call("cat_name")), reply]
 	_cat_msg_t = 1.8
 	if _door_hint != null:
-		_set_hint(_cat_msg)
+		_set_hint(_cat_msg, 1)      # 反馈期间再摸一下照样算数，交互牌别灭
 		_door_hint.visible = true
 
 
@@ -2632,6 +2637,46 @@ func pet_info() -> Array:
 ## 猫窝能养几只（面板显示「养了 1 / 2 只」用）
 func pet_capacity() -> int:
 	return ADOPT_MAX
+
+
+## 给已经养着的一只猫改名（宠物面板的「改名」按钮走这条）。
+## 只改名字：花色、亲密度、牵绳状态原样留着；返回最终采用的名字，
+## 传进来的名字清完空白是空的就返回 ""（面板据此提示「名字不能是空的」）。
+func pet_rename(i: int, name_in: String) -> String:
+	var cats := _ensure_adopted()
+	if i < 0 or i >= cats.size() or not (cats[i] is Dictionary):
+		return ""
+	# 换行会把头顶名牌撑成两行、也会污染存档，直接压成空格
+	var nm := name_in.replace("\n", " ").replace("\r", " ").strip_edges().left(PET_NAME_MAX)
+	if nm.is_empty():
+		return ""
+	var cd: Dictionary = cats[i]
+	cd["name"] = nm
+	_save_adopted()
+	# 立刻贴回世界里那只：房间里的 RoomCat_* 或校园里牵着的那只。
+	# 不能等服务端回环 —— 单机 / 旧服务端时压根不会有回环，名字会一直是旧的。
+	var room_cat := _room_cat_by_index(i)
+	if room_cat != null:
+		room_cat.set("_skin_name", nm)
+		room_cat.call("set_display_name", nm)
+	_restore_leash()
+	if _leash_cat != null and is_instance_valid(_leash_cat) and _leash_idx == i:
+		_leash_cat.set("_skin_name", nm)
+		_leash_cat.call("set_display_name", nm)
+	_cat_msg = "以后就叫「%s」啦" % nm
+	_cat_msg_t = 2.2
+	return nm
+
+
+## 宠物面板的「牵着 / 放回窝」：手机上没有 F 键，只能从面板走同一条链路。
+## 返回牵绳之后的提示文案（_set_leash 已经摆好猫、写好存档、发过通知）。
+func pet_toggle_leash(i: int) -> String:
+	var cats := _ensure_adopted()
+	if i < 0 or i >= cats.size() or not (cats[i] is Dictionary):
+		return ""
+	_restore_leash()
+	_set_leash(-1 if _leash_idx == i else i)
+	return _cat_msg
 
 
 func _adopt_open() -> bool:
@@ -2848,23 +2893,44 @@ func _setup_room_cats() -> void:
 var _leash_idx := -1            # 牵着的猫在 _adopted 里的下标（-1 = 没牵）
 var _leash_cat: Node2D = null   # 校园里跟着你的那只（房间里不生成）
 
-## 房间里离玩家最近、摸得到的自己的猫
+## 房间里离玩家最近、摸得到的自己的猫。
+##
+## ⚠️ pos 是**校园（campus/Objects）坐标**，猫的 position 是**房间局部坐标** ——
+## 房间被摆在 campus 北界之外（ROOM_ORIGIN = y −1500 格），两者差着一万二千像素。
+## 以前直接拿 pos 和 cat.position 相减，距离恒 ≈ 12000px，永远大过 CAT_PET_R：
+## 房间里按 E 摸不到猫、按 F 更牵不上（点猫能中是因为点击走的是全局变换）。
+## 和 _near_door / _near_elevator / _collect_room_seats 一样，先换算再比。
 func _nearest_room_cat(pos: Vector2) -> Node2D:
 	if room == null or not is_instance_valid(room):
 		return null
 	var host: Node2D = room.call("anchor") as Node2D
 	if host == null:
 		return null
+	var local := pos - (room as Node2D).position
 	var best: Node2D = null
 	var best_d := CAT_PET_R
 	for c in host.get_children():
 		if not (c is Node2D) or not String(c.name).begins_with("RoomCat_"):
 			continue
-		var d: float = pos.distance_to((c as Node2D).position)
+		var d: float = local.distance_to((c as Node2D).position)
 		if d < best_d:
 			best_d = d
 			best = c as Node2D
 	return best
+
+
+## 按存档下标拿房间里那只猫（RoomCat_0 / RoomCat_1）。改名后要立刻把新名字贴回去。
+func _room_cat_by_index(i: int) -> Node2D:
+	if room == null or not is_instance_valid(room):
+		return null
+	var host: Node2D = room.call("anchor") as Node2D
+	if host == null:
+		return null
+	var want := "RoomCat_%d" % i
+	for c in host.get_children():
+		if c is Node2D and String(c.name) == want:
+			return c as Node2D
+	return null
 
 
 ## RoomCat_3 → 3
@@ -3309,6 +3375,64 @@ func _auto_enter_room() -> void:
 			t2.timeout.connect(func(): _try_auto_room())
 			return
 		_try_auto_room()
+	)
+
+
+## 调试：XGD_TEST_PET=1 —— 把玩家挪到自己的猫旁边，走一遍真正的「按 F 牵绳」函数，
+## 再走一遍宠物面板的改名入口（pet_rename），最后把状态还原。
+## 盯的是「房间局部坐标被当成校园坐标」这类回归：算错时两点距离恒 ≈12000px，
+## 猫永远摸不到、F 也永远牵不上（点猫能中是因为点击走的是全局变换）。
+func _auto_test_pet() -> void:
+	var t := get_tree().create_timer(6.5)
+	t.timeout.connect(func() -> void:
+		var me: Node = _local_avatar()
+		if me == null or room == null:
+			print("[dbg] 牵绳测试：玩家或房间还没就绪")
+			return
+		var cat := _room_cat_by_index(0)
+		if cat == null:
+			print("[dbg] 牵绳测试：房间里一只猫都没有（本地存档没猫）")
+			return
+		var rp: Vector2 = (room as Node2D).position
+		var cat_at: Vector2 = rp + cat.position
+		# 站到猫脚底往下 10px —— 在 CAT_PET_R(26px) 之内，人也是站得住的
+		(me as Node2D).call("teleport_to", cat_at + Vector2(0.0, 10.0))
+		var found := _nearest_room_cat((me as Node2D).position)
+		var dist := ((me as Node2D).position - cat_at).length()
+		print("[dbg] 牵绳测试：玩家-%s 距离=%.1fpx 就近判定=%s" % [
+			String(cat.name), dist, "命中" if found == cat else "没命中"])
+		var pressed: bool = _try_leash_cat()
+		_restore_leash()
+		print("[dbg] 牵绳测试：按F→%s leash_idx=%d 牵着=%s" % [
+			"吃下了" if pressed else "没反应", _leash_idx,
+			str(_leash_cat != null and is_instance_valid(_leash_cat))])
+		# 再验一次提示条文案（触屏上会把 F 那段换成「宠」面板指引）
+		_door_clock = 0.0
+		_update_interact_hint(0.0)
+		print("[dbg] 牵绳测试：提示条=「%s」act=%s" % [
+			_door_hint.text if _door_hint != null else "", _hint_act])
+		# 改名：前后空白要去掉、超长要截到 PET_NAME_MAX，房间里的猫头顶跟着换。
+		# 重新取一遍节点 —— 上面 _set_leash 会重建房里的猫，前面那个已经是待销毁的旧节点。
+		cat = _room_cat_by_index(0)
+		if cat == null:
+			print("[dbg] 改名测试：房间里找不到猫，跳过")
+			return
+		var old_nm := str(cat.get("_skin_name"))
+		var got: String = pet_rename(0, "  " + old_nm + "改  ")
+		var now: Array = pet_info()
+		print("[dbg] 改名测试：返回「%s」存档「%s」猫头顶「%s」" % [
+			got, str(now[0].get("name", "")) if not now.is_empty() else "?",
+			str(cat.get("_skin_name"))])
+		pet_rename(0, old_nm)      # 改回去
+		# 牵着出门：走出楼以后，校园里应该真的多出一只跟着你的猫
+		_set_leash(0)
+		leave_room()
+		var lc: Node2D = _leash_cat
+		var live := lc != null and is_instance_valid(lc)
+		print("[dbg] 出门遛猫：校园里有猫=%s 名字「%s」跟着=%s" % [
+			str(live), str(lc.call("cat_name")) if live else "",
+			str(lc.call("is_following")) if live else ""])
+		_set_leash(-1)   # 收尾：别把测试状态留在存档里
 	)
 
 
@@ -3831,14 +3955,15 @@ func _update_interact_hint(delta: float) -> void:
 			_door_hint.visible = true
 			# 刚摸完先让反馈（「喵～ · 亲密 3」）占一会儿，再回到操作提示
 			if _cat_msg_t > 0.0:
-				_set_hint(_cat_msg)
+				_set_hint(_cat_msg, 1)
 				return
 			_restore_leash()
 			var rc_name := str(room_cat.call("cat_name"))
+			# 这两句里没有「E」但 E 确实能摸猫（触屏上是右下角那颗交互牌），显式标可交互
 			if _leash_idx >= 0 and _leash_idx == _room_cat_index(room_cat):
-				_set_hint("「%s」跟着你 · 点它摸摸 · F 放回窝里" % rc_name)
+				_set_hint("「%s」跟着你 · 点它摸摸 · F 放回窝里" % rc_name, 1)
 			else:
-				_set_hint("点「%s」摸摸 · 按 F 牵出门遛" % rc_name)
+				_set_hint("点「%s」摸摸 · 按 F 牵出门遛" % rc_name, 1)
 			return
 
 	# 房间里：只有站到门口才提示离开（房间中间按 E 不做任何事，
@@ -3939,7 +4064,7 @@ func _update_interact_hint(delta: float) -> void:
 	# 摸猫反馈短暂占住提示条，之后回到「点它摸摸」
 	if _cat_msg_t > 0.0:
 		_door_hint.visible = true
-		_set_hint(_cat_msg)
+		_set_hint(_cat_msg, 1)
 		return
 	var cat := _nearest_cat(pos)
 	if cat != null:
@@ -3947,15 +4072,15 @@ func _update_interact_hint(delta: float) -> void:
 		var nm := str(cat.call("cat_name"))
 		if cat == _leash_cat:
 			# 牵着溜达的那只：名字是你起的，别再走领养流程
-			_set_hint("「%s」跟着你 · 点它摸摸 · 回宿舍就收工" % nm)
+			_set_hint("「%s」跟着你 · 点它摸摸 · 回宿舍就收工" % nm, 1)
 			return
 		var left := ADOPT_PETS - int(cat.get("pet_count"))
 		if _ensure_adopted().size() >= ADOPT_MAX:
-			_set_hint("点「%s」摸摸 · 猫窝已满" % nm)
+			_set_hint("点「%s」摸摸 · 猫窝已满" % nm, 1)
 		elif left <= 0:
-			_set_hint("点「%s」领养回宿舍" % nm)
+			_set_hint("点「%s」领养回宿舍" % nm, 1)
 		else:
-			_set_hint("点「%s」摸摸 · 再点 %d 次可领养" % [nm, left])
+			_set_hint("点「%s」摸摸 · 再点 %d 次可领养" % [nm, left], 1)
 		return
 	_door_hint.visible = false
 
@@ -4059,6 +4184,9 @@ func _hint_touch_text(t: String) -> String:
 	s = s.replace("按 E", "")
 	s = s.replace("· E 写公告", "· 写公告")     # 「N 号房（你的）· E 写公告」
 	s = s.replace("（E 看公告）", "（看公告）")
+	# 牵绳是 F 的事，手机上只有右下「宠」面板能做 —— 别把人指到一个不存在的键上
+	s = s.replace("· 按 F 牵出门遛", "· 在「宠」里牵出门")
+	s = s.replace("· F 放回窝里", "· 在「宠」里放回")
 	return s.strip_edges()
 
 
