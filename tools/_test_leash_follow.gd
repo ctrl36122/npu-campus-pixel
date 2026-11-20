@@ -21,6 +21,8 @@ var dist_sum := 0.0
 var dist_n := 0
 var moved := 0.0
 var last_pos := Vector2.ZERO
+var anim_flips := 0        # 站/走/跑之间切换的次数：每帧来回切就是「抽搐」
+var last_anim := ""
 var fails: Array[String] = []
 var checks := 0
 
@@ -68,20 +70,30 @@ func _process(delta: float) -> bool:
 		if phase_t > SETTLE:
 			dist_sum += cat.position.distance_to(walker.position)
 			dist_n += 1
+			var a := str(cat.get("anim"))
+			if a != last_anim:
+				if last_anim != "":
+					anim_flips += 1
+				last_anim = a
 		return false
 	# 一档走完
 	var avg := dist_sum / float(maxi(dist_n, 1))
 	var label := "玩家 110 走路" if phase == 0 else "玩家 170 冲刺"
-	print("  %s：稳态间距 %.1fpx，猫自己走了 %.0fpx（%d 帧采样）" % [label, avg, moved, dist_n])
-	_ok(avg < 40.0, label + "时距玩家 40px 内", "实测 %.1fpx" % avg)
+	print("  %s：稳态间距 %.1fpx，猫自己走了 %.0fpx，动画切换 %d 次（%d 帧采样）" % [
+		label, avg, moved, anim_flips, dist_n])
+	_ok(avg < 70.0, label + "时距玩家 70px 内", "实测 %.1fpx" % avg)
 	# 4 秒玩家最多走 682px：猫若只靠瞬移，走路里程会接近 0
 	_ok(moved > 200.0, label + "时猫真的在跑（不是靠瞬移）", "实测 %.0fpx" % moved)
+	# 稳态期间应该一直跑着，站点/跑之间来回切就是抽搐
+	_ok(anim_flips <= 4, label + "时姿态不抖（站↔跑切换 ≤4 次）", "实测 %d 次" % anim_flips)
 
 	phase += 1
 	phase_t = 0.0
 	dist_sum = 0.0
 	dist_n = 0
 	moved = 0.0
+	anim_flips = 0
+	last_anim = ""
 	if phase > 1:
 		# 停下：猫应该贴到脚边就不再动
 		walker.velocity = Vector2.ZERO

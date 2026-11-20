@@ -20,11 +20,15 @@ const BASE_SCALE := 0.62    # sheet 猫约 20px 高 → 12px 校园局部像素�
 const WALK_SPEED := 14.0    # 校园局部像素/秒（campus scale=2 后翻倍显示）
 const RUN_SPEED := 32.0     # 自己溜达时的小跑
 const HOME_RADIUS := 90.0
-## 牵着走的时候是另一回事：玩家走路就是 110（冲刺 170），猫还用 32 跑就永远追不上，
-## 只会越拉越远然后「啪」地闪到你脚边。跟随速度按「玩家多快 + 差多远」算。
-const FOLLOW_LEAD := 1.08   # 比玩家本身再快一点点，间距才收得回来
-const FOLLOW_MAX := 210.0   # 上限要压得住冲刺的 110×1.55≈170
-const TELEPORT_R := 120.0   # 被楼挡住绕不过去就拉这么远，然后直接跟到脚边
+## 牵着走的时候是另一回事：玩家走路就是 110（冲刺 170），猫还用 32 跑就永远追不上。
+## 但**不能贴着人跑**：追到 3px 就停、下一帧又被落下 2px 再追，每帧都在「站/跑」
+## 之间切换，姿态和位置一起抖，看着就是抽搐。所以留一小段间距（约 3 格），
+## 用比例控制慢慢追 —— 落后越多跑得越快，靠近了自然减速，人停下它就停在身后。
+const FOLLOW_BACK := 26.0   # 跟在人身后这么远（校园局部 px，约 3 格）
+const FOLLOW_STOP := 4.0    # 离该待的位置这么近就彻底站住
+const FOLLOW_GAIN := 5.5    # 速度 = 还差多远 × 这个系数（比例控制，不会过冲）
+const FOLLOW_MAX := 172.0   # 刚够追上冲刺的 110×1.55≈170，再快就是「猫在飞」
+const TELEPORT_R := 150.0   # 被楼挡住绕不过去就拉这么远，然后直接跟到脚边
 
 ## row = Cat Animation List 的动作编号（1 起），n = 该行实际帧数，fps = 播放速度。
 ## 1..3 站↔坐、4..6 站↔睡、7 站立待机、8 吃、9 走、10 跑、
@@ -115,7 +119,6 @@ var _sprite: Sprite2D = null
 var _size_k := 1.0
 var _speed_k := 1.0
 var _anim_rate := 1.0        # 行走/跑步的帧率倍率：跟得越快腿要动得越快，不然像滑冰
-var _lead_prev := Vector2.INF   # 跟随对象上一帧的位置（非 CharacterBody2D 时估算速度用）
 var _doze := 0.3
 var _rng := RandomNumberGenerator.new()
 var _nav: NavGrid = null     # 可走网格（Arena 传入）；漫游时避开楼和水
@@ -357,10 +360,15 @@ func _process(delta: float) -> void:
 		queue_redraw()   # 影子是静态的，只有爱心动画需要逐帧重绘
 
 
-## 好感够了 / 牵出去遛：贴着玩家脚边小跑，离远了会加速追；跟到就原地待机
+## 好感够了 / 牵出去遛：跟在玩家身后一小段（约 3 格），落后越多跑得越快，
+## 靠近了自然减速；跟到就原地待机。**别贴到人身上**（见 FOLLOW_BACK 的注释）。
 func _follow_player(delta: float) -> void:
 	var pn := _follow_node as Node2D
-	var goal: Vector2 = pn.position + Vector2(-14.0, 10.0)
+	# 目标点：从玩家出发、朝「猫所在的那一侧」退开 FOLLOW_BACK。
+	# 人走它跟着走；人一停，猫就停在身后不动（不会慢慢蹭到人脚下）。
+	var away := pos - pn.position
+	var dir := away.normalized() if away.length() > 0.5 else Vector2(-1.0, 0.0)
+	var goal: Vector2 = pn.position + dir * FOLLOW_BACK
 	var to := goal - pos
 	moving = false
 	# 被落得太远（穿过了楼、玩家传送/上下船、房间里绕不出来）就直接跟到身边，
@@ -378,19 +386,18 @@ func _follow_player(delta: float) -> void:
 		_play("stand", true)
 		wait = 0.3
 		return
-	if to.length() <= 3.0:
+	if to.length() <= FOLLOW_STOP:
 		if anim != "stand":
 			_play("stand", true)
 		wait = 0.5   # 跟随结束后稍等一下再恢复自己溜达
 		return
-	# 速度 = 玩家自己跑多快（照抄，不然永远追不上）+ 差多远（追回来）
-	var want := _follow_lead() * FOLLOW_LEAD + to.length() * 1.6 + 8.0
-	var spd := clampf(want, WALK_SPEED, FOLLOW_MAX)
-	var want_anim := "run" if spd > 26.0 else "walk"
+	# 比例控制：离该待的位置越远跑越快，靠近了自然减速，不会冲过头再来回摆
+	var spd := clampf(to.length() * FOLLOW_GAIN, WALK_SPEED, FOLLOW_MAX)
+	var want_anim := "run" if spd > 34.0 else "walk"
 	if anim != want_anim:
 		_play(want_anim, true)
 	# 腿按实际速度摆：210px/s 还按 12fps 播，看着就是一只在冰上滑的猫
-	_anim_rate = clampf(spd / (RUN_SPEED if want_anim == "run" else WALK_SPEED), 1.0, 2.4)
+	_anim_rate = clampf(spd / (RUN_SPEED if want_anim == "run" else WALK_SPEED), 1.0, 2.0)
 	var step := to.normalized() * spd * delta
 	if _can_walk(pos + step):
 		pos += step
@@ -420,22 +427,6 @@ func _walkable_near(at: Vector2) -> Vector2:
 		if _can_walk(cand):
 			return cand
 	return Vector2.INF
-
-
-## 玩家这一 tick 自己跑多快（校园局部像素/秒）。玩家是 CharacterBody2D，直接读 velocity；
-## 别的节点（调试用）退回「和上一帧位置的差」，再夹到 FOLLOW_MAX 以内。
-func _follow_lead() -> float:
-	var pn := _follow_node as Node2D
-	if pn == null:
-		return 0.0
-	if pn is CharacterBody2D:
-		_lead_prev = pn.position
-		return (pn as CharacterBody2D).velocity.length()
-	var d := 0.0
-	if _lead_prev != Vector2.INF:
-		d = (pn.position - _lead_prev).length() * 60.0
-	_lead_prev = pn.position
-	return clampf(d, 0.0, FOLLOW_MAX)
 
 
 ## 一次性动画（起身/趴下/跳/连击）播完自动接循环动画
