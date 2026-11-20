@@ -201,6 +201,14 @@ def main() -> None:
         return
 
     out.save(GAME / "assets" / "ground_kind.png")
+    # 运行时真正读的纯数据版：不走纹理管线，避开导出时的 S3TC 有损压缩
+    # （Windows preset 的 texture_format/s3tc_bptc 会破坏 R 通道索引，导致脚步声退化成一种）
+    import struct
+    with open(GAME / "assets" / "ground_kind.bin", "wb") as f:
+        f.write(b"GKD1")
+        f.write(struct.pack("<HH", w, h))
+        f.write(bytes(out.getpixel((x, y))[0] for y in range(h) for x in range(w)))
+    print(f"已写 assets/ground_kind.bin（{w}x{h}，{w * h} 字节数据）")
     prev = Image.new("RGB", (w, h))
     pp = prev.load()
     for y in range(h):
