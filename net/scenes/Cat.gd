@@ -18,8 +18,13 @@ const FOOT_Y := 27.0        # 帧内脚底位置；跳跃/跑步行的脚本来�
 const BASE_SCALE := 0.62    # sheet 猫约 20px 高 → 12px 校园局部像素，约为人物一半
 
 const WALK_SPEED := 14.0    # 校园局部像素/秒（campus scale=2 后翻倍显示）
-const RUN_SPEED := 32.0
+const RUN_SPEED := 32.0     # 自己溜达时的小跑
 const HOME_RADIUS := 90.0
+## 牵着走的时候是另一回事：玩家走路就是 110（冲刺 170），猫还用 32 跑就永远追不上，
+## 只会越拉越远然后「啪」地闪到你脚边。跟随速度按「玩家多快 + 差多远」算。
+const FOLLOW_LEAD := 1.08   # 比玩家本身再快一点点，间距才收得回来
+const FOLLOW_MAX := 210.0   # 上限要压得住冲刺的 110×1.55≈170
+const TELEPORT_R := 120.0   # 被楼挡住绕不过去就拉这么远，然后直接跟到脚边
 
 ## row = Cat Animation List 的动作编号（1 起），n = 该行实际帧数，fps = 播放速度。
 ## 1..3 站↔坐、4..6 站↔睡、7 站立待机、8 吃、9 走、10 跑、
@@ -109,6 +114,8 @@ var frame := 0
 var _sprite: Sprite2D = null
 var _size_k := 1.0
 var _speed_k := 1.0
+var _anim_rate := 1.0        # 行走/跑步的帧率倍率：跟得越快腿要动得越快，不然像滑冰
+var _lead_prev := Vector2.INF   # 跟随对象上一帧的位置（非 CharacterBody2D 时估算速度用）
 var _doze := 0.3
 var _rng := RandomNumberGenerator.new()
 var _nav: NavGrid = null     # 可走网格（Arena 传入）；漫游时避开楼和水
@@ -352,34 +359,90 @@ func _process(delta: float) -> void:
 
 ## 好感够了 / 牵出去遛：贴着玩家脚边小跑，离远了会加速追；跟到就原地待机
 func _follow_player(delta: float) -> void:
-	var goal: Vector2 = (_follow_node as Node2D).position + Vector2(-14.0, 10.0)
+	var pn := _follow_node as Node2D
+	var goal: Vector2 = pn.position + Vector2(-14.0, 10.0)
 	var to := goal - pos
 	moving = false
 	# 被落得太远（穿过了楼、玩家传送/上下船、房间里绕不出来）就直接跟到身边，
 	# 不要让「遛猫」变成「猫卡在墙后面一直叫」
-	if to.length() > 220.0 and _can_walk(goal):
-		pos = goal
+	if to.length() > TELEPORT_R:
+		var at := _walkable_near(goal)
+		if at == Vector2.INF:
+			# 脚边一圈全踩不得水（玩家上船了）：留在原地等，别浮到湖面上
+			if anim != "stand":
+				_play("stand", true)
+			wait = 0.3
+			return
+		pos = at
 		position = pos
 		_play("stand", true)
+		wait = 0.3
 		return
-	if to.length() > 3.0:
-		if anim != "walk" and anim != "run":
-			_play("walk", true)
-		var spd := RUN_SPEED if to.length() > 40.0 else WALK_SPEED
-		var step := to.normalized() * spd * _speed_k * delta
-		if _can_walk(pos + step):
-			pos += step
-			if absf(step.x) > 0.01:
-				face = 1.0 if step.x > 0.0 else -1.0
-	elif anim != "stand":
-		_play("stand", true)
-	wait = 0.5   # 跟随结束后稍等一下再恢复自己溜达
+	if to.length() <= 3.0:
+		if anim != "stand":
+			_play("stand", true)
+		wait = 0.5   # 跟随结束后稍等一下再恢复自己溜达
+		return
+	# 速度 = 玩家自己跑多快（照抄，不然永远追不上）+ 差多远（追回来）
+	var want := _follow_lead() * FOLLOW_LEAD + to.length() * 1.6 + 8.0
+	var spd := clampf(want, WALK_SPEED, FOLLOW_MAX)
+	var want_anim := "run" if spd > 26.0 else "walk"
+	if anim != want_anim:
+		_play(want_anim, true)
+	# 腿按实际速度摆：210px/s 还按 12fps 播，看着就是一只在冰上滑的猫
+	_anim_rate = clampf(spd / (RUN_SPEED if want_anim == "run" else WALK_SPEED), 1.0, 2.4)
+	var step := to.normalized() * spd * delta
+	if _can_walk(pos + step):
+		pos += step
+		if absf(step.x) > 0.01:
+			face = 1.0 if step.x > 0.0 else -1.0
+	else:
+		# 直线被楼/水挡住：沿墙切向挪一步（只往脸朝的那边绕，免得左右抖），
+		# 实在绕不过去就等 TELEPORT_R 那个兜底
+		var tan := Vector2(-to.y, to.x).normalized()
+		if face < 0.0:
+			tan = -tan
+		var slide := tan * spd * delta
+		if _can_walk(pos + slide):
+			pos += slide
+		elif _can_walk(pos - slide):
+			pos -= slide
+	wait = 0.5
+
+
+## 目标点踩不住（楼 / 水）时，绕着它找一圈最近的落脚点；一圈都不行返回 Vector2.INF
+func _walkable_near(at: Vector2) -> Vector2:
+	if _can_walk(at):
+		return at
+	for i in 8:
+		var a := TAU * float(i) / 8.0
+		var cand := at + Vector2(cos(a), sin(a)) * 20.0
+		if _can_walk(cand):
+			return cand
+	return Vector2.INF
+
+
+## 玩家这一 tick 自己跑多快（校园局部像素/秒）。玩家是 CharacterBody2D，直接读 velocity；
+## 别的节点（调试用）退回「和上一帧位置的差」，再夹到 FOLLOW_MAX 以内。
+func _follow_lead() -> float:
+	var pn := _follow_node as Node2D
+	if pn == null:
+		return 0.0
+	if pn is CharacterBody2D:
+		_lead_prev = pn.position
+		return (pn as CharacterBody2D).velocity.length()
+	var d := 0.0
+	if _lead_prev != Vector2.INF:
+		d = (pn.position - _lead_prev).length() * 60.0
+	_lead_prev = pn.position
+	return clampf(d, 0.0, FOLLOW_MAX)
 
 
 ## 一次性动画（起身/趴下/跳/连击）播完自动接循环动画
 func _play(a: String, lp: bool, q: String = "") -> void:
 	anim = a
 	anim_t = 0.0
+	_anim_rate = 1.0
 	loop_anim = lp
 	queued = q
 	frame = 0
@@ -390,7 +453,7 @@ func _tick_anim(delta: float) -> void:
 	anim_t += delta
 	var d: Dictionary = ANIMS[anim]
 	var n := int(d["n"])
-	var f := int(anim_t * float(d["fps"]))
+	var f := int(anim_t * float(d["fps"]) * _anim_rate)
 	if f >= n:
 		if loop_anim:
 			f %= n

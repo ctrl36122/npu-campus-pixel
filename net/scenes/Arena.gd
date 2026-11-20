@@ -3432,7 +3432,9 @@ func _auto_test_pet() -> void:
 		print("[dbg] 出门遛猫：校园里有猫=%s 名字「%s」跟着=%s" % [
 			str(live), str(lc.call("cat_name")) if live else "",
 			str(lc.call("is_following")) if live else ""])
-		_set_leash(-1)   # 收尾：别把测试状态留在存档里
+		# 截图核对用：XGD_KEEP_LEASH=1 时别收回，让猫留在校园里给人看
+		if not OS.has_environment("XGD_KEEP_LEASH"):
+			_set_leash(-1)   # 收尾：别把测试状态留在存档里
 	)
 
 
@@ -4071,8 +4073,13 @@ func _update_interact_hint(delta: float) -> void:
 		_door_hint.visible = true
 		var nm := str(cat.call("cat_name"))
 		if cat == _leash_cat:
-			# 牵着溜达的那只：名字是你起的，别再走领养流程
-			_set_hint("「%s」跟着你 · 点它摸摸 · 回宿舍就收工" % nm, 1)
+			# 牵着溜达的那只：名字是你起的，别再走领养流程。
+			# 它就贴在脚边，走的时候不用一直介绍（提示条会一直挂在屏幕中间挡路），
+			# 站定了才提示「点它摸摸」。
+			if _local_avatar_moving():
+				_door_hint.visible = false
+				return
+			_set_hint("点「%s」摸摸" % nm, 1)
 			return
 		var left := ADOPT_PETS - int(cat.get("pet_count"))
 		if _ensure_adopted().size() >= ADOPT_MAX:
@@ -4438,6 +4445,15 @@ func _local_avatar() -> Node:
 		if c != null and c.get("is_local_player") == true:
 			return c
 	return null
+
+
+## 本地玩家这一帧是不是在走：牵着猫时用它决定提示条要不要让位（猫就在脚边，
+## 走着的时候一直挂着「点它摸摸」既挡视野又莫名其妙）
+func _local_avatar_moving() -> bool:
+	var me := _local_avatar()
+	if me == null or not (me is CharacterBody2D):
+		return false
+	return (me as CharacterBody2D).velocity.length() > 1.0
 
 
 ## 这个 avatar 现在实际摆着的姿势（0 = 站着）。**别直接读 sit_dir 做交互判定** ——
