@@ -23,6 +23,7 @@ var moved := 0.0
 var last_pos := Vector2.ZERO
 var anim_flips := 0        # 站/走/跑之间切换的次数：每帧来回切就是「抽搐」
 var last_anim := ""
+var max_rate := 1.0        # 跟随时动画帧率倍率的最大值：翻太快 12px 的猫腿看着就是抖
 var fails: Array[String] = []
 var checks := 0
 
@@ -67,6 +68,7 @@ func _process(delta: float) -> bool:
 		walker.position += dir * spd * delta
 		moved += cat.position.distance_to(last_pos)
 		last_pos = cat.position
+		max_rate = maxf(max_rate, float(cat.get("_anim_rate")))
 		if phase_t > SETTLE:
 			dist_sum += cat.position.distance_to(walker.position)
 			dist_n += 1
@@ -86,6 +88,8 @@ func _process(delta: float) -> bool:
 	_ok(moved > 200.0, label + "时猫真的在跑（不是靠瞬移）", "实测 %.0fpx" % moved)
 	# 稳态期间应该一直跑着，站点/跑之间来回切就是抽搐
 	_ok(anim_flips <= 4, label + "时姿态不抖（站↔跑切换 ≤4 次）", "实测 %d 次" % anim_flips)
+	# run 那行只有 4 帧 / 12fps，倍率给到 2 就是 24fps 翻腿，肉眼就是一抖一抖
+	_ok(max_rate <= 1.26, label + "时腿不翻太快（帧率倍率 ≤1.25）", "实测 %.2f" % max_rate)
 
 	phase += 1
 	phase_t = 0.0
@@ -94,6 +98,7 @@ func _process(delta: float) -> bool:
 	moved = 0.0
 	anim_flips = 0
 	last_anim = ""
+	max_rate = 1.0
 	if phase > 1:
 		# 停下：猫应该贴到脚边就不再动
 		walker.velocity = Vector2.ZERO

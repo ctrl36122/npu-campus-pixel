@@ -393,11 +393,16 @@ func _follow_player(delta: float) -> void:
 		return
 	# 比例控制：离该待的位置越远跑越快，靠近了自然减速，不会冲过头再来回摆
 	var spd := clampf(to.length() * FOLLOW_GAIN, WALK_SPEED, FOLLOW_MAX)
-	var want_anim := "run" if spd > 34.0 else "walk"
+	# 走 ↔ 跑留一点回差：卡在阈值上时每帧来回换，换一次 _play 就把 anim_t 归零，
+	# 看着也是一跳一跳的。还牵着的这只不算「抽搐」的原因，但一并管住。
+	var run_now := spd > (30.0 if anim == "run" else 40.0)
+	var want_anim := "run" if run_now else "walk"
 	if anim != want_anim:
 		_play(want_anim, true)
-	# 腿按实际速度摆：210px/s 还按 12fps 播，看着就是一只在冰上滑的猫
-	_anim_rate = clampf(spd / (RUN_SPEED if want_anim == "run" else WALK_SPEED), 1.0, 2.0)
+	# 腿按实际速度摆，但**别加太多**：run 那一行只有 4 帧、原本就 12fps，
+	# 再乘 2 就是 24fps 在翻 12px 高的四条腿 —— 看着就是抖。
+	# 1.25 已经够表示「跑得急」，再快只剩噪点。
+	_anim_rate = clampf(spd / (RUN_SPEED if want_anim == "run" else WALK_SPEED), 1.0, 1.25)
 	var step := to.normalized() * spd * delta
 	if _can_walk(pos + step):
 		pos += step

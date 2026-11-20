@@ -3402,10 +3402,17 @@ func _auto_test_pet() -> void:
 		print("[dbg] 牵绳测试：玩家-%s 距离=%.1fpx 就近判定=%s" % [
 			String(cat.name), dist, "命中" if found == cat else "没命中"])
 		var pressed: bool = _try_leash_cat()
+		# 先记状态再收绳。房间里不会生成校外的 Cat 节点（屋里由 RoomCat 自己待着），
+		# 所以这里要看存档里的 walk 标记，而不是 _leash_cat 有没有建出来。
+		var held: Dictionary = {}
+		var all_cats := _ensure_adopted()
+		for k in all_cats.size():
+			var cd = all_cats[k]
+			if cd is Dictionary and bool(cd.get("walk", false)):
+				held = cd
 		_restore_leash()
-		print("[dbg] 牵绳测试：按F→%s leash_idx=%d 牵着=%s" % [
-			"吃下了" if pressed else "没反应", _leash_idx,
-			str(_leash_cat != null and is_instance_valid(_leash_cat))])
+		print("[dbg] 牵绳测试：按F→%s 存档里牵着「%s」" % [
+			"吃下了" if pressed else "没反应", str(held.get("name", "")) if not held.is_empty() else "（没有）"])
 		# 再验一次提示条文案（触屏上会把 F 那段换成「宠」面板指引）
 		_door_clock = 0.0
 		_update_interact_hint(0.0)
