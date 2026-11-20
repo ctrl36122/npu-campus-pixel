@@ -29,6 +29,12 @@ const VOICES := 4                 # 每种材质合成多少个变体
 const POOL := 4                   # 同时最多几路脚步声叠在一起
 const CFG_PATH := "user://audio.cfg"
 const DEFAULT_VOLUME := 0.7
+## 真录音统一响度目标（≈ 实测 asphalt RMS）。素材是同一批录的，peak 都归一过，
+## 但平均能量差了 2~3 倍：wood 实测 RMS 0.128/0.171/0.098，asphalt 只有 0.052 ——
+## 同样音量下室内木地板听起来响 8~11dB，正是「只有一种、还很吵」的根源。
+## 这里按 RMS 把偏响的压下去（只压不提，避免整体变大声）。
+const TARGET_RMS := 0.055
+const SAMPLE_GAIN_MIN := 0.30     # 最低压到 30%，防止把轻录音压没
 ## 每种材质一组合成参数（见下面的 _synth），键名要和 Ground.KINDS 对得上
 const TIMBRE := {
 	# cutoff 低通截止 / poles 阶数 / decay 主体衰减 / thump_* 低频「踏」/ tick_* 高频「嗒」
@@ -55,6 +61,7 @@ var _players: Array[AudioStreamPlayer] = []
 var _next := 0
 var _cache: Dictionary = {}       # 材质名 -> Array[AudioStream]
 var _is_sample: Dictionary = {}   # 材质名 -> 这一套是真录音还是合成音
+var _stream_gain: Dictionary = {} # 材质名 -> Array[float]，与 _cache 一一对应（响度归一系数）
 var _last_idx: Dictionary = {}    # 材质名 -> 上一步用的变体编号（避开连续重复）
 var _rng := RandomNumberGenerator.new()
 
@@ -110,6 +117,9 @@ func footstep(at: Vector2) -> void:
 	var gain: float = _volume * AudioLevel.MASTER * _rng.randf_range(0.86, 1.0)
 	if is_sample:
 		gain *= float(TIMBRE.get(kind, {}).get("level", 0.85))
+		var gains: Array = _stream_gain.get(kind, [])
+		if idx < gains.size():
+			gain *= float(gains[idx])
 	p.volume_db = linear_to_db(gain)
 	p.play()
 	if OS.has_environment("XGD_SFX_DEBUG"):
@@ -172,8 +182,36 @@ func _streams(kind: String) -> Array:
 		_is_sample[kind] = false
 	else:
 		_is_sample[kind] = true
+		# 真录音逐个算 RMS，生成响度归一系数（缓存，不每步算）
+		var gains: Array = []
+		for s in out:
+			var r := _rms_of(s)
+			gains.append(clampf(TARGET_RMS / r, SAMPLE_GAIN_MIN, 1.0) if r > 0.0 else 1.0)
+		_stream_gain[kind] = gains
 	_cache[kind] = out
 	return out
+
+
+## 真录音的均方根电平（0~1）。只认 16-bit PCM（steps 素材都是 compress/mode=0）。
+## 采样多时抽稀到 ~2 万点，单次几毫秒，且只在首次加载该材质时算一次。
+func _rms_of(s: AudioStream) -> float:
+	if s is AudioStreamWAV:
+		var w := s as AudioStreamWAV
+		if w.format != AudioStreamWAV.FORMAT_16_BITS or w.stereo:
+			return 0.0
+		var d := w.data
+		var n := d.size() / 2
+		if n <= 0:
+			return 0.0
+		var step := maxi(1, n / 20000)
+		var acc := 0.0
+		var cnt := 0
+		for i in range(0, n, step):
+			var v := float(d.decode_s16(i * 2)) / 32768.0
+			acc += v * v
+			cnt += 1
+		return sqrt(acc / float(maxi(cnt, 1)))
+	return 0.0
 
 
 ## 按材质合成一次脚步：
