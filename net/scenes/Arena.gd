@@ -246,6 +246,10 @@ func _ready() -> void:
 	# 调试：按住方向键走几秒（XGD_TEST_WALK=秒数）。用来核对「我动了，对面那边跟着动」
 	if OS.has_environment("XGD_TEST_WALK"):
 		_auto_walk_sync()
+	# 调试：XGD_TEST_LEASH=1 —— 校园里牵一只猫，用 bot 输入让玩家走/冲刺，
+	# 逐帧记录猫的内部状态，抓「抽搐 / 闪烁」的原始数据
+	if OS.has_environment("XGD_TEST_LEASH"):
+		_auto_trace_leash()
 
 	_guard_local_spawn()
 	if not (OS.has_environment("XGD_NOHOME")):
@@ -3387,6 +3391,135 @@ func _auto_enter_room() -> void:
 			return
 		_try_auto_room()
 	)
+
+
+## 调试：XGD_TEST_LEASH=1 —— 校园里直接牵一只猫（不依赖存档），用模拟按键让
+## 玩家走 / 冲刺 / 斜走，逐帧记录猫的状态，抓「抽搐 / 闪烁」的原始数据：
+## 姿态切换、朝向翻转、单帧位移、掉队距离、是不是偷偷在跑 A*。
+func _auto_trace_leash() -> void:
+	var t := get_tree().create_timer(5.5)
+	t.timeout.connect(func() -> void: _trace_leash_run())
+
+
+func _trace_leash_run() -> void:
+	Engine.max_fps = 60        # 无头跑不限帧，按真实 60fps 采
+	var me := _local_avatar() as Node2D
+	var objs: Node2D = campus.get_node_or_null("Objects")
+	if me == null or objs == null:
+		print("[dbg] 牵绳追踪：玩家/场景没就绪")
+		return
+	var cat_script: Script = load("res://net/scenes/Cat.gd")
+	var cat := Node2D.new()
+	cat.name = "TraceCat"
+	cat.set_script(cat_script)
+	objs.add_child(cat)
+	cat.call("setup", me.position + Vector2(-22.0, 0.0), cat_script.SKINS[0], 7777, _cat_nav)
+	cat.call("start_follow", me)
+	print("[dbg] 牵绳追踪起点 玩家%s 猫%s 可走=%s" % [
+		str((me.position / TS).round()), str((cat.position / TS).round()),
+		str(_cat_nav.is_walkable(Vector2i(int(me.position.x / TS), int(me.position.y / TS))))])
+
+	var phases := [
+		{"name": "走110", "dir": Vector2(1, 0), "sprint": false, "dur": 2.5},
+		{"name": "停", "dir": Vector2.ZERO, "sprint": false, "dur": 1.0},
+		{"name": "往回走", "dir": Vector2(-1, 0), "sprint": false, "dur": 2.5},
+		{"name": "往上", "dir": Vector2(0, -1), "sprint": false, "dur": 2.0},
+		{"name": "往下", "dir": Vector2(0, 1), "sprint": false, "dur": 2.0},
+		{"name": "斜走", "dir": Vector2(1, 0.7), "sprint": false, "dur": 2.5},
+		# 玩家忽然被挪到 200px 外（< LOSE_R）：猫该一路跑过来，不许原地抖
+		{"name": "甩远再站着", "dir": Vector2.ZERO, "sprint": false, "dur": 3.0,
+			"warp": Vector2(200.0, 0.0)},
+		{"name": "甩远后往前走", "dir": Vector2(1, 0), "sprint": false, "dur": 2.5,
+			"warp": Vector2(0.0, -200.0)},
+	]
+	var prev: Vector2 = cat.position
+	var last_step := Vector2.ZERO
+	var last_anim := str(cat.get("anim"))
+	var last_face := float(cat.get("face"))
+	var swaps := 0
+	var flips := 0
+	var warps := 0
+	var stuck := 0
+	var path_frames := 0
+	var frames := 0
+	var max_d := 0.0
+	var vibro := 0
+	var prev_me: Vector2 = me.position
+	var me_pos_moved := 1.0
+	var verbose := OS.has_environment("XGD_CAT_VERBOSE")
+	for ph in phases:
+		var name: String = str(ph["name"])
+		var dir: Vector2 = ph["dir"].normalized() if (ph["dir"] as Vector2).length() > 0.0 else Vector2.ZERO
+		var spd_sprint: bool = bool(ph["sprint"])
+		if ph.has("warp"):
+			me.call("teleport_to", me.position + (ph["warp"] as Vector2))
+		for k in ["move_left", "move_right", "move_up", "move_down"]:
+			Input.action_release(k)
+		if dir.x > 0.0:
+			Input.action_press("move_right")
+		elif dir.x < 0.0:
+			Input.action_press("move_left")
+		if dir.y > 0.0:
+			Input.action_press("move_down")
+		elif dir.y < 0.0:
+			Input.action_press("move_up")
+		if spd_sprint:
+			Input.action_press("sprint")
+		else:
+			Input.action_release("sprint")
+		var dur: float = float(ph["dur"])
+		var pt := 0.0
+		print("[dbg] --- 相位 %s 开始（玩家 %s 猫 %s）" % [
+			name, str((me.position / TS).round()), str((cat.position / TS).round())])
+		while pt < dur:
+			await get_tree().process_frame
+			var fdt := get_process_delta_time()
+			pt += fdt
+			frames += 1
+			var p: Vector2 = cat.position
+			me_pos_moved = me.position.distance_to(prev_me)
+			prev_me = me.position
+			var stepv := p - prev
+			var step := stepv.length()
+			var a := str(cat.get("anim"))
+			var f := float(cat.get("face"))
+			var d := p.distance_to(me.position)
+			if step > 0.12:
+				last_step = stepv
+			prev = p
+			max_d = maxf(max_d, d)
+			if verbose:
+				print("      t=%.2f 距%.0f 步=%.2f %s 朝向%.0f 挡%.2f 卡%.2f 追%s 路%d" % [
+					pt, d, step, a, f,
+					float(cat.get("_block_t")), float(cat.get("_stuck_t")),
+					"1" if bool(cat.get("_chasing")) else "0",
+					(cat.get("_path") as Array).size()])
+			if a != last_anim:
+				swaps += 1
+				print("    t=%.2f 姿态 %s→%s  距%.0fpx" % [pt, last_anim, a, d])
+				last_anim = a
+			if f != last_face:
+				flips += 1
+				print("    t=%.2f 朝向翻转 →%.0f  距%.0fpx" % [pt, f, d])
+				last_face = f
+			if step > 14.0:
+				warps += 1
+				print("    t=%.2f 瞬移 %.0fpx（距玩家 %.0fpx）" % [pt, step, d])
+			elif step < 0.05 and dir != Vector2.ZERO and me_pos_moved > 0.3:
+				stuck += 1
+			# 原地抖：这一帧与上一帧的位移方向掉头超过 120°
+			if last_step.length() > 0.12 and step > 0.12:
+				if last_step.normalized().dot(stepv.normalized()) < -0.5:
+					vibro += 1
+					if vibro <= 30:
+						print("    t=%.2f 掉头 %.2f->%.2f 距%.0f" % [pt, last_step.length(), step, d])
+			if not (cat.get("_path") as Array).is_empty():
+				path_frames += 1
+	for k in ["move_left", "move_right", "move_up", "move_down", "sprint"]:
+		Input.action_release(k)
+	print("[dbg] 牵绳追踪小结：%d 帧 / 姿态切 %d / 朝向翻 %d / 瞬移 %d / 停滞帧 %d / 掉头 %d / 走A*帧 %d / 最远 %.0fpx" % [
+		frames, swaps, flips, warps, stuck, vibro, path_frames, max_d])
+	cat.queue_free()
 
 
 ## 调试：XGD_TEST_PET=1 —— 把玩家挪到自己的猫旁边，走一遍真正的「按 F 牵绳」函数，

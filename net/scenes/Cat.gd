@@ -21,13 +21,26 @@ const WALK_SPEED := 14.0    # 校园局部像素/秒（campus scale=2 后翻倍�
 const RUN_SPEED := 32.0     # 自己溜达时的小跑
 const HOME_RADIUS := 90.0
 ## 牵着走的时候是另一回事：玩家走路就是 110（冲刺 170），猫还用 32 跑就永远追不上。
-## 但**不能贴着人跑**：追到 3px 就停、下一帧又被落下 2px 再追，每帧都在「站/跑」
-## 之间切换，姿态和位置一起抖，看着就是抽搐。所以留一小段间距（约 3 格），
-## 用比例控制慢慢追 —— 落后越多跑得越快，靠近了自然减速，人停下它就停在身后。
-const FOLLOW_BACK := 26.0   # 跟在人身后这么远（校园局部 px，约 3 格）
-const FOLLOW_STOP := 4.0    # 离该待的位置这么近就彻底站住
-const FOLLOW_GAIN := 5.5    # 速度 = 还差多远 × 这个系数（比例控制，不会过冲）
-const FOLLOW_MAX := 172.0   # 刚够追上冲刺的 110×1.55≈170，再快就是「猫在飞」
+## 而且**不能贴着人跑**：追到脚下就停、下一帧又被落下，每帧都在「站/跑」之间切换，
+## 姿态和位置一起抖，看着就是抽搐。
+##
+## 以前的写法是「站在人身后 26px 的那个点」—— 一旦猫离人比 26px 更近（玩家一转身
+## 走过来就会这样），那个目标点就翻到**猫的身后**去了，猫于是朝**远离人**的方向走，
+## 玩家走进 56px/s、猫退开 52px/s，两个速度互相抵消，距离锁死在 16px 反复抖，
+## 而猫还在原地「倒着跑」—— 这就是玩家说的抽搐。
+## 现在只用一个标量：离人多远。近了就停，远了按比例追，**永远不后退**。
+const FOLLOW_NEAR := 20.0   # 缩到这个距离就彻底站住
+## 超过这个距离才重新起步。回差要**比跟随稳态的间距更宽**，否则人一走猫就
+## 「追到 20px → 站住 → 被落下 → 再追」，走两步停一下，看着一顿一顿的。
+## 稳态间距 = FOLLOW_NEAR + 人走路速度/GAIN（56px/s → 28px、110px/s → 36px），
+## 都在这个值以内，所以正常走路时它一直匀速跟着，不会走走停停。
+const FOLLOW_FAR := 32.0
+const FOLLOW_GAIN := 7.0    # 速度 = (离人多远 − FOLLOW_NEAR) × 这个系数
+const FOLLOW_MIN := 16.0    # 追起来至少这么快，再慢就不像在跟了
+const FOLLOW_MAX := 210.0   # 上限：玩家冲刺 170，留点余量才追得回来
+## 跑/走的分界（带 12px/s 回差）：人正常走路约 56px/s，猫跟着的时候应该还是走
+const RUN_ANIM := 100.0
+const RUN_ANIM_BACK := 86.0
 ## 直线被楼/水挡住时不能只做「擦墙滑动」：两个切向轮流试，会在墙角原地左右抖，
 ## 看着就是疯狂抽搐。绕路交给局部 A*（见 _build_local_path）。
 const PATH_EVERY := 0.35    # 绕路时多久重算一次路径（每帧算太浪费）
@@ -42,7 +55,7 @@ const PATH_CELLS := 26      # 局部搜索半径上限（格）；实际半径�
 const PATH_NODES := 320
 const DIRS8: Array[Vector2i] = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1),
 		Vector2i(1, 1), Vector2i(1, -1), Vector2i(-1, 1), Vector2i(-1, -1)]
-const STUCK_LIMIT := 0.6    # 一步都挪不动这么久 → 直接落到脚边（不脱离人）
+const STUCK_LIMIT := 1.2    # 一步都挪不动这么久 → 直接落到脚边（不脱离人）
 const STUCK_R := 56.0       # 但只有落后超过这么远才值得瞬移（约 7 格），贴着人就别闪
 const LOSE_R := 260.0       # 拉这么远又没有可走的路（玩家上船/被关起来）就瞬移
 const WARP_GAPS: Array[float] = [20.0, 34.0, 48.0]   # 落地兜底时由近到远找站位
@@ -141,6 +154,7 @@ var _path: Array[Vector2] = []
 var _path_goal := Vector2.INF
 var _path_t := 0.0
 var _path_ok := false        # 上次算路成功了没有：成功后走完要立刻重算，失败就退避
+var _chasing := true         # 在追人吗（20↔32 的回差，别站在阈值上每帧来回切）
 var _stuck_t := 0.0          # 连续一步没挪的时长
 var _block_t := 0.0          # 连续被挡的时长（小于 0.08 秒不换姿势，免得闪）
 var _was_pos := Vector2.INF
@@ -197,6 +211,10 @@ func start_follow(n: Node2D) -> void:
 	follow_forever = true
 	_follow_t = 0.0
 	moving = false
+	_chasing = true
+	_was_pos = Vector2.INF
+	_stuck_t = 0.0
+	_block_t = 0.0
 
 
 ## 收回牵绳：自己该干嘛干嘛（回窝附近溜达）
@@ -388,69 +406,81 @@ func _process(delta: float) -> void:
 		queue_redraw()   # 影子是静态的，只有爱心动画需要逐帧重绘
 
 
-## 好感够了 / 牵出去遛：跟在玩家身后一小段（约 3 格），落后越多跑得越快。
+## 好感够了 / 牵出去遛：跟着玩家走，但**不紧贴**（离人近了就站着）。
+##
+## 只用一个标量「离人有多远」驱动，**永远不后退**：
+##   近了（< FOLLOW_NEAR）→ 停；远了 → 按比例追，越远越快。
+## 早先是「站在人身后 26px 的那个点」，猫一旦离人比 26px 还近（玩家转身走过来
+## 就会这样），目标点就翻到猫背后，猫朝远离人的方向走 —— 玩家 56px/s 逼近、
+## 猫 52px/s 退开，距离锁死在 16px 来回抖，猫还一直在原地倒着跑。
 ##
 ## 三条路，按顺序挑：
-##   1. 到目标点的直线整条能走 → 直接走（最平滑）
+##   1. 到玩家的直线整条能走 → 直接走（最平滑）
 ##   2. 被楼/水挡住 → 在猫周围跑一次局部 A* 绕过去
 ##      （**不要**原地左右擦墙，那看着就是疯狂抽搐）
 ##   3. 连路都没有（玩家上船、被关在围栏里）→ 离得远就直接落到脚边，离得近就站着等
-## 另外还有卡住兜底：连着 0.6 秒一步没挪、又落后 56px 以上，直接跟到脚边。
+## 另外还有卡住兜底：连着 1.2 秒一步没挪、又落后 56px 以上，直接跟到脚边。
 func _follow_player(delta: float) -> void:
 	var pn := _follow_node as Node2D
 	if pn == null:
 		return
-	# 掉帧（切场景/加载）时 delta 可能到 1 秒：按它算步长会一步迈 170px（等于瞬移），
+	# 掉帧（切场景/加载）时 delta 可能到 1 秒：按它算步长会一步迈 200px（等于瞬移），
 	# 按它记「卡住多久」又会立刻触发兜底。统一压到 0.1 秒以内。
 	var dt := minf(delta, 0.1)
-	# 目标点：从玩家出发、朝「猫所在的那一侧」退开 FOLLOW_BACK。
-	# 人走它跟着走；人一停，猫就停在身后不动（不会慢慢蹭到人脚下）。
-	var away := pos - pn.position
-	var dir := away.normalized() if away.length() > 0.5 else Vector2(-1.0, 0.0)
-	var goal: Vector2 = pn.position + dir * FOLLOW_BACK
-	var to := goal - pos
-	var dist := pos.distance_to(pn.position)
+	var to := pn.position - pos
+	var dist := to.length()
 	moving = false
-	# 已经站到该待的位置：站着别动（动一下就抖）
-	if to.length() <= FOLLOW_STOP:
+
+	# 拉得实在太远（玩家传送/上船/过河）：直接落到脚边，别让它从 260px 外跑过来。
+	# 落不下来（玩家在水面上）就继续按下面的逻辑等着。
+	if dist > LOSE_R and _warp_behind(pn.position):
+		return
+
+	# 起步/停步留回差：不然猫会站在阈值上每帧在「走 / 站」之间来回切，
+	# 那一秒能切十几次，看着就是「闪」。
+	if dist > FOLLOW_FAR:
+		_chasing = true
+	elif dist < FOLLOW_NEAR:
+		_chasing = false
+	if not _chasing:
 		_clear_path()
 		_stand()
 		return
 
-	# 拉得实在太远（玩家传送/上船/过河）：直接跟到脚边，别让它从 260px 外跑过来。
-	# 落不下来（玩家在水面上）就继续按下面的逻辑站着等。
-	if dist > LOSE_R and _warp_near(goal):
-		return
-
 	# 挑这一步往哪走：
-	#   · 到目标点的直线整条都能走 → 直接走（最平滑）
-	#   · 中途有楼/水 → 走局部 BFS 给的绕路点；有路就一直沿着走，不要一步一改主意
+	#   · 到玩家的直线整条都能走 → 直接走（最平滑）
+	#   · 中途有楼/水 → 走局部 A* 给的绕路点；有路就一直沿着走，不要一步一改主意
 	#   · 算不出路（被围死/玩家在船上）→ 远就落到脚边，近就站着（绝不原地空跑）
-	var aim := goal
-	var blocked := not _line_clear(pos, goal)
-	if blocked or not _path.is_empty():
-		var way := _path_step(goal, dt)
+	var aim := pn.position
+	var blocked := not _line_clear(pos, pn.position)
+	if blocked:
+		var way := _path_step(pn.position, dt)
 		if way == Vector2.INF:
-			if blocked:
-				_clear_path()
-				if dist > STUCK_R and _warp_near(goal):
-					return
-				_stand()
+			_clear_path()
+			if dist > STUCK_R and _warp_behind(pn.position):
 				return
-			# 路走完了、直线也通了：落回「直接朝目标点走」
-		else:
-			aim = way
+			_stand()
+			return
+		aim = way
+	elif not _path.is_empty():
+		# 直线又通了：立刻丢路点回直线。以前这里写成「blocked 或 路点非空」就跑
+		# A*，结果算过一次路就再也退不出来 —— 猫一直沿着 8px 网格中心走，
+		# 一帧 0.5px、一帧 0.7px，看着就是在原地小碎步抖。
+		_clear_path()
 
-	var spd := clampf(to.length() * FOLLOW_GAIN, WALK_SPEED, FOLLOW_MAX)
+	# 速度只看「离人多远」：纯比例控制，没有惯性就不会过冲；
+	# 不掺玩家的速度估测 —— 估慢了掉队、估快了冲到人身上，两头都抖。
+	var spd := clampf((dist - FOLLOW_NEAR) * FOLLOW_GAIN, FOLLOW_MIN, FOLLOW_MAX)
 	var mv := aim - pos
 	if mv.length() < 0.5:
 		mv = to
 	var step := mv.normalized() * spd * dt
+	var before := pos
 	if _can_walk(pos + step):
 		pos += step
 		_face_step(step)
 	else:
-		# 斜着迈会切到墙角（BFS/A* 的斜向允许「只有一边能走」，连续移动却会拒绝）。
+		# 斜着迈会切到墙角（A* 的斜向允许「只有一边能走」，连续移动却会拒绝）。
 		# 拆成只走 x / 只走 y 各试一次：贴着墙滑过去，而不是原地干站。
 		var sx := Vector2(step.x, 0.0)
 		var sy := Vector2(0.0, step.y)
@@ -460,15 +490,18 @@ func _follow_player(delta: float) -> void:
 		elif absf(step.y) > 0.01 and _can_walk(pos + sy):
 			pos += sy
 			_face_step(step)
-		else:
-			# 真的一步都挪不动：先按原姿势撑 0.08 秒（别闪），再站着；
-			# 卡久了就直接落到脚边 —— 宁可闪一下，也不能把人跟丢。
-			_block_t += dt
-			if _block_t > 0.08:
-				_stand()
-			if _block_t > STUCK_LIMIT and dist > STUCK_R and _warp_near(goal):
-				return
+	# 只挪了想走的一小半 = 等于没动。贴墙时「只走 x」那条分支会以 0.05px/帧 的速度
+	# 慢慢蹭，这一步看着就是原地小碎步，必须按「被挡」处理，别当成在走。
+	# 用「相对想走的距离」而不是绝对像素，换个帧率也成立。
+	if pos.distance_to(before) < maxf(0.02, step.length() * 0.25):
+		# 先按原姿势撑 0.08 秒（几十毫秒内解开就别换姿势），还挪不动就站着 ——
+		# 空跑腿比闪一下更难看；卡久了就直接落到脚边，宁可闪一下也不能把人跟丢。
+		_block_t += dt
+		if _block_t > 0.08:
+			_stand()
+		if _block_t > STUCK_LIMIT and dist > STUCK_R and _warp_behind(pn.position):
 			return
+		return
 	_block_t = 0.0
 
 	# 卡住兜底：连着 STUCK_LIMIT 秒一步没挪，就落到脚边（宁可闪一下也不能脱离人）
@@ -477,11 +510,11 @@ func _follow_player(delta: float) -> void:
 	else:
 		_stuck_t = 0.0
 	_was_pos = pos
-	if _stuck_t > STUCK_LIMIT and dist > STUCK_R and _warp_near(goal):
+	if _stuck_t > STUCK_LIMIT and dist > STUCK_R and _warp_behind(pn.position):
 		return
 
 	# 动作：走 ↔ 跑留一点回差，卡在阈值上时不要每帧来回换
-	var run_now := spd > (30.0 if anim == "run" else 40.0)
+	var run_now := spd > (RUN_ANIM_BACK if anim == "run" else RUN_ANIM)
 	var want_anim := "run" if run_now else "walk"
 	if anim != want_anim:
 		_play(want_anim, true)
@@ -701,9 +734,24 @@ func _clear_path() -> void:
 	_path_t = 0.0
 
 
-## 直接落到目标附近能站的地方（绕不过去/被落太远时的兜底）。成功返回 true。
-func _warp_near(at: Vector2) -> bool:
-	var spot := _walkable_near(at)
+## 直接落到玩家身后能站的地方（绕不过去 / 被落太远时的兜底）。成功返回 true。
+## 落点优先取「玩家背后约一格半」，别直接落在人身上 —— 那样看着是两个精灵叠一起。
+func _warp_behind(at: Vector2) -> bool:
+	var away := pos - at
+	var dirv := away.normalized() if away.length() > 0.5 else Vector2(0.0, 1.0)
+	# 从「人背后」开始绕着找一圈：优先落到人身后，实在没地方才退而求其次。
+	# 别直接用 _walkable_near(at) —— 人是站在可走格上的，那个函数会原样返回，
+	# 猫就正好落在人身上，两个精灵叠在一起。
+	var spot := Vector2.INF
+	var a0 := dirv.angle()
+	for k in 8:
+		var a := a0 + TAU * float(k) / 8.0
+		var cand := at + Vector2(cos(a), sin(a)) * FOLLOW_FAR
+		if _can_walk(cand):
+			spot = cand
+			break
+	if spot == Vector2.INF:
+		spot = _walkable_near(at + dirv * FOLLOW_FAR)
 	if spot == Vector2.INF:
 		return false      # 脚边一圈全是水（玩家在船上）：留在原地等
 	pos = spot
@@ -712,6 +760,8 @@ func _warp_near(at: Vector2) -> bool:
 	_stuck_t = 0.0
 	_was_pos = pos
 	_block_t = 0.0
+	# 刚落地就别急着自己走开：不然「啪」一下闪到人身后，紧接着又跑起来
+	_chasing = false
 	_play("stand", true)
 	wait = 0.3
 	return true

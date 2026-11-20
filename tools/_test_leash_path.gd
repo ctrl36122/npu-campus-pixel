@@ -108,7 +108,9 @@ func _process(delta: float) -> bool:
 	last_pos = cat.position
 	if t > 0.3:
 		max_jump = maxf(max_jump, jump)
-		if d < 0.2 and str(cat.get("anim")) in ["walk", "run"]:
+		# 判据用「速度」而不是「单帧距离」：headless 不限帧，一帧只有几毫秒，
+		# 正常走路也被算成 0.1px —— 那是把帧率当成抽搐了。
+		if d / maxf(delta, 0.001) < 4.0 and str(cat.get("anim")) in ["walk", "run"]:
 			flail += 1
 			flail_t += delta
 			flail_max_t = maxf(flail_max_t, flail_t)
