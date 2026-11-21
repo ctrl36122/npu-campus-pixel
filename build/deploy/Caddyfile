@@ -98,6 +98,10 @@
 			redir /dl/XGD-Campus-android.zip https://ghfast.top/https://github.com/ctrl36122/npu-campus-pixel/releases/download/v1.2.6/XGD-Campus-android.zip 302
 			redir /dl/SHA256SUMS.txt        https://ghfast.top/https://github.com/ctrl36122/npu-campus-pixel/releases/download/v1.2.6/SHA256SUMS.txt 302
 
+			# 下载页会随版本更新（版本号 / 体积 / 哈希），禁止浏览器启发式缓存，
+			# 否则改完页面用户还看到上一版，点了照样下到旧包。
+			header Cache-Control "no-cache, must-revalidate"
+
 			root * /opt/xgd/web
 			file_server {
 				hide .*
