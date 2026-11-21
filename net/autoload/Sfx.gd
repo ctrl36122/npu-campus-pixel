@@ -147,12 +147,10 @@ func muted() -> bool:
 
 
 ## 现在用的是真素材还是合成音（设置面板/自测用）
+## 同样不能用目录枚举：导出包里只有 .import，会一律误报「没有素材」。
 func using_samples(kind: String) -> bool:
-	var dir := "res://assets/steps"
-	if not DirAccess.dir_exists_absolute(dir):
-		return false
-	for f in DirAccess.get_files_at(dir):
-		if f.begins_with(kind + "_") and not f.ends_with(".import"):
+	for i in range(1, 10):
+		if ResourceLoader.exists("res://assets/steps/%s_%d.wav" % [kind, i]):
 			return true
 	return false
 
@@ -162,19 +160,19 @@ func _streams(kind: String) -> Array:
 	if _cache.has(kind):
 		return _cache[kind]
 	var out: Array = []
-	# 1) 真素材优先
-	var dir := "res://assets/steps"
-	if DirAccess.dir_exists_absolute(dir):
-		var files := DirAccess.get_files_at(dir)
-		files.sort()
-		for f in files:
-			if not f.begins_with(kind + "_"):
-				continue
-			var path := "%s/%s" % [dir, f]
-			if ResourceLoader.exists(path):
-				var s: AudioStream = load(path)
-				if s != null:
-					out.append(s)
+	# 1) 真素材优先。
+	# ⚠️ 绝不能靠 DirAccess 枚举目录去找：导出的 PCK 里只保留 `xxx.wav.import`，
+	#    源 wav 不进包。枚举出来全是 `.import`，ResourceLoader.exists() 一个都认不出
+	#    → 全部回退合成音，听感就是「只有一种、只是频率在变」。编辑器里恰好能枚举到
+	#    真 wav，所以这个问题只在导出的 exe/apk 里出现。
+	#    改为按约定文件名 `kind_1 .. kind_9` 逐个探测；导出后 .import 的 remap 仍然有效。
+	for i in range(1, 10):
+		var path := "res://assets/steps/%s_%d.wav" % [kind, i]
+		if not ResourceLoader.exists(path):
+			continue
+		var s: AudioStream = load(path)
+		if s != null:
+			out.append(s)
 	# 2) 没有就合成
 	if out.is_empty():
 		for i in VOICES:
