@@ -26,11 +26,13 @@ jobs:
     runs-on: ubuntu-latest
     env:
       STAGE: http://118.178.95.110/dl/_stage
-      NOTES: RELEASE_NOTES_v1.2.6.md
     steps:
       - name: 拉取安装包
         run: |
           set -euo pipefail
+          # 发布说明按 tag 取：发 v1.2.7 就放 RELEASE_NOTES_v1.2.7.md 进 staging
+          NOTES="RELEASE_NOTES_${GITHUB_REF_NAME}.md"
+          echo "NOTES=$NOTES" >> "$GITHUB_ENV"
           mkdir -p out
           for f in XGD-Campus-win64.zip XGD-Campus-macos.zip XGD-Campus-android.zip SHA256SUMS.txt "$NOTES"; do
             echo "==> $f"
