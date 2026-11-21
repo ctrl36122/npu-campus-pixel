@@ -1,0 +1,69 @@
+name: publish-release
+
+# 推 v* tag 时自动把三端安装包上传成 GitHub Release。
+#
+# 为什么走 Actions 而不是本地脚本：
+#   本地只有 SSH 写权限（git push 走 ssh.github.com:443），HTTPS API 的
+#   PAT 没有 contents:write，直接调 API 建 release 会 404/403。
+#   把活交给仓库自带的 GITHUB_TOKEN 就没有这个问题。
+#
+# 安装包从服务器临时目录取（/opt/xgd/web/dl/_stage/，只在发版窗口内存活），
+# 上传完就删——这条 100Mbps 出口要和 WebSocket 共用，不能长期托管大文件。
+#
+# 注意：tag 必须打在包含本文件的 commit 上，否则 GitHub 找不到 workflow。
+#   顺序：commit+publish workflow -> push preview -> tag preview HEAD -> push tag
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      STAGE: http://118.178.95.110/dl/_stage
+      NOTES: RELEASE_NOTES_v1.2.6.md
+    steps:
+      - name: 拉取安装包
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          for f in XGD-Campus-win64.zip XGD-Campus-macos.zip XGD-Campus-android.zip SHA256SUMS.txt "$NOTES"; do
+            echo "==> $f"
+            curl -fL --retry 3 --retry-delay 2 --max-time 900 -o "out/$f" "$STAGE/$f"
+          done
+          ls -l out
+
+      - name: 校验哈希与发布文件一致
+        run: |
+          set -euo pipefail
+          cd out
+          echo "--- 清单 ---"
+          cat SHA256SUMS.txt
+          echo "--- 实测 ---"
+          sha256sum XGD-Campus-win64.zip XGD-Campus-macos.zip XGD-Campus-android.zip
+          echo "--- 比对 ---"
+          sha256sum -c SHA256SUMS.txt
+
+      - name: 创建 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          echo "tag = $TAG"
+          gh release create "$TAG" \
+            --title "像素工大 $TAG" \
+            --notes-file "out/${NOTES}" \
+            out/XGD-Campus-win64.zip \
+            out/XGD-Campus-macos.zip \
+            out/XGD-Campus-android.zip \
+            out/SHA256SUMS.txt
+          echo "=== 发布完成 ==="
+          gh release view "$TAG" --json tagName,url,assets \
+            -q '.tagName + "  " + .url, (.assets[] | "  " + .name + "  " + (.size|tostring) + " bytes")'
